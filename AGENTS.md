@@ -36,8 +36,9 @@ This project must align with the commercial-quality bar established by `pi-knowl
 
 - Publish `pi-tasks:state` only after the default status/widget refresh completes.
 - Publish on `session_start`, `session_tree`, and every successful persisted task mutation; rejected mutations must not publish.
-- Keep payload versioned. Version 1 contains `reason`, stable `widgetId`, and a task-state snapshot without raw event history.
-- Structured-clone snapshots before publication so consumers cannot mutate runtime store state.
+- Keep payload versioned. Version 2 contains `reason`, stable `widgetId`, and a compact context limited to the active task, current atomic step, unresolved blockers, evidence gaps, and a state version.
+- Do not publish full task state or history. Serve it only after an explicit recovery request through `task_list({ include_history: true })`.
+- Emit telemetry for compact publication and explicit recovery delivery; observer failures must not prevent either task persistence or the independent telemetry event.
 - Isolate observer failures from task persistence and tool success.
 - Preserve default UI when no consumer subscribes. A synchronous consumer may intentionally replace the default widget through the published `widgetId`.
 

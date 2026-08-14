@@ -150,8 +150,8 @@ task_list include_evidence=true
 
 ## Custom task UI
 
-pi-tasks publishes a versioned state snapshot after restoring its default widget
-and after every successful task mutation. Other Pi extensions can subscribe
+pi-tasks publishes a versioned compact task context after restoring its default
+widget and after every successful task mutation. Other Pi extensions can subscribe
 without importing or patching pi-tasks internals:
 
 ```ts
@@ -170,9 +170,7 @@ export default function customTaskUi(pi: ExtensionAPI) {
 
   const render = () => {
     if (!ctx || !latest) return;
-    const active = latest.state.activeTaskId
-      ? latest.state.tasks[latest.state.activeTaskId]
-      : undefined;
+    const active = latest.context.activeTask;
     ctx.ui.setWidget(
       latest.widgetId,
       active ? [`Custom task: ${active.id} ${active.title}`] : undefined,
@@ -194,7 +192,7 @@ export default function customTaskUi(pi: ExtensionAPI) {
     if (
       !value ||
       typeof value !== "object" ||
-      (value as { version?: unknown }).version !== 1
+      (value as { version?: unknown }).version !== 2
     ) return;
     latest = value as TaskStateEvent;
     render();
@@ -205,16 +203,18 @@ export default function customTaskUi(pi: ExtensionAPI) {
 Event contract:
 
 - name: `pi-tasks:state` (`TASK_STATE_EVENT`);
-- payload version: `1`;
+- payload version: `2`;
 - reasons: `session_start`, `session_tree`, or `task_mutation`;
 - `widgetId`: stable default widget key, currently `pi-tasks`;
-- `state`: structured-cloned task snapshot with event history omitted.
+- `context`: state-versioned compact contract containing only the active task,
+  current atomic step, unresolved blockers, and evidence gaps.
 
 The default widget is installed before publication, so a synchronous subscriber
 may replace it through the supported widget key. With no subscriber, existing
-pi-tasks UI behavior is unchanged. Consumer mutations affect only their cloned
-snapshot, never runtime task state. Payloads can include task text, decisions,
-blockers, and evidence references; custom UI extensions should keep them local.
+pi-tasks UI behavior is unchanged. Full task history is not published; an agent
+can explicitly request it with `task_list({ include_history: true })` after a
+contract-recovery failure. The `pi-tasks:telemetry` event reports compact
+publication and explicit full-state recovery delivery, including payload size.
 
 ## Technical Details
 
