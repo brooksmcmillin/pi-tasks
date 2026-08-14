@@ -218,6 +218,123 @@ describe("registered task tools", () => {
 		expect(store.getState().tasks.T1?.id).toBe("T1");
 	});
 
+	it("emits a schema-valid task_plan scaffold from rejection recovery", async () => {
+		const { tools, ctx, store } = createHarness();
+		const plan = requireTool(tools, "task_plan");
+
+		const rejected = await execute(
+			plan,
+			{
+				title: "Reject me",
+				objective: "Force the no-active-task recovery branch",
+				acceptance_criteria: ["Recovery is a copyable scaffold"],
+				plan_steps: [
+					// Intentionally invalid: short text, vague output, no granularity
+					// contract. Triggers TaskTransitionError before any task is created.
+					{
+						text: "Do thing",
+						expectedOutput: "done",
+						evidenceRequired: false,
+						allowedActions: [],
+					},
+				],
+				activate: true,
+			},
+			ctx,
+		);
+
+		expect(rejected.isError).toBe(true);
+		expect(rejected.content[0]?.text).toContain("Error:");
+		// The previous shape was `{ plan_steps: ["<atomic step contract>"] }`,
+		// which is `string[]` and rejected by the plan_steps schema. The fix
+		// emits a copyable, schema-valid scaffold.
+		const details = rejected.details as {
+			rejected?: boolean;
+			reason?: string;
+			retry_with?: string;
+			minimum_params?: Record<string, unknown>;
+		};
+		expect(details.rejected).toBe(true);
+		expect(details.retry_with).toBe("task_plan");
+
+		const minimumParams = details.minimum_params;
+		expect(minimumParams).toBeDefined();
+		// Top-level fields required by the task_plan schema.
+		expect(typeof minimumParams?.title).toBe("string");
+		expect(typeof minimumParams?.objective).toBe("string");
+		expect(Array.isArray(minimumParams?.acceptance_criteria)).toBe(true);
+		expect(minimumParams?.activate).toBe(true);
+
+		// plan_steps must be an array of objects, each with a complete
+		// granularityCheck. The previous shape (array of strings) failed the
+		// schema at resubmit time.
+		const planSteps = minimumParams?.plan_steps as Array<
+			Record<string, unknown>
+		>;
+		expect(Array.isArray(planSteps)).toBe(true);
+		expect(planSteps.length).toBeGreaterThan(0);
+		for (const step of planSteps) {
+			expect(typeof step.text).toBe("string");
+			expect(step.text.length).toBeGreaterThanOrEqual(8);
+			expect(typeof step.expectedOutput).toBe("string");
+			expect(step.expectedOutput.length).toBeGreaterThanOrEqual(12);
+			expect(step.evidenceRequired).toBe(true);
+			expect(Array.isArray(step.allowedActions)).toBe(true);
+			const allowed = step.allowedActions as string[];
+			expect(allowed.length).toBeGreaterThan(0);
+			expect(allowed.length).toBeLessThanOrEqual(3);
+			expect([
+				"atomic",
+				"needs_breakdown",
+				"breaking_down",
+				"deferred",
+			]).toContain(step.decompositionStatus);
+			const check = step.granularityCheck as Record<string, unknown>;
+			expect(typeof check.isAtomic).toBe("boolean");
+			expect(typeof check.reason).toBe("string");
+			expect((check.reason as string).length).toBeGreaterThan(0);
+			expect(typeof check.canBeDoneInOneAgentAction).toBe("boolean");
+			expect(typeof check.hasSingleObservableOutput).toBe("boolean");
+			expect(typeof check.hasSingleVerificationMethod).toBe("boolean");
+			expect(typeof check.hasNoHiddenSubtasks).toBe("boolean");
+		}
+
+		// End-to-end proof: the recovery scaffold, when filled in with real
+		// values and resubmitted to task_plan, creates a valid task. The
+		// placeholders alone are not a real plan; fill in concrete values.
+		const realParams = {
+			...minimumParams,
+			title: "Refilled recovery plan",
+			objective: "Verify the scaffold round-trips through task_plan",
+			acceptance_criteria: [
+				"Task is created from the recovery scaffold",
+				"Task becomes active immediately",
+			],
+			plan_steps: [
+				{
+					text: "Refill and submit the recovery plan",
+					expectedOutput: "Recovery plan creates task T1",
+					criterionIds: ["T1-AC1"],
+					evidenceRequired: true,
+					allowedActions: ["task_evidence"],
+					decompositionStatus: "atomic" as const,
+					granularityCheck: {
+						isAtomic: true,
+						reason: "Single refill-and-submit action",
+						canBeDoneInOneAgentAction: true,
+						hasSingleObservableOutput: true,
+						hasSingleVerificationMethod: true,
+						hasNoHiddenSubtasks: true,
+					},
+				},
+			],
+		};
+		const created = await execute(plan, realParams, ctx);
+		expect(created.content[0]?.text).toContain("Created task");
+		expect(store.getState().tasks.T1?.id).toBe("T1");
+		expect(store.getState().activeTaskId).toBe("T1");
+	});
+
 	it("create, update, evidence, complete, and replay through custom entries", async () => {
 		const { tools, entries, ctx, store, ui } = createHarness();
 		const plan = requireTool(tools, "task_plan");
