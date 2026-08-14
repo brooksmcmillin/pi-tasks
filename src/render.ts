@@ -417,7 +417,9 @@ function getNextAllowedActions(step: TaskStep, hasBlockers: boolean): string[] {
 		return ["task_decompose", "task_decision", "task_update"];
 	}
 	if (step.evidenceRequired && step.evidenceIds.length === 0) {
-		return [...step.allowedActions, "task_evidence"].filter(Boolean);
+		return [...step.allowedActions, "task_verify_step", "task_evidence"].filter(
+			Boolean,
+		);
 	}
 	return ["task_update", "task_evidence", ...step.allowedActions].filter(
 		Boolean,
@@ -445,7 +447,7 @@ function getRecommendedTool(
 	if (mode === "planning") return "task_plan";
 	if (mode === "blocked") return "task_update";
 	if (mode === "decomposing") return "task_decompose";
-	if (mode === "verifying") return "task_evidence";
+	if (mode === "verifying") return step ? "task_verify_step" : "task_evidence";
 	if (mode === "completing") return "task_complete";
 	return step?.allowedActions[0] ?? "task_update";
 }
@@ -477,6 +479,14 @@ function getMinimumParams(
 			task_id: task.id,
 			step_ids: step ? [step.id] : ["<current step id>"],
 			criterion_ids: step?.criterionIds ?? [],
+			references: ["<artifact path or command>"],
+		};
+	}
+	if (recommendedTool === "task_verify_step" && step) {
+		return {
+			task_id: task.id,
+			step_id: step.id,
+			criterion_ids: step.criterionIds,
 			references: ["<artifact path or command>"],
 		};
 	}
@@ -547,7 +557,7 @@ function buildResumeInstruction(
 		return `Resume by decomposing ${step.id}; do not execute or mark it done until it is atomic.`;
 	}
 	if (step.evidenceRequired && step.evidenceIds.length === 0) {
-		return `Resume ${step.id} by performing one allowed action, then record step-scoped evidence with task_evidence.step_ids before task_update done.`;
+		return `Resume ${step.id} by performing one allowed action, then use task_verify_step to record passing evidence and advance atomically.`;
 	}
 	return `Resume ${step.id} with ${nextAllowedActions.join(" or ")}; keep ordered step progression.`;
 }

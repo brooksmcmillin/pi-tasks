@@ -76,6 +76,8 @@ function applyEvent(state: TaskState, event: TaskEvent): TaskState {
 			return decomposeStep(state, event);
 		case "task.evidence_added":
 			return addEvidence(state, event);
+		case "task.step_verified":
+			return verifyStep(state, event);
 		case "task.decision_recorded":
 			return recordDecision(state, event);
 		case "task.completed":
@@ -282,52 +284,114 @@ function addEvidence(
 	event: Extract<TaskEvent, { type: "task.evidence_added" }>,
 ): TaskState {
 	const task = requireTask(state, event.taskId);
-	const evidence: TaskEvidence = {
-		...event.evidence,
-		taskId: task.id,
-		summary: event.evidence.summary.trim(),
-		references: event.evidence.references ?? [],
-		quality: normalizeEvidenceQuality(event.evidence.quality, event.evidence),
-		createdAt: event.createdAt,
-	};
+	const evidence = materializeEvidence(task, event.evidence, event.createdAt);
 	validateEvidence(evidence);
 	const duplicate = findDuplicateEvidence(task, evidence);
-	if (duplicate) {
-		linkEvidenceToCriteria(task, duplicate, event.criterionIds ?? []);
-		linkEvidenceToSteps(
-			task,
-			duplicate,
-			event.stepIds ?? [],
-			event.overrideReason,
-		);
-		if (!event.stepIds || event.stepIds.length === 0) {
-			linkEvidenceToMatchingSteps(
-				task,
-				duplicate,
-				event.criterionIds ?? [],
-				event.overrideReason,
-			);
-		}
-		recalculateProgress(task);
-		task.updatedAt = event.createdAt;
-		return state;
-	}
-	task.evidence.push(evidence);
-	linkEvidenceToCriteria(task, evidence, event.criterionIds ?? []);
+	const resolvedEvidence = duplicate ?? evidence;
+	if (!duplicate) task.evidence.push(evidence);
+	linkEvidenceToCriteria(task, resolvedEvidence, event.criterionIds ?? []);
 	linkEvidenceToSteps(
 		task,
-		evidence,
+		resolvedEvidence,
 		event.stepIds ?? [],
 		event.overrideReason,
 	);
 	if (!event.stepIds || event.stepIds.length === 0) {
 		linkEvidenceToMatchingSteps(
 			task,
-			evidence,
+			resolvedEvidence,
 			event.criterionIds ?? [],
 			event.overrideReason,
 		);
 	}
+	recalculateProgress(task);
+	task.updatedAt = event.createdAt;
+	return state;
+}
+
+function materializeEvidence(
+	task: Task,
+	evidenceInput: Extract<
+		TaskEvent,
+		{ type: "task.evidence_added" | "task.step_verified" }
+	>["evidence"],
+	createdAt: string,
+): TaskEvidence {
+	return {
+		...evidenceInput,
+		taskId: task.id,
+		summary: evidenceInput.summary.trim(),
+		references: evidenceInput.references ?? [],
+		quality: normalizeEvidenceQuality(evidenceInput.quality, evidenceInput),
+		createdAt,
+	};
+}
+
+function verifyStep(
+	state: TaskState,
+	event: Extract<TaskEvent, { type: "task.step_verified" }>,
+): TaskState {
+	const task = requireTask(state, event.taskId);
+	const step = requireStep(task, event.stepId);
+	const evidence = materializeEvidence(task, event.evidence, event.createdAt);
+	validateEvidence(evidence);
+	if (evidence.passed !== true) {
+		throw new TaskTransitionError(
+			"task.step_verified requires passing evidence",
+		);
+	}
+	const criterionIds = event.criterionIds ?? step.criterionIds;
+	const invalidCriterionIds = criterionIds.filter(
+		(criterionId) => !step.criterionIds.includes(criterionId),
+	);
+	if (invalidCriterionIds.length > 0) {
+		throw new TaskTransitionError(
+			`Verification criteria must belong to plan step ${step.id}: ${invalidCriterionIds.join(",")}`,
+		);
+	}
+	const duplicate = findDuplicateEvidence(task, evidence);
+	if (
+		step.status === "done" &&
+		duplicate &&
+		step.evidenceIds.includes(duplicate.id)
+	) {
+		const criteriaLinked = criterionIds.every((criterionId) =>
+			task.acceptanceCriteria
+				.find((criterion) => criterion.id === criterionId)
+				?.evidenceIds.includes(duplicate.id),
+		);
+		if (
+			evidence.id === duplicate.id &&
+			evidenceQualityEqual(evidence.quality, duplicate.quality) &&
+			criteriaLinked
+		) {
+			return state;
+		}
+		throw new TaskTransitionError(
+			`Plan step ${step.id} is already done; refusing conflicting verification retry`,
+		);
+	}
+	if (step.status === "done" || step.status === "skipped") {
+		throw new TaskTransitionError(
+			`Plan step ${step.id} is already ${step.status}; refusing conflicting verification retry`,
+		);
+	}
+	addEvidence(state, {
+		...event,
+		type: "task.evidence_added",
+		criterionIds,
+		stepIds: [step.id],
+	});
+	const resolvedEvidence = findDuplicateEvidence(task, evidence);
+	if (!resolvedEvidence) {
+		throw new TaskTransitionError("Verified evidence was not recorded");
+	}
+	updatePlanStep(task, {
+		...event,
+		type: "task.updated",
+		stepStatus: "done",
+		stepEvidenceIds: [resolvedEvidence.id],
+	});
 	recalculateProgress(task);
 	task.updatedAt = event.createdAt;
 	return state;
@@ -1134,7 +1198,7 @@ function validateEvidence(evidence: TaskEvidence): void {
 	}
 }
 
-function normalizeEvidenceQuality(
+export function normalizeEvidenceQuality(
 	quality: EvidenceQuality | undefined,
 	evidence: Omit<TaskEvidence, "taskId" | "createdAt" | "quality">,
 ): EvidenceQuality {
@@ -1149,6 +1213,13 @@ function normalizeEvidenceQuality(
 			? { observedOutput: quality.observedOutput.trim() }
 			: {}),
 	};
+}
+
+export function evidenceQualityEqual(
+	left: EvidenceQuality,
+	right: EvidenceQuality,
+): boolean {
+	return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function validateEvidenceQualityScore(evidence: TaskEvidence): void {

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Added `task_verify_step`, which records passing evidence and completes the current atomic step through one persisted `task.step_verified` event with idempotent exact retries.
+
+### Changed
+- Weak-model resume guidance now recommends the compound verification tool for the successful current-step path while retaining `task_evidence` and `task_update` for failure, backfill, skip, blocker, and scope workflows.
+
 ## [0.2.3] - 2026-08-04
 
 ### Fixed

@@ -20,6 +20,7 @@ import type {
 	ToolDefinition,
 	ToolResult,
 } from "./pi-types.ts";
+import { evidenceQualityEqual, normalizeEvidenceQuality } from "./reducer.ts";
 import {
 	buildTaskResume,
 	formatTaskFocus,
@@ -124,6 +125,17 @@ interface TaskEvidenceParams extends Record<string, unknown> {
 	step_ids?: string[];
 	quality?: EvidenceQuality;
 	override_reason?: string;
+}
+
+interface TaskVerifyStepParams extends Record<string, unknown> {
+	task_id: string;
+	step_id: string;
+	type: EvidenceType;
+	level: VerificationLevel;
+	summary: string;
+	references?: string[];
+	criterion_ids?: string[];
+	quality?: EvidenceQuality;
 }
 
 interface TaskDecisionParams extends Record<string, unknown> {
@@ -657,6 +669,107 @@ export function registerTaskTools(
 				? `Linked existing evidence ${duplicate.id} for task ${params.task_id}`
 				: `Recorded evidence ${evidenceId} for task ${params.task_id}`;
 			return appendAndReport(pi, store, ctx, event, success);
+		},
+	});
+
+	registerGuidedTool<TaskVerifyStepParams>(pi, {
+		name: "task_verify_step",
+		label: "Verify Task Step",
+		description:
+			"Atomically record passing verification evidence and complete the current atomic plan step.",
+		promptSnippet:
+			"Record successful evidence and advance the current atomic pi-tasks step in one operation",
+		promptGuidelines: [
+			"Use task_verify_step for the successful happy path after verifying the current atomic step.",
+			"The tool records passing evidence, links it to the step and criteria, completes the step, and activates the next step atomically.",
+			"Use task_evidence instead for failed or unknown evidence, non-step evidence, or evidence that must not advance the plan.",
+		],
+		parameters: Type.Object({
+			task_id: Type.String(),
+			step_id: Type.String(),
+			type: Type.Enum(EVIDENCE_TYPES),
+			level: Type.Enum(VERIFICATION_LEVELS),
+			summary: Type.String(),
+			references: Type.Optional(Type.Array(Type.String())),
+			criterion_ids: Type.Optional(Type.Array(Type.String())),
+			quality: Type.Optional(evidenceQualitySchema()),
+		}),
+		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+			const state = store.getState();
+			const task = state.tasks[params.task_id];
+			const evidenceParams: TaskEvidenceParams = {
+				task_id: params.task_id,
+				type: params.type,
+				level: params.level,
+				summary: params.summary,
+				passed: "true",
+				...(params.references ? { references: params.references } : {}),
+				...(params.criterion_ids
+					? { criterion_ids: params.criterion_ids }
+					: {}),
+				step_ids: [params.step_id],
+				...(params.quality ? { quality: params.quality } : {}),
+			};
+			const duplicate = findDuplicateEvidenceForParams(task, evidenceParams);
+			const step = task?.planSteps.find(
+				(candidate) => candidate.id === params.step_id,
+			);
+			const criterionIds = params.criterion_ids ?? step?.criterionIds ?? [];
+			const criteriaBelongToStep = criterionIds.every((criterionId) =>
+				step?.criterionIds.includes(criterionId),
+			);
+			const criteriaLinked = duplicate
+				? criterionIds.every((criterionId) =>
+						task?.acceptanceCriteria
+							.find((criterion) => criterion.id === criterionId)
+							?.evidenceIds.includes(duplicate.id),
+					)
+				: false;
+			const requestedQuality = duplicate
+				? normalizeEvidenceQuality(params.quality, {
+						id: duplicate.id,
+						type: params.type,
+						level: params.level,
+						summary: params.summary,
+						passed: true,
+						references: params.references ?? [],
+					})
+				: undefined;
+			if (
+				duplicate &&
+				step?.status === "done" &&
+				step.evidenceIds.includes(duplicate.id) &&
+				criteriaBelongToStep &&
+				criteriaLinked &&
+				requestedQuality &&
+				evidenceQualityEqual(requestedQuality, duplicate.quality)
+			) {
+				return textResult(
+					`Step ${params.step_id} already verified by ${duplicate.id}; retry made no changes\n\n${formatTaskResume(state)}`,
+					buildTaskResume(state),
+				);
+			}
+			const evidenceId = duplicate?.id ?? idGenerator.next("E");
+			const event = baseEvent("task.step_verified", params.task_id, ctx, {
+				stepId: params.step_id,
+				evidence: {
+					id: evidenceId,
+					type: params.type,
+					level: params.level,
+					summary: params.summary,
+					passed: true,
+					references: params.references ?? [],
+					...(params.quality ? { quality: params.quality } : {}),
+				},
+				...(params.criterion_ids ? { criterionIds: params.criterion_ids } : {}),
+			});
+			return appendAndReport(
+				pi,
+				store,
+				ctx,
+				event,
+				`Verified and completed step ${params.step_id} with evidence ${evidenceId}`,
+			);
 		},
 	});
 

@@ -648,7 +648,34 @@ Behavior:
 - marks referenced criteria satisfied only when `passed: true`,
 - never marks task done by itself.
 
-### 8.11 `task_decision`
+### 8.11 `task_verify_step`
+
+Purpose:
+
+Atomically record passing evidence and complete the current atomic step.
+
+Parameters:
+
+- `task_id`
+- `step_id`
+- `type`
+- `level`
+- `summary`
+- `references`
+- `criterion_ids`
+- `quality`
+
+Behavior:
+
+- accepts only the current open atomic step and passing evidence,
+- defaults criterion linkage to the step's criterion IDs and rejects criteria outside that step,
+- validates and links evidence before completing the step on a cloned state,
+- persists the evidence and step transition as one `task.step_verified` event,
+- reuses duplicate evidence and activates the next step,
+- makes exact response-loss retries a no-op and rejects conflicting stale retries,
+- leaves failed/unknown evidence, backfills, skips, blockers, and scope changes to the primitive tools.
+
+### 8.12 `task_decision`
 
 Purpose:
 
@@ -668,7 +695,7 @@ Behavior:
 - appends decision,
 - visible in task details.
 
-### 8.12 `task_complete`
+### 8.13 `task_complete`
 
 Purpose:
 

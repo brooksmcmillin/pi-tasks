@@ -357,6 +357,113 @@ describe("registered task tools", () => {
 		expect(replayed.getState().tasks.T1?.status).toBe("done");
 	});
 
+	it("atomically verifies the current step and makes exact retries a no-op", async () => {
+		const { tools, entries, ctx, store } = createHarness();
+		const plan = requireTool(tools, "task_plan");
+		const verify = requireTool(tools, "task_verify_step");
+		await execute(
+			plan,
+			{
+				title: "Atomic verification",
+				objective: "Record proof and advance in one event",
+				acceptance_criteria: ["The first step is verified"],
+				plan_steps: [
+					{
+						text: "Run focused verification",
+						expectedOutput: "Focused verification passes",
+						criterionIds: ["T1-AC1"],
+						evidenceRequired: true,
+						allowedActions: ["npm test"],
+						decompositionStatus: "atomic",
+						granularityCheck: {
+							isAtomic: true,
+							reason: "One test command has one observable result",
+							canBeDoneInOneAgentAction: true,
+							hasSingleObservableOutput: true,
+							hasSingleVerificationMethod: true,
+							hasNoHiddenSubtasks: true,
+						},
+					},
+					{
+						text: "Inspect the package artifact",
+						expectedOutput: "Package artifact is valid",
+						evidenceRequired: true,
+						allowedActions: ["npm pack --dry-run"],
+						decompositionStatus: "atomic",
+						granularityCheck: {
+							isAtomic: true,
+							reason: "One package command has one observable result",
+							canBeDoneInOneAgentAction: true,
+							hasSingleObservableOutput: true,
+							hasSingleVerificationMethod: true,
+							hasNoHiddenSubtasks: true,
+						},
+					},
+				],
+				activate: true,
+			},
+			ctx,
+		);
+
+		const params = {
+			task_id: "T1",
+			step_id: "T1-S1",
+			type: "test",
+			level: "unit_test",
+			summary: "Focused unit test passed",
+			references: ["test/unit/tools.test.ts"],
+			quality: {
+				source: "npm test",
+				reproducible: true,
+				verifier: "tool",
+				artifactRefs: ["test/unit/tools.test.ts"],
+				observedOutput: "all focused tests passed",
+			},
+		};
+		const before = entries.length;
+		const verified = await execute(verify, params, ctx);
+
+		expect(verified.isError).not.toBe(true);
+		expect(entries).toHaveLength(before + 1);
+		expect(entries.at(-1)?.type).toBe("task.step_verified");
+		expect(store.getState().tasks.T1?.planSteps[0]?.status).toBe("done");
+		expect(store.getState().tasks.T1?.planSteps[1]?.status).toBe("active");
+		expect(store.getState().tasks.T1?.evidence).toHaveLength(1);
+		expect(store.getState().tasks.T1?.acceptanceCriteria[0]?.status).toBe(
+			"satisfied",
+		);
+
+		const retried = await execute(verify, params, ctx);
+		expect(retried.content[0]?.text).toContain("retry made no changes");
+		expect(entries).toHaveLength(before + 1);
+		expect(store.getState().tasks.T1?.evidence).toHaveLength(1);
+
+		const changedQuality = await execute(
+			verify,
+			{
+				...params,
+				quality: { ...params.quality, reproducible: false },
+			},
+			ctx,
+		);
+		expect(changedQuality.isError).toBe(true);
+		expect(changedQuality.content[0]?.text).toContain(
+			"evidence must be reproducible",
+		);
+		expect(entries).toHaveLength(before + 1);
+
+		const changedCriteria = await execute(
+			verify,
+			{ ...params, criterion_ids: ["T1-AC999"] },
+			ctx,
+		);
+		expect(changedCriteria.isError).toBe(true);
+		expect(changedCriteria.content[0]?.text).toContain(
+			"Verification criteria must belong to plan step T1-S1",
+		);
+		expect(entries).toHaveLength(before + 1);
+	});
+
 	it("decomposes a coarse step before execution", async () => {
 		const { tools, ctx, store } = createHarness();
 		const plan = requireTool(tools, "task_plan");

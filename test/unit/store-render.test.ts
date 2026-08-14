@@ -297,7 +297,7 @@ describe("store replay and render helpers", () => {
 			{ type: "custom", customType: TASK_EVENT_CUSTOM_TYPE, data: createEvent },
 		]).state;
 		const output = formatTaskNext(state);
-		expect(output).toContain("Only next tool: task_evidence");
+		expect(output).toContain("Only next tool: task_verify_step");
 		expect(output).toContain("Current step lock: T1-S1");
 		expect(output).toContain("Do not call: task_update done, task_complete");
 	});
@@ -329,7 +329,7 @@ describe("store replay and render helpers", () => {
 		expect(result.state.activeTaskId).toBe("T2");
 		expect(output).toContain("Current step: T2-S1.1");
 		expect(output).toContain("Lineage: T2-S1:breaking_down > T2-S1.1:atomic");
-		expect(output).toContain("task_evidence.step_ids");
+		expect(output).toContain("task_verify_step to record passing evidence");
 		expect(snapshot.resume.currentStepId).toBe("T2-S1.1");
 	});
 
