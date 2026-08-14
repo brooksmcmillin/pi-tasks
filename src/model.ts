@@ -269,6 +269,15 @@ export interface TaskEvidenceAddedEvent extends TaskEventBase {
 	overrideReason?: string;
 }
 
+export interface TaskStepVerifiedEvent extends TaskEventBase {
+	type: "task.step_verified";
+	stepId: string;
+	evidence: Omit<TaskEvidence, "taskId" | "createdAt" | "quality"> & {
+		quality?: EvidenceQuality;
+	};
+	criterionIds?: string[];
+}
+
 export interface TaskDecisionRecordedEvent extends TaskEventBase {
 	type: "task.decision_recorded";
 	decision: Omit<TaskDecision, "taskId" | "createdAt">;
@@ -304,6 +313,7 @@ export type TaskEvent =
 	| TaskUpdatedEvent
 	| TaskStepsDecomposedEvent
 	| TaskEvidenceAddedEvent
+	| TaskStepVerifiedEvent
 	| TaskDecisionRecordedEvent
 	| TaskCompletedEvent
 	| TaskCancelledEvent

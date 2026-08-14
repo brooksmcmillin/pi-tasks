@@ -69,14 +69,14 @@ task_plan → ordered steps with acceptance criteria
     ↓
 task_focus → agent sees exactly what's in scope
     ↓
-task_update → step-by-step execution with evidence lock
+task_update → record progress, scope changes, blockers, or skips
     ↓
-task_evidence → attach proof before marking done
+task_verify_step → atomically attach passing proof and advance
     ↓
 task_complete → only succeeds when all gates pass
 ```
 
-The agent gets 12 tools. The user gets `/tasks`. Everything persists in Pi's session tree.
+The agent gets 13 tools. The user gets `/tasks`. Everything persists in Pi's session tree.
 
 ### Oh My Pi support
 
@@ -115,6 +115,7 @@ the registered tool description while still keeping `promptSnippet` and
 | `task_list` | List tasks with optional filtering |
 | `task_update` | Advance steps, record activity, flag scope drift |
 | `task_evidence` | Attach verification evidence to steps/criteria |
+| `task_verify_step` | Atomically attach passing evidence and complete the current atomic step |
 | `task_decision` | Record explicit user decisions |
 | `task_complete` | Close a task (only if all gates pass) |
 
