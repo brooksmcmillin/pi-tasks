@@ -1,10 +1,10 @@
 import { registerTaskCommands } from "./src/commands.js";
 import { buildTaskResume } from "./src/render.js";
-import { TASK_STATE_EVENT, TASK_WIDGET_ID, } from "./src/state-events.js";
+import { TASK_STATE_EVENT, TASK_TELEMETRY_EVENT, TASK_WIDGET_ID, } from "./src/state-events.js";
 import { createTaskRuntimeStore, snapshotState } from "./src/store.js";
 import { registerTaskTools } from "./src/tools.js";
 import { updateTaskUi } from "./src/widget.js";
-export { TASK_STATE_EVENT, TASK_WIDGET_ID, };
+export { TASK_STATE_EVENT, TASK_TELEMETRY_EVENT, TASK_WIDGET_ID, };
 export default function (pi) {
     const store = createTaskRuntimeStore();
     const replay = (ctx, reason) => {

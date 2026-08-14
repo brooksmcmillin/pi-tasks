@@ -133,12 +133,7 @@ export function buildTaskResume(state) {
             mode: "planning",
             recommendedTool: "task_plan",
             blockedTools: ["task_update", "task_evidence", "task_complete"],
-            minimumParams: {
-                title: "<short task title>",
-                objective: "<bounded objective>",
-                acceptance_criteria: ["<verifiable criterion>"],
-                plan_steps: ["<atomic step contract>"],
-            },
+            minimumParams: getTaskPlanRecoveryParams(),
             currentStepLineage: [],
             evidenceIds: [],
             criterionIds: [],
@@ -405,6 +400,49 @@ function getMinimumParams(task, step, recommendedTool) {
         };
     }
     return { task_id: task.id };
+}
+/**
+ * Build a copyable, schema-valid scaffold for the no-active-task recovery
+ * branch. The previous shape `{ plan_steps: ["<atomic step contract>"] }` was
+ * not accepted by the task_plan schema (plan_steps is `TaskStepInput[]`, not
+ * `string[]`) and could not be resubmitted as-is, so the recovery was useless.
+ *
+ * The scaffold below passes the reducer's quality gate and granularity
+ * contract so an agent can copy it verbatim, edit the placeholders, and
+ * resubmit. It deliberately:
+ *   - uses `decompositionStatus: "needs_breakdown"` to avoid the
+ *     atomic-only criterion link requirement (criterionIds are
+ *     server-generated, never guessed by the scaffold);
+ *   - includes `activate: true` so a successful submit immediately becomes
+ *     the active task;
+ *   - includes a complete granularityCheck with `isAtomic: false` so the
+ *     schema is satisfied and the agent replaces it with a verified atomic
+ *     contract during task planning (typically via task_decompose).
+ */
+function getTaskPlanRecoveryParams() {
+    return {
+        title: "<short task title>",
+        objective: "<bounded objective>",
+        acceptance_criteria: ["<verifiable criterion>"],
+        plan_steps: [
+            {
+                text: "Replace with the bounded step text (>= 8 chars, no vague wording)",
+                expectedOutput: "Replace with the verifiable single observable output (>= 12 chars)",
+                allowedActions: ["task_decompose"],
+                evidenceRequired: true,
+                decompositionStatus: "needs_breakdown",
+                granularityCheck: {
+                    isAtomic: false,
+                    reason: "Scaffold from task_plan rejection; refine with task_decompose before claiming atomicity.",
+                    canBeDoneInOneAgentAction: false,
+                    hasSingleObservableOutput: false,
+                    hasSingleVerificationMethod: false,
+                    hasNoHiddenSubtasks: false,
+                },
+            },
+        ],
+        activate: true,
+    };
 }
 function formatMinimumParams(params) {
     return JSON.stringify(params);

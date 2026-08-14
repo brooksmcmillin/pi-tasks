@@ -4,9 +4,12 @@ import type { ExtensionAPI, ExtensionContext } from "./src/pi-types.ts";
 import { buildTaskResume } from "./src/render.ts";
 import {
 	TASK_STATE_EVENT,
+	TASK_TELEMETRY_EVENT,
 	TASK_WIDGET_ID,
+	type TaskContextContract,
 	type TaskStateEvent,
 	type TaskStateEventReason,
+	type TaskTelemetryEvent,
 } from "./src/state-events.ts";
 import { createTaskRuntimeStore, snapshotState } from "./src/store.ts";
 import { registerTaskTools } from "./src/tools.ts";
@@ -14,9 +17,12 @@ import { updateTaskUi } from "./src/widget.ts";
 
 export {
 	TASK_STATE_EVENT,
+	TASK_TELEMETRY_EVENT,
 	TASK_WIDGET_ID,
+	type TaskContextContract,
 	type TaskStateEvent,
 	type TaskStateEventReason,
+	type TaskTelemetryEvent,
 };
 
 export default function (pi: ExtensionAPI) {

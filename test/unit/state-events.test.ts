@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import taskExtension, {
 	TASK_STATE_EVENT,
+	TASK_TELEMETRY_EVENT,
 	TASK_WIDGET_ID,
 	type TaskStateEvent,
 } from "../../index.ts";
@@ -71,6 +72,7 @@ type Handler = (event: unknown, ctx: ExtensionContext) => Promise<void> | void;
 function createHarness(initialEvents: TaskEvent[] = []) {
 	const branchEvents = [...initialEvents];
 	const emitted: TaskStateEvent[] = [];
+	const telemetry: unknown[] = [];
 	const operations: string[] = [];
 	const subscribers: Array<(value: unknown) => void> = [];
 	const handlers = new Map<string, Handler>();
@@ -79,10 +81,17 @@ function createHarness(initialEvents: TaskEvent[] = []) {
 	const pi: ExtensionAPI = {
 		events: {
 			emit: (event, data) => {
-				expect(event).toBe(TASK_STATE_EVENT);
-				operations.push("event");
-				emitted.push(data as TaskStateEvent);
-				for (const subscriber of subscribers) subscriber(data);
+				if (event === TASK_STATE_EVENT) {
+					operations.push("event");
+					emitted.push(data as TaskStateEvent);
+					for (const subscriber of subscribers) subscriber(data);
+					return;
+				}
+				if (event === TASK_TELEMETRY_EVENT) {
+					telemetry.push(data);
+					return;
+				}
+				throw new Error(`Unexpected event: ${event}`);
 			},
 		},
 		on: (event, handler) => handlers.set(event, handler),
@@ -118,6 +127,7 @@ function createHarness(initialEvents: TaskEvent[] = []) {
 	return {
 		ctx,
 		emitted,
+		telemetry,
 		handlers,
 		operations,
 		subscribe: (subscriber: (value: unknown) => void) =>
@@ -142,9 +152,7 @@ function createConsumer() {
 	let latest: TaskStateEvent | undefined;
 	const render = () => {
 		if (!ctx || !latest) return;
-		const active = latest.state.activeTaskId
-			? latest.state.tasks[latest.state.activeTaskId]
-			: undefined;
+		const active = latest.context.activeTask;
 		ctx.ui.setWidget(
 			latest.widgetId,
 			active ? [`Custom task: ${active.id} ${active.title}`] : undefined,
@@ -160,7 +168,7 @@ function createConsumer() {
 			if (
 				!value ||
 				typeof value !== "object" ||
-				(value as { version?: unknown }).version !== 1
+				(value as { version?: unknown }).version !== 2
 			)
 				return;
 			latest = value as TaskStateEvent;
@@ -170,27 +178,24 @@ function createConsumer() {
 }
 
 describe("task state event hook", () => {
-	it("publishes cloned replay state after restoring the default widget", async () => {
-		const { ctx, emitted, handlers, operations, tools } = createHarness([
+	it("publishes compact replay context after restoring the default widget", async () => {
+		const { ctx, emitted, handlers, operations, telemetry } = createHarness([
 			createEvent,
 		]);
 
 		await handlers.get("session_start")?.({}, ctx);
 		expect(operations).toEqual(["status", "widget", "event"]);
 		expect(emitted[0]).toMatchObject({
-			version: 1,
+			version: 2,
 			reason: "session_start",
 			widgetId: TASK_WIDGET_ID,
-			state: { activeTaskId: "T1" },
+			context: { activeTask: { id: "T1", title: "State hook replay" } },
 		});
-		expect("events" in (emitted[0]?.state ?? {})).toBe(false);
-
-		const publishedTask = emitted[0]?.state.tasks.T1;
-		if (!publishedTask) throw new Error("Expected published task");
-		publishedTask.title = "consumer mutation";
-		const focus = await execute(tools.get("task_focus"), {}, ctx);
-		expect(focus.content[0]?.text).toContain("State hook replay");
-		expect(focus.content[0]?.text).not.toContain("consumer mutation");
+		expect("state" in (emitted[0] ?? {})).toBe(false);
+		expect(telemetry.at(-1)).toMatchObject({
+			event: "task_context.compact_published",
+			reason: "session_start",
+		});
 
 		await handlers.get("session_tree")?.({}, ctx);
 		expect(emitted.at(-1)?.reason).toBe("session_tree");
@@ -225,9 +230,9 @@ describe("task state event hook", () => {
 		expect(result.content[0]?.text).toContain("Created task T1");
 		expect(operations).toEqual(["status", "widget", "event"]);
 		expect(emitted.at(-1)).toMatchObject({
-			version: 1,
+			version: 2,
 			reason: "task_mutation",
-			state: { activeTaskId: "T1" },
+			context: { activeTask: { id: "T1" } },
 		});
 	});
 
@@ -250,14 +255,29 @@ describe("task state event hook", () => {
 		expect(operations).toEqual(["status", "widget", "event"]);
 		expect(emitted).toHaveLength(emissionCount + 1);
 		expect(emitted.at(-1)).toMatchObject({
-			version: 1,
+			version: 2,
 			reason: "task_mutation",
-			state: {
-				activeTaskId: "T1",
-				lastUpdatedAt: snapshotEvent?.createdAt,
+			context: {
+				stateVersion: snapshotEvent?.createdAt,
+				activeTask: { id: "T1" },
 			},
 		});
-		expect("events" in (emitted.at(-1)?.state ?? {})).toBe(false);
+		expect("state" in (emitted.at(-1) ?? {})).toBe(false);
+	});
+
+	it("serves full state only for an explicit recovery request", async () => {
+		const { ctx, telemetry, tools } = createHarness([createEvent]);
+		const result = await execute(
+			tools.get("task_list"),
+			{ include_history: true },
+			ctx,
+		);
+
+		expect(result.content[0]?.text).toContain('"events"');
+		expect(telemetry.at(-1)).toMatchObject({
+			event: "task_context.full_state_recovery_served",
+			reason: "explicit_request",
+		});
 	});
 
 	it("does not publish rejected mutations", async () => {
@@ -281,7 +301,7 @@ describe("task state event hook", () => {
 	});
 
 	it("isolates observer failures from persisted mutations", async () => {
-		const { ctx, handlers, subscribe, tools } = createHarness();
+		const { ctx, handlers, subscribe, telemetry, tools } = createHarness();
 		subscribe(() => {
 			throw new Error("consumer failed");
 		});
@@ -297,5 +317,9 @@ describe("task state event hook", () => {
 		expect(result.isError).not.toBe(true);
 		expect(result.content[0]?.text).toContain("Created task T1");
 		expect(focus.content[0]?.text).toContain("Mutation hook");
+		expect(telemetry.at(-1)).toMatchObject({
+			event: "task_context.compact_published",
+			reason: "task_mutation",
+		});
 	});
 });

@@ -29,6 +29,7 @@ import {
 	formatTaskResume,
 } from "./render.ts";
 import { Type } from "./schema.ts";
+import { TASK_TELEMETRY_EVENT } from "./state-events.ts";
 import { errorText, snapshotState, type TaskRuntimeStore } from "./store.ts";
 import { updateTaskUi } from "./widget.ts";
 
@@ -85,6 +86,7 @@ interface TaskListParams extends Record<string, unknown> {
 	status?: TaskStatus;
 	include_done?: boolean;
 	include_evidence?: boolean;
+	include_history?: boolean;
 	limit?: number;
 }
 
@@ -490,7 +492,8 @@ export function registerTaskTools(
 	registerGuidedTool<TaskListParams>(pi, {
 		name: "task_list",
 		label: "Task List",
-		description: "List pi-tasks tasks on the current session branch.",
+		description:
+			"List pi-tasks tasks on the current session branch. Set include_history only to recover full task state after an explicit request or compact-contract failure.",
 		promptSnippet:
 			"Inspect current pi-tasks task status, blockers, and verification gaps",
 		promptGuidelines: [
@@ -501,6 +504,7 @@ export function registerTaskTools(
 			status: Type.Optional(Type.Enum(TASK_STATUSES)),
 			include_done: Type.Optional(Type.Boolean()),
 			include_evidence: Type.Optional(Type.Boolean()),
+			include_history: Type.Optional(Type.Boolean()),
 			limit: Type.Optional(Type.Number()),
 		}),
 		execute: async (_toolCallId, params) => {
@@ -508,10 +512,23 @@ export function registerTaskTools(
 			const filtered = params.status
 				? filterStateByStatus(rawState, params.status)
 				: rawState;
-			return textResult(
-				formatTaskList(filtered, formatListOptions(params)),
-				buildTaskResume(filtered),
-			);
+			const output = params.include_history
+				? JSON.stringify(filtered, null, 2)
+				: formatTaskList(filtered, formatListOptions(params));
+			if (params.include_history) {
+				try {
+					pi.events.emit(TASK_TELEMETRY_EVENT, {
+						version: 1,
+						event: "task_context.full_state_recovery_served",
+						reason: "explicit_request",
+						stateVersion: rawState.lastUpdatedAt,
+						payloadBytes: output.length,
+					});
+				} catch {
+					// Observability must not make state recovery unavailable.
+				}
+			}
+			return textResult(output, buildTaskResume(filtered));
 		},
 	});
 
