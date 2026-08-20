@@ -7,6 +7,7 @@ import type {
 	TaskStatus,
 	TaskStep,
 } from "./model.ts";
+import { isSupportAction, SUPPORT_ACTIONS } from "./support-actions.ts";
 
 const STATUS_ORDER: TaskStatus[] = [
 	"active",
@@ -199,7 +200,7 @@ export function buildTaskResume(state: TaskState): TaskResumeContext {
 			evidenceIds: [],
 			criterionIds: [],
 			allowedActions: [],
-			nextAllowedActions: ["task_plan"],
+			nextAllowedActions: withSupportActions(["task_plan"]),
 			verificationGaps: [],
 			blockers: [],
 			decisions: [],
@@ -221,7 +222,7 @@ export function buildTaskResume(state: TaskState): TaskResumeContext {
 		);
 	const nextAllowedActions = step
 		? getNextAllowedActions(step, blockers.length > 0)
-		: ["task_complete"];
+		: withSupportActions(["task_complete"]);
 	const mode = getExecutionMode(task, step, blockers.length > 0, gaps);
 	const recommendedTool = getRecommendedTool(mode, step);
 	return {
@@ -333,6 +334,7 @@ export function formatTaskNext(state: TaskState): string {
 		lines.push("Mode: planning");
 		lines.push("Do now: task_plan");
 		lines.push("Do not call: task_update, task_evidence, task_complete");
+		lines.push(`Always allowed: ${SUPPORT_ACTIONS.join(", ")}`);
 		lines.push(
 			`Minimum params: ${formatMinimumParams(resume.minimumParams ?? {})}`,
 		);
@@ -344,6 +346,7 @@ export function formatTaskNext(state: TaskState): string {
 	lines.push(
 		`Only next tool: ${resume.recommendedTool ?? resume.nextAllowedActions[0] ?? "task_resume"}`,
 	);
+	lines.push(`Always allowed: ${SUPPORT_ACTIONS.join(", ")}`);
 	if (resume.currentStepId) {
 		lines.push(`Current step lock: ${resume.currentStepId}`);
 	}
@@ -406,18 +409,36 @@ function getCurrentOpenStep(task: Task): TaskStep | undefined {
 	);
 }
 
+function withSupportActions(actions: string[]): string[] {
+	return unique([...actions, ...SUPPORT_ACTIONS]);
+}
+
+function unique(values: string[]): string[] {
+	return [...new Set(values.filter(Boolean))];
+}
+
 function getNextAllowedActions(step: TaskStep, hasBlockers: boolean): string[] {
-	if (hasBlockers) return ["task_update"];
+	// Support actions (safe local reads, searches, instruction/tool discovery)
+	// never mutate repo or task state, so they are always admissible
+	// regardless of decomposition status or blockers - an agent must never
+	// need to decompose a step just to unlock a safe read.
+	if (hasBlockers) return withSupportActions(["task_update"]);
 	if (step.decompositionStatus !== "atomic") {
-		return ["task_decompose", "task_decision", "task_update"];
+		return withSupportActions([
+			"task_decompose",
+			"task_decision",
+			"task_update",
+		]);
 	}
 	if (step.evidenceRequired && step.evidenceIds.length === 0) {
-		return [...step.allowedActions, "task_verify_step", "task_evidence"].filter(
-			Boolean,
+		return withSupportActions(
+			[...step.allowedActions, "task_verify_step", "task_evidence"].filter(
+				Boolean,
+			),
 		);
 	}
-	return ["task_update", "task_evidence", ...step.allowedActions].filter(
-		Boolean,
+	return withSupportActions(
+		["task_update", "task_evidence", ...step.allowedActions].filter(Boolean),
 	);
 }
 
@@ -448,6 +469,13 @@ function getRecommendedTool(
 }
 
 function getBlockedTools(mode: TaskExecutionMode): string[] {
+	const blocked = getBlockedToolsForMode(mode);
+	// Support actions must never be blocked, no matter the mode - they are
+	// always-admissible reads/searches/discovery, not mutating task tools.
+	return blocked.filter((tool) => !isSupportAction(tool));
+}
+
+function getBlockedToolsForMode(mode: TaskExecutionMode): string[] {
 	if (mode === "planning")
 		return ["task_update", "task_evidence", "task_complete"];
 	if (mode === "blocked") return ["task_complete", "task_decompose"];
