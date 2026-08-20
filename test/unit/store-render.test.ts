@@ -302,6 +302,42 @@ describe("store replay and render helpers", () => {
 		expect(output).toContain("Do not call: task_update done, task_complete");
 	});
 
+	it("admits safe support actions on a non-atomic step with zero decomposition events (regression: previously required decomposing just to unlock a read)", () => {
+		// coarseEvent's single plan step is intentionally non-atomic
+		// (decompositionStatus "needs_breakdown") and no task.steps_decomposed
+		// event has been applied - depth stays 0. Before the fix,
+		// getNextAllowedActions returned only
+		// ["task_decompose", "task_decision", "task_update"] while a step
+		// needed breakdown, so an agent had no sanctioned way to do a safe
+		// read/search/instruction-load without first decomposing (this is
+		// exactly what forced the retro incident's depth-five decomposition).
+		const state = replayBranchEntries([
+			{ type: "custom", customType: TASK_EVENT_CUSTOM_TYPE, data: coarseEvent },
+		]).state;
+		expect(state.tasks.T2?.planSteps[0]?.decompositionStatus).toBe(
+			"needs_breakdown",
+		);
+		expect(state.tasks.T2?.planSteps[0]?.depth).toBe(0);
+		const resume = buildTaskResume(state);
+		expect(resume.currentStepId).toBe("T2-S1");
+		// The fix: support actions are available immediately, at depth 0,
+		// with no decomposition event required.
+		expect(resume.nextAllowedActions).toEqual(
+			expect.arrayContaining([
+				"read",
+				"search",
+				"grep",
+				"glob",
+				"list",
+				"instruction_load",
+				"tool_discovery",
+			]),
+		);
+		const output = formatTaskResume(state);
+		expect(output).toContain("read");
+		expect(output).toContain("instruction_load");
+	});
+
 	it("replays a compaction snapshot with resume fields for a decomposed step", () => {
 		const beforeSnapshot = replayBranchEntries([
 			{ type: "custom", customType: TASK_EVENT_CUSTOM_TYPE, data: coarseEvent },

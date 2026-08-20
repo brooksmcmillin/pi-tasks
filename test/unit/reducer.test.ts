@@ -339,7 +339,11 @@ describe("task reducer", () => {
 				(criterion) => criterion.status === "satisfied",
 			),
 		).toBe(true);
-		expect(state.tasks.T1.progress).toBeGreaterThan(1);
+		// Regression guard for the progress-inflation bug: satisfying
+		// acceptance criteria and adding evidence must not pull progress up
+		// while the task's single deliverable plan step remains open.
+		expect(state.tasks.T1.planSteps[0]?.status).not.toBe("done");
+		expect(state.tasks.T1.progress).toBe(1);
 		expect(state.tasks.T1.progress).toBeLessThan(100);
 	});
 
@@ -611,5 +615,214 @@ describe("task reducer", () => {
 	it("replay reconstructs the same state", () => {
 		const events = [created(), ...evidenceThenStepDone(), complete()];
 		expect(replayTaskEvents(events)).toEqual(apply(events));
+	});
+
+	describe("deliverable-sized plans and support-action mechanics", () => {
+		it("rejects decomposing into a pure read/instruction-load mechanic step instead of admitting it as a support action", () => {
+			// This is the retro incident's shape: an agent tries to gain
+			// permission to read mandatory workflow instructions by modeling
+			// the read itself as a nested plan step. That must be rejected -
+			// reads are always-admissible support actions, not plan steps.
+			expect(() =>
+				apply([
+					coarseCreated(),
+					{
+						...decompose(),
+						childSteps: [
+							{
+								text: "Read the mandatory workflow instructions",
+								expectedOutput: "Instructions are read",
+								criterionIds: ["T1-AC1"],
+								evidenceRequired: true,
+								allowedActions: ["read"],
+								decompositionStatus: "atomic",
+								granularityCheck: atomicCheck,
+							},
+							{
+								text: "Run package dry-run",
+								expectedOutput: "npm pack dry-run completes",
+								criterionIds: ["T1-AC2"],
+								evidenceRequired: true,
+								allowedActions: ["npm pack --dry-run"],
+								decompositionStatus: "atomic",
+								granularityCheck: atomicCheck,
+							},
+						],
+					},
+				]),
+			).toThrow(/read\/instruction-load mechanic/);
+		});
+
+		it("rejects decomposing into a pure commit mechanic step", () => {
+			expect(() =>
+				apply([
+					coarseCreated(),
+					{
+						...decompose(),
+						childSteps: [
+							{
+								text: "Create commit for release changes",
+								expectedOutput: "Commit is created",
+								criterionIds: ["T1-AC1"],
+								evidenceRequired: true,
+								allowedActions: ["git commit"],
+								decompositionStatus: "atomic",
+								granularityCheck: atomicCheck,
+							},
+							{
+								text: "Run package dry-run",
+								expectedOutput: "npm pack dry-run completes",
+								criterionIds: ["T1-AC2"],
+								evidenceRequired: true,
+								allowedActions: ["npm pack --dry-run"],
+								decompositionStatus: "atomic",
+								granularityCheck: atomicCheck,
+							},
+						],
+					},
+				]),
+			).toThrow(/commit mechanic/);
+		});
+
+		it("rejects a mechanic-only step at task creation, not only at decomposition", () => {
+			expect(() =>
+				apply([
+					{
+						...created(),
+						planSteps: [
+							{
+								text: "Read the deployment runbook",
+								expectedOutput: "Runbook is read",
+								criterionIds: ["T1-AC1", "T1-AC2"],
+								evidenceRequired: true,
+								allowedActions: ["read"],
+								decompositionStatus: "atomic",
+								granularityCheck: atomicCheck,
+							},
+						],
+					},
+				]),
+			).toThrow(/read\/instruction-load mechanic/);
+		});
+
+		it("caps derived progress by open deliverable plan steps, not by satisfied criteria or evidence alone", () => {
+			// Regression for the progress-inflation bug: a plan with three
+			// deliverable steps, only one of which is closed, but with all
+			// acceptance criteria satisfied and evidence recorded. Under the
+			// old equally-weighted average of (stepRatio, criteriaRatio, 1),
+			// this would compute to round(((1/3) + 1 + 1) / 3 * 99) = 77 - and
+			// with more criteria/evidence terms this climbs toward the
+			// retro's ~88% even though two of three deliverables are still
+			// open. The fix caps progress at the plan-step closure ratio.
+			const threeStepCreated: TaskEvent = {
+				...created(),
+				planSteps: [
+					{
+						text: "Ship the reducer change",
+						expectedOutput: "Reducer change is merged",
+						criterionIds: ["T1-AC1", "T1-AC2"],
+						evidenceRequired: true,
+						allowedActions: ["edit reducer"],
+						decompositionStatus: "atomic",
+						granularityCheck: atomicCheck,
+					},
+					{
+						text: "Ship the render change",
+						expectedOutput: "Render change is merged",
+						criterionIds: ["T1-AC1", "T1-AC2"],
+						evidenceRequired: true,
+						allowedActions: ["edit render"],
+						decompositionStatus: "atomic",
+						granularityCheck: atomicCheck,
+					},
+					{
+						text: "Open the pull request",
+						expectedOutput: "Pull request is open for review",
+						criterionIds: ["T1-AC1", "T1-AC2"],
+						evidenceRequired: true,
+						allowedActions: ["gh pr create"],
+						decompositionStatus: "atomic",
+						granularityCheck: atomicCheck,
+					},
+				],
+			};
+			const oldBuggyAverage = Math.round(((1 / 3 + 1 + 1) / 3) * 99);
+			expect(oldBuggyAverage).toBeGreaterThanOrEqual(75);
+
+			const afterFirstStep = apply([
+				threeStepCreated,
+				evidence({ stepIds: ["T1-S1"] }),
+				stepDone("T1-S1"),
+			]);
+			expect(
+				afterFirstStep.tasks.T1.acceptanceCriteria.every(
+					(criterion) => criterion.status === "satisfied",
+				),
+			).toBe(true);
+			expect(afterFirstStep.tasks.T1.evidence.length).toBeGreaterThan(0);
+			expect(
+				afterFirstStep.tasks.T1.planSteps.filter(
+					(step) => step.status !== "done" && step.status !== "skipped",
+				).length,
+			).toBe(2);
+			// Two of three deliverables remain open: progress must stay well
+			// below completion and below the old buggy average, not approach it.
+			expect(afterFirstStep.tasks.T1.progress).toBeLessThan(90);
+			expect(afterFirstStep.tasks.T1.progress).toBeLessThan(oldBuggyAverage);
+			expect(afterFirstStep.tasks.T1.progress).toBe(33);
+
+			const afterAllSteps = apply([
+				threeStepCreated,
+				evidence({ stepIds: ["T1-S1"] }),
+				stepDone("T1-S1"),
+				evidence({
+					id: "T1-evidence-2",
+					evidence: {
+						id: "E2",
+						type: "test",
+						level: "unit_test",
+						summary: "second step verified",
+						passed: true,
+						references: ["npm test"],
+						quality: {
+							source: "vitest",
+							reproducible: true,
+							verifier: "tool",
+							artifactRefs: ["npm test"],
+							observedOutput: "Test suite passed",
+						},
+					},
+					stepIds: ["T1-S2"],
+				}),
+				stepDone("T1-S2"),
+				evidence({
+					id: "T1-evidence-3",
+					evidence: {
+						id: "E3",
+						type: "test",
+						level: "unit_test",
+						summary: "third step verified",
+						passed: true,
+						references: ["npm test"],
+						quality: {
+							source: "vitest",
+							reproducible: true,
+							verifier: "tool",
+							artifactRefs: ["npm test"],
+							observedOutput: "Test suite passed",
+						},
+					},
+					stepIds: ["T1-S3"],
+				}),
+				stepDone("T1-S3"),
+			]);
+			// All deliverables closed: progress now approaches completion.
+			expect(
+				afterAllSteps.tasks.T1.planSteps.every(
+					(step) => step.status === "done",
+				),
+			).toBe(true);
+			expect(afterAllSteps.tasks.T1.progress).toBe(99);
+		});
 	});
 });
