@@ -51,7 +51,7 @@ export function isSupportAction(action: string): boolean {
 const READ_MECHANIC_PATTERNS = [
 	/^\s*read\b/i,
 	/^\s*(load|review)\s+(the\s+)?(mandatory\s+)?(workflow\s+)?instructions?\b/i,
-	/\binstruction(s)?\s+(load|loading)\b/i,
+	/^\s*(perform|run)?\s*instruction(s)?\s+(load|loading)\b/i,
 ];
 
 const COMMIT_MECHANIC_PATTERNS = [
@@ -63,6 +63,42 @@ const COMMIT_MECHANIC_PATTERNS = [
 export type MechanicStepKind = "read" | "commit";
 
 /**
+ * Words that, when present in the text remaining after stripping a matched
+ * mechanic lead phrase, indicate the step does substantive work beyond the
+ * mechanic itself (validation, parsing, further action, etc.) and therefore
+ * is NOT a pure mechanic step.
+ */
+const SUBSTANTIVE_REMAINDER_MARKERS =
+	/\b(and|then|but|so that|to ensure|,|;)\b|,/i;
+
+const ACTION_VERB_MARKERS =
+	/\b(validate|validating|confirm|confirming|generate|generating|parse|parsing|verify|verifying|check|checking|ensure|ensuring|create|creating|write|writing|implement|implementing|analyze|analyzing|summarize|summarizing|process|processing|compute|computing|apply|applying|update|updating|build|building|test|testing|review|reviewing|handle|handling)\b/i;
+
+/** Maximum word count for an allowed trailing object noun phrase (e.g. "the workflow instructions"). */
+const MAX_TRAILING_OBJECT_WORDS = 6;
+
+/**
+ * Given text and a lead-phrase regex anchored at the start, returns whether
+ * the ENTIRE text is essentially just that lead phrase plus, at most, a
+ * short trailing object noun phrase (e.g. "the mandatory workflow
+ * instructions", "the deployment runbook"). Any additional clause, verb, or
+ * conjunction in the remainder means the step is substantive deliverable
+ * work wearing the mechanic's opening words, not a pure mechanic.
+ */
+function isPureMechanic(trimmed: string, leadPattern: RegExp): boolean {
+	const match = trimmed.match(leadPattern);
+	if (!match) return false;
+	let remainder = trimmed.slice(match[0].length);
+	remainder = remainder.replace(/^[\s,:;.-]+/, "").replace(/[\s,:;.-]+$/, "");
+	if (remainder === "") return true;
+	if (SUBSTANTIVE_REMAINDER_MARKERS.test(remainder)) return false;
+	if (ACTION_VERB_MARKERS.test(remainder)) return false;
+	const words = remainder.split(/\s+/).filter(Boolean);
+	if (words.length > MAX_TRAILING_OBJECT_WORDS) return false;
+	return true;
+}
+
+/**
  * Classifies plan-step text whose entire content is a read/instruction-load
  * mechanic or a commit mechanic, rather than a deliverable unit of work.
  * Returns undefined when the text is not purely a mechanic action.
@@ -72,10 +108,14 @@ export function classifyMechanicStep(
 ): MechanicStepKind | undefined {
 	const trimmed = text.trim();
 	if (!trimmed) return undefined;
-	if (READ_MECHANIC_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+	if (
+		READ_MECHANIC_PATTERNS.some((pattern) => isPureMechanic(trimmed, pattern))
+	) {
 		return "read";
 	}
-	if (COMMIT_MECHANIC_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+	if (
+		COMMIT_MECHANIC_PATTERNS.some((pattern) => isPureMechanic(trimmed, pattern))
+	) {
 		return "commit";
 	}
 	return undefined;
