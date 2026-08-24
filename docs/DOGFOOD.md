@@ -4,9 +4,9 @@ This document tracks real Pi dogfood evidence. Skipped items are not counted as 
 
 ## Current Status
 
-Date: 2026-07-22
+Date: 2026-08-24
 
-Result: passed for the scoped MVP dogfood gate, release-hardening dogfood gate, weak-model release gate, installed-package smoke, 0.1.5 receiver-bound append compatibility release gate, and 0.2.0 state-event source/resume/fork/live-TTY/manual-compaction/installed-package smoke.
+Result: passed for the scoped MVP dogfood gate, release-hardening dogfood gate, weak-model release gate, installed-package smoke, 0.1.5 receiver-bound append compatibility release gate, 0.2.0 state-event source/resume/fork/live-TTY/manual-compaction/installed-package smoke, and 0.2.4 Issue #3 weak-model/Oh My Pi evidence-schema release gate.
 
 Environment:
 
@@ -68,6 +68,9 @@ Environment:
 - 0.2.0 large compaction session directory: `/private/tmp/pi-tasks-release-020-compact/sessions`
 - 0.2.0 large compaction session ID: `release-020-large-compact`
 - 0.2.0 large compaction seed prompt: `/private/tmp/pi-tasks-large-compact-prompt.md`
+- 0.2.4 Issue #3 weak-model session root: `/private/tmp/pi-tasks-issue3-ornith15-fixed`
+- 0.2.4 Issue #3 weak-model summary: `/private/tmp/pi-tasks-issue3-ornith15-fixed/summary2.json`
+- 0.2.4 Issue #3 weak-model model: `llama.cpp/bartowski/Ornith-1.5-35B-A3B-GGUF:Q6_K_L`
 
 ## Passed Scenarios
 
@@ -145,6 +148,11 @@ Environment:
 - Confirmed 0.2.0 live TTY `/tasks` renders active task `T1`; `/quit` exits cleanly.
 - Confirmed 0.2.0 installed tarball supports `import("pi-tasks")` and installed runtime publishes `pi-tasks:state` for `session_start` and `task_mutation`.
 - Confirmed 0.2.0 large-session manual `/compact` compacted from 56,203 tokens and emitted a `task_mutation` state event for active task `T1` without raw `events`.
+- Confirmed 0.2.4 Oh My Pi weak-model schema compatibility for `task_evidence type=command`: ornith1.5 recorded passing command evidence on the first attempt with `quality.command`, `quality.observedOutput`, `quality.artifactRefs`, and top-level `references`.
+- Confirmed 0.2.4 Issue #3 recovery flow: ornith1.5 intentionally submitted invalid command evidence once, then used the rejected call's copyable retry example shape to submit corrected evidence without duplicating the failed payload.
+- Confirmed 0.2.4 `task_evidence type=test` and `type=review` remain usable with the flat OMP-compatible quality schema; review evidence uses `quality.command` as a verification-action label rather than a fake shell command.
+- Confirmed 0.2.4 Traditional Chinese weak-model command evidence records successfully on the first attempt after `references` was made schema-required.
+- Confirmed 0.2.4 Issue #3 transcript analysis found zero duplicate `task_evidence` payload loops across final ornith1.5 sessions.
 
 ## Commands
 

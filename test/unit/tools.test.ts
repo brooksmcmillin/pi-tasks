@@ -96,6 +96,126 @@ describe("registered task tools", () => {
 		);
 	});
 
+	it("uses an omp-compatible task_evidence schema with required quality fields", () => {
+		const { tools } = createHarness();
+		const evidence = requireTool(tools, "task_evidence");
+		const schema = evidence.parameters as {
+			type?: string;
+			required?: string[];
+			properties?: Record<
+				string,
+				{
+					enum?: string[];
+					required?: string[];
+				}
+			>;
+		};
+
+		expect(schema.type).toBe("object");
+		expect(schema.required).toEqual(
+			expect.arrayContaining([
+				"task_id",
+				"type",
+				"level",
+				"summary",
+				"passed",
+				"references",
+				"quality",
+			]),
+		);
+		expect(schema.properties?.type?.enum).toEqual(
+			expect.arrayContaining(["command", "test", "dogfood", "review"]),
+		);
+		expect(schema.properties?.quality?.required).toEqual(
+			expect.arrayContaining([
+				"source",
+				"reproducible",
+				"verifier",
+				"command",
+				"artifactRefs",
+				"observedOutput",
+			]),
+		);
+		expect(schema).not.toHaveProperty("oneOf");
+	});
+
+	it("returns a copyable task_evidence example after quality rejection", async () => {
+		const { tools, ctx } = createHarness();
+		const plan = requireTool(tools, "task_plan");
+		const evidence = requireTool(tools, "task_evidence");
+
+		await execute(
+			plan,
+			{
+				title: "Evidence recovery",
+				objective: "Verify task_evidence recovery example",
+				acceptance_criteria: ["Recovery example is returned"],
+				plan_steps: [
+					{
+						text: "Record command evidence",
+						expectedOutput: "Rejected evidence includes a corrected example",
+						criterionIds: ["T1-AC1"],
+						evidenceRequired: true,
+						allowedActions: ["task_evidence"],
+						decompositionStatus: "atomic",
+						granularityCheck: {
+							isAtomic: true,
+							reason: "Single evidence recording call",
+							canBeDoneInOneAgentAction: true,
+							hasSingleObservableOutput: true,
+							hasSingleVerificationMethod: true,
+							hasNoHiddenSubtasks: true,
+						},
+					},
+				],
+				activate: true,
+			},
+			ctx,
+		);
+
+		const rejected = await execute(
+			evidence,
+			{
+				task_id: "T1",
+				type: "command",
+				level: "e2e_smoke",
+				summary: "npm test passed",
+				passed: "true",
+				references: ["npm test"],
+				criterion_ids: ["T1-AC1"],
+				step_ids: ["T1-S1"],
+				quality: {
+					source: "local shell",
+					reproducible: true,
+					verifier: "tool",
+					artifactRefs: ["npm test"],
+				},
+			},
+			ctx,
+		);
+
+		expect(rejected.isError).toBe(true);
+		expect(rejected.content[0]?.text).toContain(
+			"Minimal working task_evidence params",
+		);
+		expect(rejected.content[0]?.text).toContain('"command": "npm test"');
+		expect(rejected.content[0]?.text).toContain(
+			'"observedOutput": "<concise observed output',
+		);
+		expect(rejected.details).toMatchObject({
+			rejected: true,
+			retry_example: {
+				task_id: "T1",
+				type: "command",
+				quality: {
+					command: "npm test",
+					observedOutput:
+						"<concise observed output from the command/test/dogfood run>",
+				},
+			},
+		});
+	});
+
 	it("preserves ExtensionAPI method receivers when appending task events", async () => {
 		const { tools, ctx, store } = createHarness();
 		const plan = requireTool(tools, "task_plan");
