@@ -6,6 +6,7 @@ TMP_ROOT="${TMPDIR:-/tmp}/pi-tasks-release-check"
 NPM_CACHE="${TMP_ROOT}/npm-cache"
 PACK_DIR="${TMP_ROOT}/pack"
 CONSUMER_DIR="${TMP_ROOT}/consumer"
+TRACKED_DIR="${TMP_ROOT}/tracked-checkout"
 
 cd "${ROOT_DIR}"
 
@@ -24,11 +25,28 @@ npm test
 echo "==> build"
 npm run build
 
+echo "==> committed dist parity"
+DIST_CHANGES="$(git diff --name-only -- dist)"
+DIST_UNTRACKED="$(git ls-files --others --exclude-standard -- dist)"
+if [[ -n "${DIST_CHANGES}" || -n "${DIST_UNTRACKED}" ]]; then
+	git status --short --untracked-files=all -- dist >&2
+	echo "dist/ does not match the generated build output; stage the rebuilt artifacts" >&2
+	exit 1
+fi
+
 echo "==> source import smoke"
 node --experimental-strip-types -e "import('./index.ts')"
 
 echo "==> dist import smoke"
 node -e "import('./dist/index.js')"
+
+echo "==> tracked-checkout dist import smoke"
+mkdir -p "${TRACKED_DIR}"
+git checkout-index --all --prefix="${TRACKED_DIR}/"
+(
+	cd "${TRACKED_DIR}"
+	node -e "import('./dist/index.js')"
+)
 
 echo "==> npm pack dry run"
 env npm_config_cache="${NPM_CACHE}" npm pack --dry-run

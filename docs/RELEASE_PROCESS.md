@@ -15,8 +15,10 @@ Do not publish an npm release until every gate below is recorded with evidence.
 - `npm run check`
 - `npm test`
 - `npm run build`
+- confirm the generated `dist/` output matches the Git index with no untracked modules
 - `node --experimental-strip-types -e "import('./index.ts')"`
 - `node -e "import('./dist/index.js')"`
+- import `dist/index.js` from an index-only checkout that excludes untracked files
 - `npm pack --dry-run`
 - clean tarball install plus `node -e "import('pi-tasks')"`
 - `npm audit --audit-level=low`
