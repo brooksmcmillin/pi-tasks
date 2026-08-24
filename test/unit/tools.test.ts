@@ -96,6 +96,149 @@ describe("registered task tools", () => {
 		);
 	});
 
+	it("uses an omp-compatible task_evidence schema with required quality fields", () => {
+		const { tools } = createHarness();
+		const evidence = requireTool(tools, "task_evidence");
+		const schema = evidence.parameters as {
+			type?: string;
+			required?: string[];
+			properties?: Record<
+				string,
+				{
+					enum?: string[];
+					required?: string[];
+				}
+			>;
+		};
+
+		expect(schema.type).toBe("object");
+		expect(schema.required).toEqual(
+			expect.arrayContaining([
+				"task_id",
+				"type",
+				"level",
+				"summary",
+				"passed",
+				"references",
+				"quality",
+			]),
+		);
+		expect(schema.properties?.type?.enum).toEqual(
+			expect.arrayContaining(["command", "test", "dogfood", "review"]),
+		);
+		expect(schema.properties?.quality?.required).toEqual(
+			expect.arrayContaining([
+				"source",
+				"reproducible",
+				"verifier",
+				"command",
+				"artifactRefs",
+				"observedOutput",
+			]),
+		);
+		expect(schema).not.toHaveProperty("oneOf");
+	});
+
+	it("requires traceable evidence for atomic step verification", () => {
+		const { tools } = createHarness();
+		const verify = requireTool(tools, "task_verify_step");
+		const schema = verify.parameters as {
+			required?: string[];
+			properties?: Record<string, { required?: string[] }>;
+		};
+
+		expect(schema.required).toEqual(
+			expect.arrayContaining(["references", "quality"]),
+		);
+		expect(schema.properties?.quality?.required).toEqual(
+			expect.arrayContaining([
+				"source",
+				"reproducible",
+				"verifier",
+				"command",
+				"artifactRefs",
+				"observedOutput",
+			]),
+		);
+	});
+
+	it("returns a copyable task_evidence example after quality rejection", async () => {
+		const { tools, ctx } = createHarness();
+		const plan = requireTool(tools, "task_plan");
+		const evidence = requireTool(tools, "task_evidence");
+
+		await execute(
+			plan,
+			{
+				title: "Evidence recovery",
+				objective: "Verify task_evidence recovery example",
+				acceptance_criteria: ["Recovery example is returned"],
+				plan_steps: [
+					{
+						text: "Record command evidence",
+						expectedOutput: "Rejected evidence includes a corrected example",
+						criterionIds: ["T1-AC1"],
+						evidenceRequired: true,
+						allowedActions: ["task_evidence"],
+						decompositionStatus: "atomic",
+						granularityCheck: {
+							isAtomic: true,
+							reason: "Single evidence recording call",
+							canBeDoneInOneAgentAction: true,
+							hasSingleObservableOutput: true,
+							hasSingleVerificationMethod: true,
+							hasNoHiddenSubtasks: true,
+						},
+					},
+				],
+				activate: true,
+			},
+			ctx,
+		);
+
+		const rejected = await execute(
+			evidence,
+			{
+				task_id: "T1",
+				type: "command",
+				level: "e2e_smoke",
+				summary: "npm test passed",
+				passed: "true",
+				references: ["npm test"],
+				criterion_ids: ["T1-AC1"],
+				step_ids: ["T1-S1"],
+				quality: {
+					source: "local shell",
+					reproducible: true,
+					verifier: "tool",
+					artifactRefs: ["npm test"],
+				},
+			},
+			ctx,
+		);
+
+		expect(rejected.isError).toBe(true);
+		expect(rejected.content[0]?.text).toContain(
+			"Minimal working task_evidence params",
+		);
+		expect(rejected.content[0]?.text).toContain('"command": "npm test"');
+		expect(rejected.content[0]?.text).toContain(
+			'"observedOutput": "<concise observed output',
+		);
+		expect(rejected.details).toMatchObject({
+			rejected: true,
+			retry_example: {
+				task_id: "T1",
+				type: "command",
+				quality: {
+					command: "npm test",
+					observedOutput:
+						"<concise observed output from the command/test/dogfood run>",
+				},
+			},
+		});
+	});
+
 	it("preserves ExtensionAPI method receivers when appending task events", async () => {
 		const { tools, ctx, store } = createHarness();
 		const plan = requireTool(tools, "task_plan");
@@ -275,9 +418,9 @@ describe("registered task tools", () => {
 		expect(planSteps.length).toBeGreaterThan(0);
 		for (const step of planSteps) {
 			expect(typeof step.text).toBe("string");
-			expect(step.text.length).toBeGreaterThanOrEqual(8);
+			expect((step.text as string).length).toBeGreaterThanOrEqual(8);
 			expect(typeof step.expectedOutput).toBe("string");
-			expect(step.expectedOutput.length).toBeGreaterThanOrEqual(12);
+			expect((step.expectedOutput as string).length).toBeGreaterThanOrEqual(12);
 			expect(step.evidenceRequired).toBe(true);
 			expect(Array.isArray(step.allowedActions)).toBe(true);
 			const allowed = step.allowedActions as string[];
@@ -708,10 +851,10 @@ describe("registered task tools", () => {
 			ctx,
 		);
 		expect(result.content[0]?.text).toContain("Checkpointed");
-		expect(entries.at(-1)?.type).toBe("task.snapshot");
+		const latestEntry = entries.at(-1);
+		expect(latestEntry?.type).toBe("task.snapshot");
 		expect(
-			entries.at(-1)?.type === "task.snapshot" &&
-				entries.at(-1).resume.currentStepId,
+			latestEntry?.type === "task.snapshot" && latestEntry.resume.currentStepId,
 		).toBe("T1-S1");
 	});
 });

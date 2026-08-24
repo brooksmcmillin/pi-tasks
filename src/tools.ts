@@ -1,4 +1,8 @@
-import { createEventId, SequentialIdGenerator } from "./ids.ts";
+import {
+	createEventId,
+	type IdGenerator,
+	SequentialIdGenerator,
+} from "./ids.ts";
 import type {
 	AcceptanceCriterion,
 	EvidenceQuality,
@@ -122,7 +126,7 @@ interface TaskEvidenceParams extends Record<string, unknown> {
 	level: VerificationLevel;
 	summary: string;
 	passed: "true" | "false" | "unknown";
-	references?: string[];
+	references: string[];
 	criterion_ids?: string[];
 	step_ids?: string[];
 	quality?: EvidenceQuality;
@@ -135,9 +139,9 @@ interface TaskVerifyStepParams extends Record<string, unknown> {
 	type: EvidenceType;
 	level: VerificationLevel;
 	summary: string;
-	references?: string[];
+	references: string[];
 	criterion_ids?: string[];
-	quality?: EvidenceQuality;
+	quality: EvidenceQuality;
 }
 
 interface TaskDecisionParams extends Record<string, unknown> {
@@ -206,7 +210,7 @@ function formatToolDescription(
 export function registerTaskTools(
 	pi: ExtensionAPI,
 	store: TaskRuntimeStore,
-	idGenerator = new SequentialIdGenerator(),
+	idGenerator: IdGenerator = new SequentialIdGenerator(),
 ): void {
 	registerGuidedTool<TaskPlanParams>(pi, {
 		name: "task_plan",
@@ -632,25 +636,9 @@ export function registerTaskTools(
 			"Passing non-note evidence must use a verification level stronger than not_verified.",
 			"Attach criterion IDs when evidence proves specific acceptance criteria.",
 			"Attach step_ids when evidence proves specific atomic steps, especially when multiple steps share the same criterion.",
-			"Provide quality.source, quality.reproducible, quality.verifier, quality.artifactRefs, and observedOutput for test/command/dogfood evidence.",
+			"Always provide references plus quality.source, quality.reproducible, quality.verifier, quality.command, quality.artifactRefs, and quality.observedOutput; for non-command evidence, quality.command should name the verification action.",
 		],
-		parameters: Type.Object({
-			task_id: Type.String(),
-			type: Type.Enum(EVIDENCE_TYPES),
-			level: Type.Enum(VERIFICATION_LEVELS),
-			summary: Type.String(),
-			passed: Type.Enum(["true", "false", "unknown"]),
-			references: Type.Optional(Type.Array(Type.String())),
-			criterion_ids: Type.Optional(Type.Array(Type.String())),
-			step_ids: Type.Optional(Type.Array(Type.String())),
-			quality: Type.Optional(evidenceQualitySchema()),
-			override_reason: Type.Optional(
-				Type.String({
-					description:
-						"Required only when attaching evidence outside the current step lock.",
-				}),
-			),
-		}),
+		parameters: taskEvidenceParametersSchema(),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 			const duplicate = findDuplicateEvidenceForParams(
 				store.getState().tasks[params.task_id],
@@ -693,12 +681,13 @@ export function registerTaskTools(
 		name: "task_verify_step",
 		label: "Verify Task Step",
 		description:
-			"Atomically record passing verification evidence and complete the current atomic plan step.",
+			"Atomically record passing verification evidence with traceable references and complete quality fields, then complete the current atomic plan step.",
 		promptSnippet:
 			"Record successful evidence and advance the current atomic pi-tasks step in one operation",
 		promptGuidelines: [
 			"Use task_verify_step for the successful happy path after verifying the current atomic step.",
 			"The tool records passing evidence, links it to the step and criteria, completes the step, and activates the next step atomically.",
+			"Always provide references plus quality.source, quality.reproducible, quality.verifier, quality.command, quality.artifactRefs, and quality.observedOutput; for non-command evidence, quality.command should name the verification action.",
 			"Use task_evidence instead for failed or unknown evidence, non-step evidence, or evidence that must not advance the plan.",
 		],
 		parameters: Type.Object({
@@ -707,9 +696,9 @@ export function registerTaskTools(
 			type: Type.Enum(EVIDENCE_TYPES),
 			level: Type.Enum(VERIFICATION_LEVELS),
 			summary: Type.String(),
-			references: Type.Optional(Type.Array(Type.String())),
+			references: Type.Array(Type.String()),
 			criterion_ids: Type.Optional(Type.Array(Type.String())),
-			quality: Type.Optional(evidenceQualitySchema()),
+			quality: evidenceQualitySchema(),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 			const state = store.getState();
@@ -720,12 +709,12 @@ export function registerTaskTools(
 				level: params.level,
 				summary: params.summary,
 				passed: "true",
-				...(params.references ? { references: params.references } : {}),
+				references: params.references,
 				...(params.criterion_ids
 					? { criterion_ids: params.criterion_ids }
 					: {}),
 				step_ids: [params.step_id],
-				...(params.quality ? { quality: params.quality } : {}),
+				quality: params.quality,
 			};
 			const duplicate = findDuplicateEvidenceForParams(task, evidenceParams);
 			const step = task?.planSteps.find(
@@ -749,7 +738,7 @@ export function registerTaskTools(
 						level: params.level,
 						summary: params.summary,
 						passed: true,
-						references: params.references ?? [],
+						references: params.references,
 					})
 				: undefined;
 			if (
@@ -775,8 +764,8 @@ export function registerTaskTools(
 					level: params.level,
 					summary: params.summary,
 					passed: true,
-					references: params.references ?? [],
-					...(params.quality ? { quality: params.quality } : {}),
+					references: params.references,
+					quality: params.quality,
 				},
 				...(params.criterion_ids ? { criterionIds: params.criterion_ids } : {}),
 			});
@@ -893,14 +882,40 @@ function granularityCheckSchema() {
 	});
 }
 
+function taskEvidenceParametersSchema() {
+	return Type.Object({
+		task_id: Type.String(),
+		type: Type.Enum(EVIDENCE_TYPES),
+		level: Type.Enum(VERIFICATION_LEVELS),
+		summary: Type.String(),
+		passed: Type.Enum(["true", "false", "unknown"] as const),
+		references: Type.Array(Type.String()),
+		criterion_ids: Type.Optional(Type.Array(Type.String())),
+		step_ids: Type.Optional(Type.Array(Type.String())),
+		quality: evidenceQualitySchema(),
+		override_reason: Type.Optional(
+			Type.String({
+				description:
+					"Required only when attaching evidence outside the current step lock.",
+			}),
+		),
+	});
+}
+
 function evidenceQualitySchema() {
 	return Type.Object({
 		source: Type.String(),
 		reproducible: Type.Boolean(),
 		verifier: Type.Enum(["agent", "tool", "user", "external"] as const),
-		command: Type.Optional(Type.String()),
+		command: Type.String({
+			description:
+				"Exact command for command evidence; for non-command evidence, name the verification action.",
+		}),
 		artifactRefs: Type.Array(Type.String()),
-		observedOutput: Type.Optional(Type.String()),
+		observedOutput: Type.String({
+			description:
+				"Concise observed output proving what happened; put long logs in artifactRefs.",
+		}),
 	});
 }
 
@@ -926,7 +941,7 @@ function appendAndReport(
 		);
 	} catch (error) {
 		const resume = formatTaskResume(store.getState());
-		const recovery = buildRejectionRecovery(error, store.getState());
+		const recovery = buildRejectionRecovery(error, store.getState(), event);
 		return {
 			...textResult(
 				[
@@ -936,6 +951,15 @@ function appendAndReport(
 					`- retry_with: ${recovery.retry_with}`,
 					`- do_not_retry_same_call: ${recovery.do_not_retry_same_call}`,
 					`- reason: ${recovery.reason}`,
+					...(recovery.retry_example
+						? [
+								"",
+								"Minimal working task_evidence params:",
+								"```json",
+								JSON.stringify(recovery.retry_example, null, 2),
+								"```",
+							]
+						: []),
 					"",
 					"Recovery guidance:",
 					resume,
@@ -947,8 +971,13 @@ function appendAndReport(
 	}
 }
 
-function buildRejectionRecovery(error: unknown, state: TaskState) {
+function buildRejectionRecovery(
+	error: unknown,
+	state: TaskState,
+	event?: TaskEvent,
+) {
 	const resume = buildTaskResume(state);
+	const retryExample = buildEvidenceRetryExample(event);
 	return {
 		rejected: true,
 		reason: errorText(error),
@@ -956,8 +985,59 @@ function buildRejectionRecovery(error: unknown, state: TaskState) {
 			resume.recommendedTool ?? resume.nextAllowedActions[0] ?? "task_resume",
 		minimum_params: resume.minimumParams ?? {},
 		do_not_retry_same_call: true,
+		...(retryExample ? { retry_example: retryExample } : {}),
 		resume,
 	};
+}
+
+function buildEvidenceRetryExample(
+	event: TaskEvent | undefined,
+): Record<string, unknown> | undefined {
+	if (event?.type !== "task.evidence_added") return undefined;
+	if (
+		event.evidence.type !== "command" &&
+		event.evidence.type !== "test" &&
+		event.evidence.type !== "dogfood"
+	) {
+		return undefined;
+	}
+	const references =
+		event.evidence.references.length > 0
+			? event.evidence.references
+			: ["<artifact-or-command-reference>"];
+	const artifactRefs =
+		event.evidence.quality?.artifactRefs &&
+		event.evidence.quality.artifactRefs.length > 0
+			? event.evidence.quality.artifactRefs
+			: references;
+	const quality: Record<string, unknown> = {
+		source: event.evidence.quality?.source?.trim() || event.evidence.type,
+		reproducible: true,
+		verifier: event.evidence.quality?.verifier ?? "tool",
+		artifactRefs,
+		observedOutput:
+			event.evidence.quality?.observedOutput?.trim() ||
+			"<concise observed output from the command/test/dogfood run>",
+	};
+	if (event.evidence.type === "command") {
+		quality.command =
+			event.evidence.quality?.command?.trim() ||
+			references[0] ||
+			"<exact command>";
+	}
+	const example: Record<string, unknown> = {
+		task_id: event.taskId,
+		type: event.evidence.type,
+		level: event.evidence.level,
+		summary: event.evidence.summary,
+		passed: String(event.evidence.passed),
+		references,
+		quality,
+	};
+	if (event.criterionIds) example.criterion_ids = event.criterionIds;
+	if (event.stepIds) example.step_ids = event.stepIds;
+	if (event.overrideReason) example.override_reason = event.overrideReason;
+	return example;
 }
 
 function selectTask(state: TaskState, taskId?: string): Task | undefined {

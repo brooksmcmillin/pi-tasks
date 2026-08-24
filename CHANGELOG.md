@@ -11,6 +11,11 @@
 - `pi-tasks:state` now publishes a version-2 compact delta/resume contract instead of a full task snapshot. The contract contains the active task, current atomic step, unresolved blockers, evidence gaps, and state version.
 - Weak-model resume guidance now recommends the compound verification tool for the successful current-step path while retaining `task_evidence` and `task_update` for failure, backfill, skip, blocker, and scope workflows.
 
+## [0.2.4] - 2026-08-24
+
+### Fixed
+- Aligned `task_evidence` schema with runtime evidence quality gates for weak-model and Oh My Pi compatibility by requiring traceability references and complete quality fields, and preserving copyable retry examples for rejected command/test/dogfood evidence.
+
 ## [0.2.3] - 2026-08-04
 
 ### Fixed

@@ -1,4 +1,5 @@
 import { createEmptyState, } from "./model.js";
+import { classifyMechanicStep, mechanicStepMessage, } from "./support-actions.js";
 const TERMINAL_STATUSES = ["done", "cancelled"];
 const MAX_DECOMPOSITION_DEPTH = 4;
 const MIN_PLAN_QUALITY_SCORE = 80;
@@ -428,6 +429,10 @@ function createPlanSteps(taskId, planSteps, initialSteps, criterionIds, createdA
         if (!expectedOutput) {
             throw new TaskTransitionError("Plan step expectedOutput is required");
         }
+        const mechanicKind = classifyMechanicStep(text);
+        if (mechanicKind) {
+            throw new TaskTransitionError(mechanicStepMessage(mechanicKind, text));
+        }
         const linkedCriteria = unique(step.criterionIds ?? criterionIds);
         for (const criterionId of linkedCriteria) {
             if (!criterionIds.includes(criterionId)) {
@@ -808,12 +813,20 @@ function recalculateProgress(task) {
         task.progress = derived;
 }
 function deriveProgress(task) {
-    const scores = [];
+    const floor = task.status === "active" ? 1 : 0;
     const planSteps = task.planSteps ?? [];
     if (planSteps.length > 0) {
+        // Deliverable plan-step closure is the dominant, limiting factor for
+        // progress: acceptance criteria can be safety invariants unrelated to
+        // deliverable completion, and "evidence exists" alone proves nothing
+        // about how much deliverable work remains. Neither may pull progress
+        // up past what the open plan steps justify.
         const closedSteps = planSteps.filter((step) => step.status === "done" || step.status === "skipped").length;
-        scores.push(closedSteps / planSteps.length);
+        const stepRatio = closedSteps / planSteps.length;
+        return Math.max(floor, Math.min(99, Math.round(stepRatio * 99)));
     }
+    // No plan steps: fall back to the previous criteria/evidence-based logic.
+    const scores = [];
     if (task.acceptanceCriteria.length > 0) {
         const closedCriteria = task.acceptanceCriteria.filter((criterion) => criterion.status === "satisfied" || criterion.status === "skipped").length;
         scores.push(closedCriteria / task.acceptanceCriteria.length);
@@ -821,9 +834,9 @@ function deriveProgress(task) {
     if (task.evidence.length > 0)
         scores.push(1);
     if (scores.length === 0)
-        return task.status === "active" ? 1 : 0;
+        return floor;
     const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
-    return Math.min(99, Math.max(task.status === "active" ? 1 : 0, Math.round(average * 99)));
+    return Math.max(floor, Math.min(99, Math.round(average * 99)));
 }
 function validateEvidence(evidence) {
     if (!evidence.summary.trim())

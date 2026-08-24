@@ -1,3 +1,4 @@
+import { isSupportAction, SUPPORT_ACTIONS } from "./support-actions.js";
 const STATUS_ORDER = [
     "active",
     "blocked",
@@ -138,7 +139,7 @@ export function buildTaskResume(state) {
             evidenceIds: [],
             criterionIds: [],
             allowedActions: [],
-            nextAllowedActions: ["task_plan"],
+            nextAllowedActions: withSupportActions(["task_plan"]),
             verificationGaps: [],
             blockers: [],
             decisions: [],
@@ -156,7 +157,7 @@ export function buildTaskResume(state) {
         .map((decision) => `${decision.id}: ${compactDetail(decision.question)} -> ${compactDetail(decision.decision)}`);
     const nextAllowedActions = step
         ? getNextAllowedActions(step, blockers.length > 0)
-        : ["task_complete"];
+        : withSupportActions(["task_complete"]);
     const mode = getExecutionMode(task, step, blockers.length > 0, gaps);
     const recommendedTool = getRecommendedTool(mode, step);
     return {
@@ -255,6 +256,7 @@ export function formatTaskNext(state) {
         lines.push("Mode: planning");
         lines.push("Do now: task_plan");
         lines.push("Do not call: task_update, task_evidence, task_complete");
+        lines.push(`Always allowed: ${SUPPORT_ACTIONS.join(", ")}`);
         lines.push(`Minimum params: ${formatMinimumParams(resume.minimumParams ?? {})}`);
         lines.push(`Stop condition: ${resume.resumeInstruction}`);
         return lines.join("\n");
@@ -262,6 +264,7 @@ export function formatTaskNext(state) {
     lines.push(`Task: ${resume.taskId} - ${resume.title}`);
     lines.push(`Mode: ${resume.mode ?? "executing"}`);
     lines.push(`Only next tool: ${resume.recommendedTool ?? resume.nextAllowedActions[0] ?? "task_resume"}`);
+    lines.push(`Always allowed: ${SUPPORT_ACTIONS.join(", ")}`);
     if (resume.currentStepId) {
         lines.push(`Current step lock: ${resume.currentStepId}`);
     }
@@ -313,16 +316,30 @@ export function getVerificationGaps(task) {
 function getCurrentOpenStep(task) {
     return task.planSteps.find((step) => step.status !== "done" && step.status !== "skipped");
 }
+function withSupportActions(actions) {
+    return unique([...actions, ...SUPPORT_ACTIONS]);
+}
+function unique(values) {
+    return [...new Set(values.filter(Boolean))];
+}
 function getNextAllowedActions(step, hasBlockers) {
+    // Support actions (safe local reads, searches, instruction/tool discovery)
+    // never mutate repo or task state, so they are always admissible
+    // regardless of decomposition status or blockers - an agent must never
+    // need to decompose a step just to unlock a safe read.
     if (hasBlockers)
-        return ["task_update"];
+        return withSupportActions(["task_update"]);
     if (step.decompositionStatus !== "atomic") {
-        return ["task_decompose", "task_decision", "task_update"];
+        return withSupportActions([
+            "task_decompose",
+            "task_decision",
+            "task_update",
+        ]);
     }
     if (step.evidenceRequired && step.evidenceIds.length === 0) {
-        return [...step.allowedActions, "task_verify_step", "task_evidence"].filter(Boolean);
+        return withSupportActions([...step.allowedActions, "task_verify_step", "task_evidence"].filter(Boolean));
     }
-    return ["task_update", "task_evidence", ...step.allowedActions].filter(Boolean);
+    return withSupportActions(["task_update", "task_evidence", ...step.allowedActions].filter(Boolean));
 }
 function getExecutionMode(task, step, hasBlockers, gaps) {
     if (hasBlockers || task.status === "blocked")
@@ -349,6 +366,12 @@ function getRecommendedTool(mode, step) {
     return step?.allowedActions[0] ?? "task_update";
 }
 function getBlockedTools(mode) {
+    const blocked = getBlockedToolsForMode(mode);
+    // Support actions must never be blocked, no matter the mode - they are
+    // always-admissible reads/searches/discovery, not mutating task tools.
+    return blocked.filter((tool) => !isSupportAction(tool));
+}
+function getBlockedToolsForMode(mode) {
     if (mode === "planning")
         return ["task_update", "task_evidence", "task_complete"];
     if (mode === "blocked")
