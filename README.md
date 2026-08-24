@@ -246,7 +246,7 @@ publication and explicit full-state recovery delivery, including payload size.
 
 Local verification suite:
 
-- `npm run release:check` (typecheck + lint + test + build + import smoke + pack + audit)
+- `npm run release:check` (typecheck + lint + test + build parity + tracked-checkout import smoke + pack + audit)
 - Real Pi dogfood passed on 2026-06-18, 2026-06-19, 2026-06-20, and 2026-06-23
 
 Dogfood coverage includes: task lifecycle, evidence enforcement, ordered step rejection, structured plan steps, recursive decomposition, compaction-safe resume, duplicate evidence rejection, blocked task display, forked-session replay, tarball install, and weak-model smoke.
