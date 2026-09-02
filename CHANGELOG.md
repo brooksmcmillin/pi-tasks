@@ -3,11 +3,14 @@
 ## Unreleased
 
 ### Added
+- Added backward-compatible acceptance and diagnostic evidence roles. Diagnostic evidence may support diagnostic steps and remains visible without changing criterion status or satisfying task completion; evidence without a role defaults to acceptance.
+- Added explicit acceptance-evidence supersession through `task_evidence.supersedes_evidence_ids` plus a required reason. Passing acceptance replacements retain failed records, expose both directions of the relationship, and prevent only explicitly superseded failures from blocking completion.
 - Added `task_verify_step`, which records passing evidence and completes the current atomic step through one persisted `task.step_verified` event with idempotent exact retries.
 - Added `pi-tasks:telemetry` events for compact context publication and explicit full-state recovery delivery.
 - Added `task_list({ include_history: true })` as an explicit full-state recovery path.
 
 ### Changed
+- Tool guidance now tells agents to record expected or remediated fail-first results as diagnostic evidence and attach passing acceptance evidence for step and criterion completion.
 - `pi-tasks:state` now publishes a version-2 compact delta/resume contract instead of a full task snapshot. The contract contains the active task, current atomic step, unresolved blockers, evidence gaps, and state version.
 - Weak-model resume guidance now recommends the compound verification tool for the successful current-step path while retaining `task_evidence` and `task_update` for failure, backfill, skip, blocker, and scope workflows.
 

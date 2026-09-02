@@ -223,6 +223,16 @@ A task cannot be marked `done` unless it has completion evidence. Evidence may i
 - explicit user acceptance,
 - or documented reason why verification was not possible.
 
+Evidence defaults to the acceptance role for backward compatibility. Expected
+or remediated fail-first observations use the diagnostic role: they remain visible
+and may retain links for context or support diagnostic steps, but they do not
+change criterion status or satisfy task completion. Completion considers only
+active, unsuperseded acceptance
+evidence. A failed acceptance record may be ignored only after a passing acceptance
+replacement explicitly supersedes its evidence ID with a non-empty reason. Both
+records remain visible, and later passing evidence never supersedes failures
+implicitly.
+
 ### 6.3 Agent-Usable, Not Just Human-Readable
 
 The data model must be structured enough for tools to update safely, query reliably, and produce deterministic summaries.
@@ -276,11 +286,14 @@ Optional fields:
 Fields:
 
 - `type`: `test | command | review | file | commit | dogfood | user_acceptance | external | note`.
+- `role`: `acceptance | diagnostic`, defaulting to `acceptance` when omitted.
 - `summary`: concise description.
 - `level`: `static_read | unit_test | integration_test | e2e_smoke | release_grade_e2e | pi_dogfood | external_unverified`.
 - `passed`: boolean or `unknown`.
 - `timestamp`.
 - `references`: file paths, commit SHAs, command names, or URLs.
+- `supersedes_evidence_ids`: explicit failed evidence IDs replaced by this passing record.
+- `reason`: required explanation for explicit supersession.
 
 ### 7.3 Decision Record
 
@@ -386,10 +399,19 @@ Inputs:
 
 - task ID,
 - evidence type,
+- optional evidence role,
 - verification level,
 - passed,
 - summary,
-- references.
+- references,
+- optional superseded evidence IDs,
+- required reason when superseding evidence.
+
+Rules:
+
+- Diagnostic evidence may support diagnostic steps but does not change criterion status or satisfy task completion.
+- Only passing acceptance evidence may supersede an existing failed acceptance record.
+- Supersession is explicit and preserves both evidence records.
 
 #### `task_complete`
 
@@ -405,6 +427,10 @@ Inputs:
 Rules:
 
 - Reject completion if no evidence exists unless `force_with_reason` is supplied.
+- Evaluate only active, unsuperseded acceptance evidence.
+- Reject diagnostic-only support for criteria or task completion.
+- Reject non-superseded failed acceptance evidence linked to satisfied criteria or completed steps.
+- Ignore only acceptance failures named by a valid explicit passing acceptance replacement.
 - If forced, result must clearly state that completion is not fully verified.
 
 #### `task_decision`

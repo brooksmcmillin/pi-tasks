@@ -114,7 +114,7 @@ the registered tool description while still keeping `promptSnippet` and
 | `task_decompose` | Break non-atomic steps into child steps |
 | `task_list` | List tasks with optional filtering |
 | `task_update` | Advance steps, record activity, flag scope drift |
-| `task_evidence` | Attach verification evidence to steps/criteria |
+| `task_evidence` | Attach acceptance or diagnostic evidence and supersede linked failures |
 | `task_verify_step` | Atomically attach passing evidence and complete the current atomic step |
 | `task_decision` | Record explicit user decisions |
 | `task_complete` | Close a task (only if all gates pass) |
@@ -126,12 +126,48 @@ the registered tool description while still keeping `promptSnippet` and
 - No evidence exists
 - Any ordered plan step is still active or pending
 - Required criteria are not satisfied
-- A criterion is satisfied without evidence
+- A criterion is satisfied without active acceptance evidence
+- A completed evidence-required step lacks evidence
+- A completed step or satisfied criterion has a non-superseded failing acceptance record
+- Completion evidence contains no active acceptance record
 - Unresolved blockers remain
 - Unresolved scope drift warnings remain
 - All evidence is only `not_verified`
 
 Forced completion requires `force_with_reason` and produces a low-confidence warning.
+
+### Evidence roles and supersession
+
+Evidence defaults to `role: "acceptance"` for backward compatibility. Use
+`role: "diagnostic"` for expected or remediated fail-first observations. Diagnostic
+evidence remains visible, may be linked for context, and may support a diagnostic
+step, but it does not change or satisfy acceptance criteria and cannot count as
+task-completion evidence. Link passing acceptance evidence to the relevant
+criteria and use it for task completion.
+
+```json
+{
+  "role": "diagnostic",
+  "passed": "false",
+  "summary": "Fail-first test produced the expected failure"
+}
+```
+
+If failing acceptance evidence is already linked, a passing acceptance replacement
+can explicitly supersede it:
+
+```json
+{
+  "supersedes_evidence_ids": ["E239"],
+  "reason": "Passing rerun after formatting"
+}
+```
+
+The original record remains visible as `superseded by:E240`; the replacement
+shows `supersedes:E239` and the reason. Only an explicit passing acceptance
+replacement with a non-empty reason removes that failure from completion
+validation. Diagnostic evidence cannot supersede acceptance failures, and a later
+pass never implicitly supersedes earlier failures.
 
 ## Token Efficiency
 

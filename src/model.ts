@@ -37,15 +37,20 @@ export type EvidenceType =
 	| "external"
 	| "note";
 
+export type EvidenceRole = "acceptance" | "diagnostic";
+
 export interface TaskEvidence {
 	id: string;
 	taskId: string;
 	type: EvidenceType;
+	role?: EvidenceRole;
 	level: VerificationLevel;
 	summary: string;
 	passed: boolean | "unknown";
 	references: string[];
 	quality: EvidenceQuality;
+	supersedesEvidenceIds?: string[];
+	supersessionReason?: string;
 	createdAt: string;
 }
 

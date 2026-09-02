@@ -105,8 +105,10 @@ describe("registered task tools", () => {
 			properties?: Record<
 				string,
 				{
+					type?: string;
 					enum?: string[];
 					required?: string[];
+					description?: string;
 				}
 			>;
 		};
@@ -136,7 +138,120 @@ describe("registered task tools", () => {
 				"observedOutput",
 			]),
 		);
+		expect(schema.properties?.role?.enum).toEqual(["acceptance", "diagnostic"]);
+		expect(schema.properties?.supersedes_evidence_ids?.type).toBe("array");
+		expect(schema.properties?.reason?.description).toContain(
+			"Required non-empty explanation",
+		);
+		expect(evidence.promptGuidelines).toContain(
+			"For expected or remediated fail-first results, use role diagnostic; diagnostic evidence remains visible and may support diagnostic steps, but cannot satisfy criteria or task completion.",
+		);
+		expect(evidence.description).toContain("supersedes_evidence_ids");
 		expect(schema).not.toHaveProperty("oneOf");
+	});
+
+	it("records explicit supersession metadata through task_evidence", async () => {
+		const { tools, ctx, store } = createHarness();
+		const plan = requireTool(tools, "task_plan");
+		const evidence = requireTool(tools, "task_evidence");
+		await execute(
+			plan,
+			{
+				title: "Evidence supersession",
+				objective: "Replace a linked failed verification with an explicit pass",
+				acceptance_criteria: ["The verification passes"],
+				plan_steps: [
+					{
+						text: "Run focused verification",
+						expectedOutput: "Focused verification passes",
+						evidenceRequired: true,
+						allowedActions: ["task_evidence"],
+						decompositionStatus: "atomic",
+						granularityCheck: {
+							isAtomic: true,
+							reason: "Single verification command",
+							canBeDoneInOneAgentAction: true,
+							hasSingleObservableOutput: true,
+							hasSingleVerificationMethod: true,
+							hasNoHiddenSubtasks: true,
+						},
+					},
+				],
+				activate: true,
+			},
+			ctx,
+		);
+		const quality = {
+			source: "vitest",
+			reproducible: true,
+			verifier: "tool",
+			command: "npm test",
+			artifactRefs: ["npm test"],
+			observedOutput: "Focused verification result",
+		};
+		await execute(
+			evidence,
+			{
+				task_id: "T1",
+				type: "test",
+				level: "unit_test",
+				summary: "Initial verification failed",
+				passed: "false",
+				references: ["npm test"],
+				criterion_ids: ["T1-AC1"],
+				step_ids: ["T1-S1"],
+				quality,
+			},
+			ctx,
+		);
+		const replacement = await execute(
+			evidence,
+			{
+				task_id: "T1",
+				type: "test",
+				level: "unit_test",
+				summary: "Verification rerun passed",
+				passed: "true",
+				references: ["npm test"],
+				criterion_ids: ["T1-AC1"],
+				step_ids: ["T1-S1"],
+				supersedes_evidence_ids: ["E1"],
+				reason: "Passing rerun after formatting",
+				quality,
+			},
+			ctx,
+		);
+
+		expect(replacement.isError).not.toBe(true);
+		const diagnostic = await execute(
+			evidence,
+			{
+				task_id: "T1",
+				type: "test",
+				role: "diagnostic",
+				level: "unit_test",
+				summary: "Fail-first probe produced the expected failure",
+				passed: "false",
+				references: ["npm test"],
+				criterion_ids: ["T1-AC1"],
+				step_ids: ["T1-S1"],
+				quality,
+			},
+			ctx,
+		);
+		expect(diagnostic.isError).not.toBe(true);
+		expect(store.getState().tasks.T1?.evidence).toHaveLength(3);
+		expect(store.getState().tasks.T1?.evidence[0]?.role).toBe("acceptance");
+		expect(store.getState().tasks.T1?.evidence[1]).toMatchObject({
+			id: "E2",
+			role: "acceptance",
+			supersedesEvidenceIds: ["E1"],
+			supersessionReason: "Passing rerun after formatting",
+		});
+		expect(store.getState().tasks.T1?.evidence[2]).toMatchObject({
+			id: "E3",
+			role: "diagnostic",
+		});
 	});
 
 	it("requires traceable evidence for atomic step verification", () => {

@@ -118,7 +118,7 @@ export function formatTaskList(
 			),
 			...task.evidence.map(
 				(item) =>
-					`  - ${item.id} evidence ${item.level} ${item.passed}: ${compactDetail(item.summary)}; source:${compactRef(item.quality.source)}; reproducible:${item.quality.reproducible}${item.references.length ? ` (${item.references.map(compactRef).join(", ")})` : ""}`,
+					`  - ${item.id} evidence ${item.level} ${item.passed}: ${compactDetail(item.summary)}; source:${compactRef(item.quality.source)}; reproducible:${item.quality.reproducible}; role:${item.role ?? "acceptance"}${formatEvidenceSupersession(task, item)}${item.references.length ? ` (${item.references.map(compactRef).join(", ")})` : ""}`,
 			),
 		];
 	});
@@ -127,6 +127,17 @@ export function formatTaskList(
 			? ["", "Warnings:", ...state.warnings.map((warning) => `- ${warning}`)]
 			: [];
 	return [...lines, ...warnings].join("\n");
+}
+
+function formatEvidenceSupersession(
+	task: Task,
+	evidence: Task["evidence"][number],
+): string {
+	const supersedes = evidence.supersedesEvidenceIds ?? [];
+	const supersededBy = task.evidence
+		.filter((item) => (item.supersedesEvidenceIds ?? []).includes(evidence.id))
+		.map((item) => item.id);
+	return `${supersedes.length ? `; supersedes:${supersedes.join(",")}` : ""}${evidence.supersessionReason ? `; reason:${compactDetail(evidence.supersessionReason)}` : ""}${supersededBy.length ? `; superseded by:${supersededBy.join(",")}` : ""}`;
 }
 
 function compactDetail(text: string): string {
@@ -390,17 +401,46 @@ export function getVerificationGaps(task: Task): string[] {
 	for (const criterion of task.acceptanceCriteria) {
 		if (criterion.status !== "satisfied" && criterion.status !== "skipped")
 			gaps.push(`${criterion.id} pending`);
-		if (criterion.status === "satisfied" && criterion.evidenceIds.length === 0)
-			gaps.push(`${criterion.id} lacks evidence`);
+		if (
+			criterion.status === "satisfied" &&
+			!hasActiveAcceptanceEvidence(task, criterion.evidenceIds)
+		) {
+			gaps.push(`${criterion.id} lacks acceptance evidence`);
+		}
 	}
-	if (task.evidence.length === 0) gaps.push("no evidence");
+	const activeAcceptanceEvidence = task.evidence.filter((evidence) =>
+		hasActiveAcceptanceEvidence(task, [evidence.id]),
+	);
+	if (activeAcceptanceEvidence.length === 0)
+		gaps.push("no acceptance evidence");
 	if (
-		task.evidence.length > 0 &&
-		task.evidence.every((evidence) => evidence.level === "not_verified")
+		activeAcceptanceEvidence.length > 0 &&
+		activeAcceptanceEvidence.every(
+			(evidence) => evidence.level === "not_verified",
+		)
 	) {
-		gaps.push("only not_verified evidence");
+		gaps.push("only not_verified acceptance evidence");
 	}
 	return gaps;
+}
+
+function hasActiveAcceptanceEvidence(
+	task: Task,
+	evidenceIds: string[],
+): boolean {
+	return evidenceIds.some((evidenceId) => {
+		const evidence = task.evidence.find((item) => item.id === evidenceId);
+		if (!evidence || (evidence.role ?? "acceptance") !== "acceptance") {
+			return false;
+		}
+		return !task.evidence.some(
+			(replacement) =>
+				(replacement.role ?? "acceptance") === "acceptance" &&
+				replacement.passed === true &&
+				Boolean(replacement.supersessionReason?.trim()) &&
+				(replacement.supersedesEvidenceIds ?? []).includes(evidenceId),
+		);
+	});
 }
 
 function getCurrentOpenStep(task: Task): TaskStep | undefined {
