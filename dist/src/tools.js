@@ -26,6 +26,7 @@ const EVIDENCE_TYPES = [
     "external",
     "note",
 ];
+const EVIDENCE_ROLES = ["acceptance", "diagnostic"];
 const VERIFICATION_LEVELS = [
     "not_verified",
     "static_read",
@@ -379,6 +380,8 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
         promptSnippet: "Record verification evidence before claiming a task is complete",
         promptGuidelines: [
             "Use task_evidence for tests, commands, reviews, files, dogfood, or explicit user acceptance.",
+            "For expected or remediated fail-first results, use role diagnostic; diagnostic evidence remains visible and may support diagnostic steps, but cannot satisfy criteria or task completion.",
+            "When a failed acceptance record is already linked, a passing acceptance replacement may explicitly supersede it with supersedes_evidence_ids and a non-empty reason; never assume an unrelated later pass supersedes an earlier failure.",
             "Passing non-note evidence must use a verification level stronger than not_verified.",
             "Attach criterion IDs when evidence proves specific acceptance criteria.",
             "Attach step_ids when evidence proves specific atomic steps, especially when multiple steps share the same criterion.",
@@ -396,10 +399,15 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 evidence: {
                     id: evidenceId,
                     type: params.type,
+                    role: params.role ?? "acceptance",
                     level: params.level,
                     summary: params.summary,
                     passed: parsePassed(params.passed),
                     references: params.references ?? [],
+                    ...(params.supersedes_evidence_ids
+                        ? { supersedesEvidenceIds: params.supersedes_evidence_ids }
+                        : {}),
+                    ...(params.reason ? { supersessionReason: params.reason } : {}),
                     ...(params.quality ? { quality: params.quality } : {}),
                 },
                 ...(params.criterion_ids ? { criterionIds: params.criterion_ids } : {}),
@@ -423,7 +431,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Use task_verify_step for the successful happy path after verifying the current atomic step.",
             "The tool records passing evidence, links it to the step and criteria, completes the step, and activates the next step atomically.",
             "Always provide references plus quality.source, quality.reproducible, quality.verifier, quality.command, quality.artifactRefs, and quality.observedOutput; for non-command evidence, quality.command should name the verification action.",
-            "Use task_evidence instead for failed or unknown evidence, non-step evidence, or evidence that must not advance the plan.",
+            "Use task_evidence with role diagnostic for expected or remediated fail-first results; diagnostic evidence cannot satisfy criteria or task completion.",
         ],
         parameters: Type.Object({
             task_id: Type.String(),
@@ -441,6 +449,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             const evidenceParams = {
                 task_id: params.task_id,
                 type: params.type,
+                role: "acceptance",
                 level: params.level,
                 summary: params.summary,
                 passed: "true",
@@ -464,6 +473,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 ? normalizeEvidenceQuality(params.quality, {
                     id: duplicate.id,
                     type: params.type,
+                    role: "acceptance",
                     level: params.level,
                     summary: params.summary,
                     passed: true,
@@ -485,6 +495,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 evidence: {
                     id: evidenceId,
                     type: params.type,
+                    role: "acceptance",
                     level: params.level,
                     summary: params.summary,
                     passed: true,
@@ -582,12 +593,21 @@ function taskEvidenceParametersSchema() {
     return Type.Object({
         task_id: Type.String(),
         type: Type.Enum(EVIDENCE_TYPES),
+        role: Type.Optional(Type.Enum(EVIDENCE_ROLES, {
+            description: "Evidence purpose. Defaults to acceptance; diagnostic evidence cannot satisfy criteria or task completion.",
+        })),
         level: Type.Enum(VERIFICATION_LEVELS),
         summary: Type.String(),
         passed: Type.Enum(["true", "false", "unknown"]),
         references: Type.Array(Type.String()),
         criterion_ids: Type.Optional(Type.Array(Type.String())),
         step_ids: Type.Optional(Type.Array(Type.String())),
+        supersedes_evidence_ids: Type.Optional(Type.Array(Type.String(), {
+            description: "Failed evidence IDs explicitly replaced by this passing evidence.",
+        })),
+        reason: Type.Optional(Type.String({
+            description: "Required non-empty explanation when supersedes_evidence_ids is provided.",
+        })),
         quality: evidenceQualitySchema(),
         override_reason: Type.Optional(Type.String({
             description: "Required only when attaching evidence outside the current step lock.",
@@ -692,6 +712,7 @@ function buildEvidenceRetryExample(event) {
     const example = {
         task_id: event.taskId,
         type: event.evidence.type,
+        role: event.evidence.role ?? "acceptance",
         level: event.evidence.level,
         summary: event.evidence.summary,
         passed: String(event.evidence.passed),
@@ -702,6 +723,12 @@ function buildEvidenceRetryExample(event) {
         example.criterion_ids = event.criterionIds;
     if (event.stepIds)
         example.step_ids = event.stepIds;
+    if (event.evidence.supersedesEvidenceIds) {
+        example.supersedes_evidence_ids = event.evidence.supersedesEvidenceIds;
+    }
+    if (event.evidence.supersessionReason) {
+        example.reason = event.evidence.supersessionReason;
+    }
     if (event.overrideReason)
         example.override_reason = event.overrideReason;
     return example;
@@ -751,11 +778,16 @@ function findDuplicateEvidenceForParams(task, params) {
     const passed = parsePassed(params.passed);
     const references = params.references ?? [];
     return task.evidence.find((evidence) => evidence.type === params.type &&
+        (evidence.role ?? "acceptance") === (params.role ?? "acceptance") &&
         evidence.level === params.level &&
         evidence.passed === passed &&
         evidence.summary.trim() === params.summary.trim() &&
         normalizedReferences(evidence.references) ===
-            normalizedReferences(references));
+            normalizedReferences(references) &&
+        normalizedReferences(evidence.supersedesEvidenceIds ?? []) ===
+            normalizedReferences(params.supersedes_evidence_ids ?? []) &&
+        (evidence.supersessionReason?.trim() ?? "") ===
+            (params.reason?.trim() ?? ""));
 }
 function criteriaAlreadyLinked(state, params, evidence) {
     const task = state.tasks[params.task_id];

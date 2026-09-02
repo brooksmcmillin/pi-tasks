@@ -228,6 +228,8 @@ function addEvidence(state, event) {
     const evidence = materializeEvidence(task, event.evidence, event.createdAt);
     validateEvidence(evidence);
     const duplicate = findDuplicateEvidence(task, evidence);
+    if (!duplicate)
+        validateEvidenceSupersession(task, evidence);
     const resolvedEvidence = duplicate ?? evidence;
     if (!duplicate)
         task.evidence.push(evidence);
@@ -244,9 +246,14 @@ function materializeEvidence(task, evidenceInput, createdAt) {
     return {
         ...evidenceInput,
         taskId: task.id,
+        role: evidenceInput.role ?? "acceptance",
         summary: evidenceInput.summary.trim(),
         references: evidenceInput.references ?? [],
         quality: normalizeEvidenceQuality(evidenceInput.quality, evidenceInput),
+        supersedesEvidenceIds: unique(evidenceInput.supersedesEvidenceIds ?? []),
+        ...(evidenceInput.supersessionReason !== undefined
+            ? { supersessionReason: evidenceInput.supersessionReason.trim() }
+            : {}),
         createdAt,
     };
 }
@@ -303,6 +310,10 @@ function verifyStep(state, event) {
 function linkEvidenceToCriteria(task, evidence, criterionIds) {
     for (const criterionId of criterionIds) {
         const criterion = requireCriterion(task, criterionId);
+        if (getEvidenceRole(evidence) === "diagnostic") {
+            criterion.evidenceIds = unique([...criterion.evidenceIds, evidence.id]);
+            continue;
+        }
         if (evidence.passed === true) {
             criterion.status = "satisfied";
             criterion.evidenceIds = unique([...criterion.evidenceIds, evidence.id]);
@@ -696,11 +707,13 @@ function validateCompletion(task, evidenceIds, forceReason) {
     if (unresolvedDriftWarning && !forceReason) {
         throw new TaskTransitionError(`Task ${task.id} has unresolved scope drift warning: ${unresolvedDriftWarning}`);
     }
-    const evidence = evidenceIds.length > 0
+    const selectedEvidence = evidenceIds.length > 0
         ? evidenceIds.map((id) => requireEvidence(task, id))
         : task.evidence;
-    if (!forceReason && evidence.length === 0)
-        throw new TaskTransitionError("Completion evidence IDs are required");
+    const evidence = selectedEvidence.filter((item) => isActiveAcceptanceEvidence(task, item));
+    if (!forceReason && evidence.length === 0) {
+        throw new TaskTransitionError("Completion requires active acceptance evidence");
+    }
     if (!forceReason && evidence.every((item) => item.level === "not_verified")) {
         throw new TaskTransitionError("Completion requires verification stronger than not_verified");
     }
@@ -710,29 +723,32 @@ function validateCompletion(task, evidenceIds, forceReason) {
             !forceReason) {
             throw new TaskTransitionError(`Criterion ${criterion.id} is not satisfied`);
         }
-        if (criterion.status === "satisfied" &&
-            criterion.evidenceIds.length === 0) {
-            throw new TaskTransitionError(`Criterion ${criterion.id} is satisfied without evidence`);
+        const criterionEvidence = criterion.evidenceIds
+            .map((evidenceId) => requireEvidence(task, evidenceId))
+            .filter((item) => isActiveAcceptanceEvidence(task, item));
+        if (criterion.status === "satisfied" && criterionEvidence.length === 0) {
+            throw new TaskTransitionError(`Criterion ${criterion.id} is satisfied without active acceptance evidence`);
         }
-        for (const evidenceId of criterion.evidenceIds) {
-            const criterionEvidence = requireEvidence(task, evidenceId);
-            if (criterionEvidence.passed === false && !forceReason) {
-                throw new TaskTransitionError(`Criterion ${criterion.id} has failing evidence ${evidenceId}`);
+        for (const evidenceItem of criterionEvidence) {
+            if (evidenceItem.passed === false && !forceReason) {
+                throw new TaskTransitionError(`Criterion ${criterion.id} has failing evidence ${evidenceItem.id}`);
             }
         }
     }
     for (const step of task.planSteps) {
+        const stepEvidence = step.evidenceIds
+            .map((evidenceId) => requireEvidence(task, evidenceId))
+            .filter((item) => isActiveAcceptanceEvidence(task, item));
         if (step.evidenceRequired &&
             step.status === "done" &&
             step.evidenceIds.length === 0 &&
             !forceReason) {
             throw new TaskTransitionError(`Plan step ${step.id} is done without step evidence`);
         }
-        for (const evidenceId of step.evidenceIds) {
-            const stepEvidence = requireEvidence(task, evidenceId);
-            validateEvidenceQualityScore(stepEvidence);
-            if (stepEvidence.passed === false && !forceReason) {
-                throw new TaskTransitionError(`Plan step ${step.id} has failing evidence ${evidenceId}`);
+        for (const evidenceItem of stepEvidence) {
+            validateEvidenceQualityScore(evidenceItem);
+            if (evidenceItem.passed === false && !forceReason) {
+                throw new TaskTransitionError(`Plan step ${step.id} has failing evidence ${evidenceItem.id}`);
             }
         }
     }
@@ -831,12 +847,60 @@ function deriveProgress(task) {
         const closedCriteria = task.acceptanceCriteria.filter((criterion) => criterion.status === "satisfied" || criterion.status === "skipped").length;
         scores.push(closedCriteria / task.acceptanceCriteria.length);
     }
-    if (task.evidence.length > 0)
+    if (task.evidence.some((evidence) => isActiveAcceptanceEvidence(task, evidence))) {
         scores.push(1);
+    }
     if (scores.length === 0)
         return floor;
     const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
     return Math.max(floor, Math.min(99, Math.round(average * 99)));
+}
+function getEvidenceRole(evidence) {
+    return evidence.role ?? "acceptance";
+}
+function validateEvidenceSupersession(task, evidence) {
+    const supersededIds = evidence.supersedesEvidenceIds ?? [];
+    if (supersededIds.length === 0) {
+        if (evidence.supersessionReason) {
+            throw new TaskTransitionError("Evidence supersession reason requires supersedes_evidence_ids");
+        }
+        return;
+    }
+    if (evidence.passed !== true) {
+        throw new TaskTransitionError("Evidence supersession requires a passing replacement");
+    }
+    if (getEvidenceRole(evidence) !== "acceptance") {
+        throw new TaskTransitionError("Evidence supersession requires an acceptance replacement");
+    }
+    if (!evidence.supersessionReason) {
+        throw new TaskTransitionError("Evidence supersession reason is required");
+    }
+    for (const supersededId of supersededIds) {
+        if (supersededId === evidence.id) {
+            throw new TaskTransitionError("Evidence cannot supersede itself");
+        }
+        const superseded = requireEvidence(task, supersededId);
+        if (superseded.passed !== false) {
+            throw new TaskTransitionError(`Evidence ${supersededId} is not failing and cannot be superseded`);
+        }
+        if (getEvidenceRole(superseded) !== "acceptance") {
+            throw new TaskTransitionError(`Evidence ${supersededId} is diagnostic and cannot be superseded`);
+        }
+        const existingReplacement = task.evidence.find((item) => (item.supersedesEvidenceIds ?? []).includes(supersededId));
+        if (existingReplacement) {
+            throw new TaskTransitionError(`Evidence ${supersededId} is already superseded by ${existingReplacement.id}`);
+        }
+    }
+}
+function isEvidenceSuperseded(task, evidenceId) {
+    return task.evidence.some((item) => getEvidenceRole(item) === "acceptance" &&
+        item.passed === true &&
+        Boolean(item.supersessionReason?.trim()) &&
+        (item.supersedesEvidenceIds ?? []).includes(evidenceId));
+}
+function isActiveAcceptanceEvidence(task, evidence) {
+    return (getEvidenceRole(evidence) === "acceptance" &&
+        !isEvidenceSuperseded(task, evidence.id));
 }
 function validateEvidence(evidence) {
     if (!evidence.summary.trim())
@@ -924,11 +988,16 @@ function containsVagueEvidence(value) {
 }
 function findDuplicateEvidence(task, evidence) {
     return task.evidence.find((existing) => existing.type === evidence.type &&
+        getEvidenceRole(existing) === getEvidenceRole(evidence) &&
         existing.level === evidence.level &&
         existing.passed === evidence.passed &&
         existing.summary.trim() === evidence.summary.trim() &&
         normalizedReferences(existing.references) ===
-            normalizedReferences(evidence.references));
+            normalizedReferences(evidence.references) &&
+        normalizedReferences(existing.supersedesEvidenceIds ?? []) ===
+            normalizedReferences(evidence.supersedesEvidenceIds ?? []) &&
+        (existing.supersessionReason?.trim() ?? "") ===
+            (evidence.supersessionReason?.trim() ?? ""));
 }
 function normalizedReferences(references) {
     return unique(references.map((reference) => reference.trim()).filter(Boolean))

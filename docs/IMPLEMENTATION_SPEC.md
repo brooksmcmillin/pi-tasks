@@ -158,6 +158,7 @@ export interface TaskEvidence {
 	id: string;
 	taskId: string;
 	type: "test" | "command" | "review" | "file" | "commit" | "dogfood" | "user_acceptance" | "external" | "note";
+	role?: "acceptance" | "diagnostic";
 	level: VerificationLevel;
 	summary: string;
 	passed: boolean | "unknown";
@@ -170,6 +171,8 @@ export interface TaskEvidence {
 		artifactRefs: string[];
 		observedOutput?: string;
 	};
+	supersedesEvidenceIds?: string[];
+	supersessionReason?: string;
 	createdAt: string;
 }
 ```
@@ -182,6 +185,12 @@ Rules:
 - `test`, `command`, and `dogfood` evidence require observed output and artifact references.
 - `command` evidence also requires the command string.
 - `external_unverified` is allowed but cannot satisfy release-grade evidence by itself.
+- Missing `role` defaults to `acceptance` during creation and replay for backward compatibility.
+- Expected or remediated fail-first observations should use role `diagnostic`; diagnostic links preserve context without changing criterion status.
+- Diagnostic evidence may support diagnostic steps, but cannot satisfy a criterion, count as task-completion evidence, or supersede acceptance evidence.
+- A linked acceptance failure is ignored by completion validation only when a later passing acceptance record explicitly names it in `supersedesEvidenceIds` and provides a non-empty `supersessionReason`.
+- Completion evaluates only active, unsuperseded acceptance evidence.
+- Supersession retains both records and renders the original as superseded by the replacement; unrelated later passes never supersede failures implicitly.
 
 ### 5.4 Acceptance Criterion
 
@@ -401,8 +410,10 @@ Completion rejection cases:
 - no evidence,
 - unsatisfied required criteria,
 - active unresolved blocker,
-- `passed: false` evidence attached to required criterion,
-- verification level only `not_verified`.
+- no active acceptance completion evidence,
+- diagnostic-only evidence attached to a satisfied criterion or supplied as task-completion evidence,
+- non-superseded `passed: false` acceptance evidence attached to a satisfied criterion or completed step,
+- active acceptance verification level only `not_verified`.
 
 Forced completion:
 
@@ -629,6 +640,7 @@ Parameters:
 
 - `task_id`
 - `type`
+- `role`
 - `level`
 - `summary`
 - `passed`
@@ -636,16 +648,24 @@ Parameters:
 - `criterion_ids`
 - `step_ids`
 - `quality`
+- `supersedes_evidence_ids`
+- `reason`
 - `override_reason`
 
 Behavior:
 
-- appends evidence,
+- appends evidence with `role` defaulting to `acceptance`,
 - links evidence to explicit step IDs when provided,
+- preserves diagnostic links without changing criterion status,
 - rejects low-quality evidence that lacks traceability, reproducibility, required artifact references, or observed output for test/command/dogfood evidence,
 - rejects oversized evidence summaries, references, artifact refs, command strings, source strings, and observed output,
 - rejects evidence linked to a non-current step unless `override_reason` is supplied,
+- excludes diagnostic evidence from criterion satisfaction and task-completion evidence while allowing it to support diagnostic steps,
+- requires a non-empty `reason`, `passed: true`, and role `acceptance` when `supersedes_evidence_ids` is supplied,
+- requires every explicitly superseded record to exist, be failing, and have role `acceptance`,
+- retains superseded records and exposes both directions of the relationship in detailed evidence output,
 - marks referenced criteria satisfied only when `passed: true`,
+- never treats an unrelated later pass as superseding an earlier failure,
 - never marks task done by itself.
 
 ### 8.11 `task_verify_step`
@@ -714,6 +734,10 @@ Behavior:
 - rejects unsupported completion,
 - rejects completion while any plan step is still active or pending unless forced with a reason,
 - rejects completion while unresolved `off_plan` or `scope_change` warnings remain,
+- evaluates only active, unsuperseded acceptance evidence,
+- rejects diagnostic-only support for satisfied criteria or task-completion evidence,
+- rejects non-superseded failing acceptance evidence linked to satisfied criteria or completed steps,
+- ignores a linked acceptance failure only when an explicit valid passing acceptance replacement supersedes it,
 - appends completion event,
 - sets progress to 100,
 - updates widget/status,

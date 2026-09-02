@@ -65,6 +65,9 @@ This project must align with the commercial-quality bar established by `pi-knowl
   - unresolved user decisions,
   - and completion confidence.
 - The system must not mark work complete without verification evidence.
+- Record expected or remediated fail-first results with evidence role `diagnostic`; diagnostic evidence may support diagnostic steps and remain linked for context, but must not change criterion status or satisfy task completion.
+- Evidence without an explicit role is acceptance evidence for backward compatibility.
+- A linked acceptance failure may stop blocking completion only through an explicit passing acceptance replacement that names the superseded evidence and gives a non-empty reason; retain both records and never infer supersession from a later pass.
 - The agent may propose task changes, but user-facing decisions must be recorded explicitly.
 
 ## Verification Rules

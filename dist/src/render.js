@@ -73,13 +73,20 @@ export function formatTaskList(state, options = {}) {
             ...decisions,
             ...planSteps,
             ...task.acceptanceCriteria.map((criterion) => `  - ${criterion.id} [${criterion.status}] ${compactDetail(criterion.text)}${criterion.evidenceIds.length ? ` evidence:${criterion.evidenceIds.join(",")}` : ""}`),
-            ...task.evidence.map((item) => `  - ${item.id} evidence ${item.level} ${item.passed}: ${compactDetail(item.summary)}; source:${compactRef(item.quality.source)}; reproducible:${item.quality.reproducible}${item.references.length ? ` (${item.references.map(compactRef).join(", ")})` : ""}`),
+            ...task.evidence.map((item) => `  - ${item.id} evidence ${item.level} ${item.passed}: ${compactDetail(item.summary)}; source:${compactRef(item.quality.source)}; reproducible:${item.quality.reproducible}; role:${item.role ?? "acceptance"}${formatEvidenceSupersession(task, item)}${item.references.length ? ` (${item.references.map(compactRef).join(", ")})` : ""}`),
         ];
     });
     const warnings = state.warnings.length > 0
         ? ["", "Warnings:", ...state.warnings.map((warning) => `- ${warning}`)]
         : [];
     return [...lines, ...warnings].join("\n");
+}
+function formatEvidenceSupersession(task, evidence) {
+    const supersedes = evidence.supersedesEvidenceIds ?? [];
+    const supersededBy = task.evidence
+        .filter((item) => (item.supersedesEvidenceIds ?? []).includes(evidence.id))
+        .map((item) => item.id);
+    return `${supersedes.length ? `; supersedes:${supersedes.join(",")}` : ""}${evidence.supersessionReason ? `; reason:${compactDetail(evidence.supersessionReason)}` : ""}${supersededBy.length ? `; superseded by:${supersededBy.join(",")}` : ""}`;
 }
 function compactDetail(text) {
     return truncateText(text.replace(/\s+/g, " ").trim(), DETAIL_TEXT_MAX);
@@ -302,16 +309,31 @@ export function getVerificationGaps(task) {
     for (const criterion of task.acceptanceCriteria) {
         if (criterion.status !== "satisfied" && criterion.status !== "skipped")
             gaps.push(`${criterion.id} pending`);
-        if (criterion.status === "satisfied" && criterion.evidenceIds.length === 0)
-            gaps.push(`${criterion.id} lacks evidence`);
+        if (criterion.status === "satisfied" &&
+            !hasActiveAcceptanceEvidence(task, criterion.evidenceIds)) {
+            gaps.push(`${criterion.id} lacks acceptance evidence`);
+        }
     }
-    if (task.evidence.length === 0)
-        gaps.push("no evidence");
-    if (task.evidence.length > 0 &&
-        task.evidence.every((evidence) => evidence.level === "not_verified")) {
-        gaps.push("only not_verified evidence");
+    const activeAcceptanceEvidence = task.evidence.filter((evidence) => hasActiveAcceptanceEvidence(task, [evidence.id]));
+    if (activeAcceptanceEvidence.length === 0)
+        gaps.push("no acceptance evidence");
+    if (activeAcceptanceEvidence.length > 0 &&
+        activeAcceptanceEvidence.every((evidence) => evidence.level === "not_verified")) {
+        gaps.push("only not_verified acceptance evidence");
     }
     return gaps;
+}
+function hasActiveAcceptanceEvidence(task, evidenceIds) {
+    return evidenceIds.some((evidenceId) => {
+        const evidence = task.evidence.find((item) => item.id === evidenceId);
+        if (!evidence || (evidence.role ?? "acceptance") !== "acceptance") {
+            return false;
+        }
+        return !task.evidence.some((replacement) => (replacement.role ?? "acceptance") === "acceptance" &&
+            replacement.passed === true &&
+            Boolean(replacement.supersessionReason?.trim()) &&
+            (replacement.supersedesEvidenceIds ?? []).includes(evidenceId));
+    });
 }
 function getCurrentOpenStep(task) {
     return task.planSteps.find((step) => step.status !== "done" && step.status !== "skipped");

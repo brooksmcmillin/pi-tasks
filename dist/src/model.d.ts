@@ -6,15 +6,19 @@ export type TaskStepStatus = "pending" | "active" | "done" | "skipped";
 export type TaskStepGranularityStatus = "needs_breakdown" | "breaking_down" | "atomic" | "deferred";
 export type VerificationLevel = "not_verified" | "static_read" | "unit_test" | "integration_test" | "e2e_smoke" | "release_grade_e2e" | "pi_dogfood" | "external_unverified";
 export type EvidenceType = "test" | "command" | "review" | "file" | "commit" | "dogfood" | "user_acceptance" | "external" | "note";
+export type EvidenceRole = "acceptance" | "diagnostic";
 export interface TaskEvidence {
     id: string;
     taskId: string;
     type: EvidenceType;
+    role?: EvidenceRole;
     level: VerificationLevel;
     summary: string;
     passed: boolean | "unknown";
     references: string[];
     quality: EvidenceQuality;
+    supersedesEvidenceIds?: string[];
+    supersessionReason?: string;
     createdAt: string;
 }
 export interface EvidenceQuality {

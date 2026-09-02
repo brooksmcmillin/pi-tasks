@@ -9,6 +9,7 @@ import {
 	replayTaskEvents,
 	TaskTransitionError,
 } from "../../src/reducer.ts";
+import { formatTaskList } from "../../src/render.ts";
 
 const now = "2026-06-18T00:00:00.000Z";
 
@@ -87,7 +88,7 @@ function updated(
 
 function evidence(
 	params: Partial<Extract<TaskEvent, { type: "task.evidence_added" }>> = {},
-): TaskEvent {
+): Extract<TaskEvent, { type: "task.evidence_added" }> {
 	return {
 		version: 1,
 		id: "T1-evidence",
@@ -334,6 +335,7 @@ describe("task reducer", () => {
 	it("adds evidence and satisfies criteria with passing evidence", () => {
 		const state = apply([created(), evidence()]);
 		expect(state.tasks.T1.evidence).toHaveLength(1);
+		expect(state.tasks.T1.evidence[0]?.role).toBe("acceptance");
 		expect(
 			state.tasks.T1.acceptanceCriteria.every(
 				(criterion) => criterion.status === "satisfied",
@@ -574,6 +576,256 @@ describe("task reducer", () => {
 		expect(state.tasks.T1.status).toBe("done");
 		expect(state.tasks.T1.progress).toBe(100);
 		expect(state.activeTaskId).toBeUndefined();
+	});
+
+	it("retains diagnostic fail-first evidence without changing acceptance state", () => {
+		const diagnosticEvidence = evidence({
+			evidence: {
+				...evidence().evidence,
+				role: "diagnostic",
+				passed: false,
+				summary: "Fail-first test produced the expected failure",
+			},
+			criterionIds: ["T1-AC1", "T1-AC2"],
+			stepIds: ["T1-S1"],
+		});
+		const diagnosticState = apply([created(), diagnosticEvidence]);
+		expect(diagnosticState.tasks.T1.evidence).toHaveLength(1);
+		expect(diagnosticState.tasks.T1.evidence[0]?.role).toBe("diagnostic");
+		expect(
+			diagnosticState.tasks.T1.acceptanceCriteria.every(
+				(criterion) => criterion.status === "pending",
+			),
+		).toBe(true);
+		expect(diagnosticState.tasks.T1.acceptanceCriteria[0]?.evidenceIds).toEqual(
+			["E1"],
+		);
+		const diagnosticStepState = apply([
+			created(),
+			diagnosticEvidence,
+			stepDone(),
+		]);
+		expect(diagnosticStepState.tasks.T1.planSteps[0]?.status).toBe("done");
+		expect(
+			diagnosticStepState.tasks.T1.acceptanceCriteria.every(
+				(criterion) => criterion.status === "pending",
+			),
+		).toBe(true);
+
+		const passingEvidence = evidence({
+			evidence: {
+				...evidence().evidence,
+				id: "E2",
+				summary: "Implementation test passed",
+				passed: true,
+			},
+			criterionIds: ["T1-AC1", "T1-AC2"],
+			stepIds: ["T1-S1"],
+		});
+		const state = apply([
+			created(),
+			diagnosticEvidence,
+			passingEvidence,
+			stepDone(),
+			complete({ evidenceIds: ["E2"] }),
+		]);
+		expect(state.tasks.T1.status).toBe("done");
+		expect(state.tasks.T1.evidence.map((item) => item.id)).toEqual([
+			"E1",
+			"E2",
+		]);
+		const output = formatTaskList(state, {
+			includeDone: true,
+			includeEvidence: true,
+		});
+		expect(output).toContain("E1 evidence unit_test false");
+		expect(output).toContain("role:diagnostic");
+	});
+
+	it("rejects diagnostic evidence as completion evidence", () => {
+		const diagnosticEvidence = evidence({
+			evidence: {
+				...evidence().evidence,
+				role: "diagnostic",
+				passed: true,
+				summary: "Diagnostic probe passed",
+			},
+			criterionIds: ["T1-AC1", "T1-AC2"],
+			stepIds: ["T1-S1"],
+		});
+		const acceptanceEvidence = evidence({
+			evidence: {
+				...evidence().evidence,
+				id: "E2",
+				summary: "Acceptance test passed",
+			},
+			criterionIds: [],
+			stepIds: ["T1-S1"],
+		});
+		const readyEvents = [
+			created(),
+			diagnosticEvidence,
+			acceptanceEvidence,
+			stepDone(),
+		];
+		expect(() =>
+			apply([...readyEvents, complete({ evidenceIds: ["E1"] })]),
+		).toThrow("Completion requires active acceptance evidence");
+		expect(() =>
+			apply([
+				...readyEvents,
+				complete({
+					evidenceIds: ["E2"],
+					criterionResults: [
+						{
+							criterionId: "T1-AC1",
+							status: "satisfied",
+							evidenceIds: ["E1"],
+						},
+					],
+				}),
+			]),
+		).toThrow(
+			"Criterion T1-AC1 is satisfied without active acceptance evidence",
+		);
+	});
+
+	it("requires explicit passing supersession before linked failing evidence stops blocking completion", () => {
+		const failedEvidence = evidence({
+			evidence: {
+				id: "E1",
+				type: "test",
+				level: "unit_test",
+				summary: "Initial test run failed formatting",
+				passed: false,
+				references: ["npm test"],
+				quality: {
+					source: "vitest",
+					reproducible: true,
+					verifier: "tool",
+					artifactRefs: ["npm test"],
+					observedOutput: "Formatting check failed",
+				},
+			},
+			criterionIds: [],
+			stepIds: ["T1-S1"],
+		});
+		const passingEvidence = evidence({
+			evidence: {
+				id: "E2",
+				type: "test",
+				level: "unit_test",
+				summary: "Test rerun passed after formatting",
+				passed: true,
+				references: ["npm test"],
+				quality: {
+					source: "vitest",
+					reproducible: true,
+					verifier: "tool",
+					artifactRefs: ["npm test"],
+					observedOutput: "Test suite passed",
+				},
+			},
+			criterionIds: ["T1-AC1", "T1-AC2"],
+			stepIds: ["T1-S1"],
+		});
+		const unsupersededEvents = [
+			created(),
+			failedEvidence,
+			passingEvidence,
+			stepDone(),
+		];
+		expect(() =>
+			apply([...unsupersededEvents, complete({ evidenceIds: ["E2"] })]),
+		).toThrow("Plan step T1-S1 has failing evidence E1");
+
+		const supersedingEvidence = {
+			...passingEvidence,
+			evidence: {
+				...passingEvidence.evidence,
+				supersedesEvidenceIds: ["E1"],
+				supersessionReason: "Passing rerun after formatting",
+			},
+		} satisfies TaskEvent;
+		const state = apply([
+			created(),
+			failedEvidence,
+			supersedingEvidence,
+			stepDone(),
+			complete({ evidenceIds: ["E2"] }),
+		]);
+		expect(state.tasks.T1.status).toBe("done");
+		expect(state.tasks.T1.evidence.map((item) => item.id)).toEqual([
+			"E1",
+			"E2",
+		]);
+		expect(state.tasks.T1.evidence[1]?.supersedesEvidenceIds).toEqual(["E1"]);
+		expect(state.tasks.T1.evidence[1]?.supersessionReason).toBe(
+			"Passing rerun after formatting",
+		);
+		const output = formatTaskList(state, {
+			includeDone: true,
+			includeEvidence: true,
+		});
+		expect(output).toContain("E1 evidence unit_test false");
+		expect(output).toContain("superseded by:E2");
+		expect(output).toContain("E2 evidence unit_test true");
+		expect(output).toContain("supersedes:E1");
+	});
+
+	it("requires a reason and a passing replacement for supersession", () => {
+		const failedEvidence = evidence({
+			evidence: {
+				...evidence().evidence,
+				passed: false,
+				summary: "Initial test run failed",
+			},
+			stepIds: ["T1-S1"],
+		});
+		const replacement = evidence({
+			evidence: {
+				...evidence().evidence,
+				id: "E2",
+				summary: "Test rerun passed",
+				supersedesEvidenceIds: ["E1"],
+				supersessionReason: "Passing rerun",
+			},
+			stepIds: ["T1-S1"],
+		});
+
+		expect(() =>
+			apply([
+				created(),
+				failedEvidence,
+				{
+					...replacement,
+					evidence: {
+						...replacement.evidence,
+						supersessionReason: "   ",
+					},
+				},
+			]),
+		).toThrow("Evidence supersession reason is required");
+		expect(() =>
+			apply([
+				created(),
+				failedEvidence,
+				{
+					...replacement,
+					evidence: { ...replacement.evidence, passed: false },
+				},
+			]),
+		).toThrow("Evidence supersession requires a passing replacement");
+		expect(() =>
+			apply([
+				created(),
+				failedEvidence,
+				{
+					...replacement,
+					evidence: { ...replacement.evidence, role: "diagnostic" },
+				},
+			]),
+		).toThrow("Evidence supersession requires an acceptance replacement");
 	});
 
 	it("rejects completion while plan steps remain open", () => {
