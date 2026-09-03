@@ -7,6 +7,7 @@ import type {
 	TaskStatus,
 	TaskStep,
 } from "./model.ts";
+import { hasBlockingFailedEvidence } from "./reducer.ts";
 
 const STATUS_ORDER: TaskStatus[] = [
 	"active",
@@ -115,10 +116,13 @@ export function formatTaskList(
 				(criterion) =>
 					`  - ${criterion.id} [${criterion.status}] ${compactDetail(criterion.text)}${criterion.evidenceIds.length ? ` evidence:${criterion.evidenceIds.join(",")}` : ""}`,
 			),
-			...task.evidence.map(
-				(item) =>
-					`  - ${item.id} evidence ${item.level} ${item.passed}: ${compactDetail(item.summary)}; source:${compactRef(item.quality.source)}; reproducible:${item.quality.reproducible}${item.references.length ? ` (${item.references.map(compactRef).join(", ")})` : ""}`,
-			),
+			...task.evidence.map((item) => {
+				const supersedes =
+					item.supersedes && item.supersedes.length > 0
+						? `; supersedes:${item.supersedes.join(",")}`
+						: "";
+				return `  - ${item.id} evidence ${item.level} ${item.passed}: ${compactDetail(item.summary)}; source:${compactRef(item.quality.source)}; reproducible:${item.quality.reproducible}${supersedes}${item.references.length ? ` (${item.references.map(compactRef).join(", ")})` : ""}`;
+			}),
 		];
 	});
 	const warnings =
@@ -388,12 +392,28 @@ export function getVerificationGaps(task: Task): string[] {
 		) {
 			gaps.push(`${step.id} lacks evidence`);
 		}
+		const failingEvidence = step.evidenceIds.filter((evidenceId) =>
+			hasBlockingFailedEvidence(task, evidenceId, { stepId: step.id }),
+		);
+		if (failingEvidence.length > 0) {
+			gaps.push(`${step.id} has failing evidence ${failingEvidence.join(",")}`);
+		}
 	}
 	for (const criterion of task.acceptanceCriteria) {
 		if (criterion.status !== "satisfied" && criterion.status !== "skipped")
 			gaps.push(`${criterion.id} pending`);
 		if (criterion.status === "satisfied" && criterion.evidenceIds.length === 0)
 			gaps.push(`${criterion.id} lacks evidence`);
+		const failingEvidence = criterion.evidenceIds.filter((evidenceId) =>
+			hasBlockingFailedEvidence(task, evidenceId, {
+				criterionId: criterion.id,
+			}),
+		);
+		if (failingEvidence.length > 0) {
+			gaps.push(
+				`${criterion.id} has failing evidence ${failingEvidence.join(",")}`,
+			);
+		}
 	}
 	if (task.evidence.length === 0) gaps.push("no evidence");
 	if (

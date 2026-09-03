@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.5] - 2026-09-03
+
+### Added
+- Added `task_evidence.supersedes` so a later passing rerun can explicitly resolve prior linked failed evidence without losing audit lineage.
+- Added smart-model and weak-model convergence guidance to every pi-tasks tool prompt.
+
+### Fixed
+- Allowed `task_complete` to ignore linked failed evidence only when a later passing evidence item explicitly supersedes it on the same step or criterion.
+
 ## [0.2.4] - 2026-08-24
 
 ### Fixed

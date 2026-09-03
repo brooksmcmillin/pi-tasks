@@ -124,6 +124,7 @@ interface TaskEvidenceParams extends Record<string, unknown> {
 	step_ids?: string[];
 	quality?: EvidenceQuality;
 	override_reason?: string;
+	supersedes?: string[];
 }
 
 interface TaskDecisionParams extends Record<string, unknown> {
@@ -203,6 +204,8 @@ export function registerTaskTools(
 			"Create a pi-tasks execution contract before non-trivial implementation work",
 		promptGuidelines: [
 			"Use task_plan for multi-step work before implementation when no suitable active task exists.",
+			"Smart models: constrain the plan to the user's stated objective; do not add speculative scope, gates, or abstractions.",
+			"Weak models: omit unknown generated IDs and make each acceptance criterion a separately verifiable sentence.",
 			"Prefer plan_steps with expectedOutput, criterionIds, evidenceRequired, and allowedActions for commercial-quality work.",
 			"When creating a new task, omit plan_steps.criterionIds unless you already know the generated criterion IDs; omitted criterionIds link the step to all task criteria.",
 			"Generated criterion IDs use the final task ID, such as T1-AC1. Do not guess IDs from criterion text or array indexes.",
@@ -276,6 +279,8 @@ export function registerTaskTools(
 			"Ask pi-tasks for the only next tool to call before continuing",
 		promptGuidelines: [
 			"Call task_next after rejection, compaction, branch navigation, or uncertainty.",
+			"Smart models: treat the returned recommendation as the control contract; do not override it from memory or intuition.",
+			"Weak models: call exactly the Only next tool with the shown minimum params; if a tool is blocked, do not call it.",
 			"Follow Only next tool and Current step lock exactly.",
 			"Do not call blocked tools listed by task_next.",
 		],
@@ -296,6 +301,8 @@ export function registerTaskTools(
 			"Inspect the current pi-tasks focus before acting, then work only on the active step",
 		promptGuidelines: [
 			"Call task_focus before implementation, verification, or step completion work.",
+			"Smart models: compare intended work to the current step lock before acting; record drift before off-step work.",
+			"Weak models: copy the current step ID, criterion IDs, and evidence IDs exactly into the next tool call.",
 			"If Granularity is not atomic, use task_decompose before doing implementation work.",
 			"If intended work does not match the active step, record scope_change or off_plan with task_update first.",
 			"Use task_evidence before marking an evidence-required step done.",
@@ -317,6 +324,8 @@ export function registerTaskTools(
 			"Resume pi-tasks work from the current compact execution contract before acting",
 		promptGuidelines: [
 			"Call task_resume after context compaction, session resume, or when unsure what to do next.",
+			"Smart models: trust the persisted resume contract after compaction; do not reconstruct stale plan state from memory.",
+			"Weak models: read recommendedTool, blockedTools, and minimumParams, then call only the recommended tool.",
 			"Follow next allowed actions; do not complete tasks while verification gaps remain.",
 			"Use task_decompose when the resume instruction says the current step is not atomic.",
 		],
@@ -337,6 +346,8 @@ export function registerTaskTools(
 			"Create a pi-tasks checkpoint before risky context transitions or long pauses",
 		promptGuidelines: [
 			"Use task_checkpoint before long-running work, major decomposition changes, or when the user asks for a restartable handoff.",
+			"Smart models: checkpoint only at real handoff or risk boundaries; do not use snapshots as proof of work.",
+			"Weak models: provide at most a short reason, then continue with task_next or task_focus.",
 			"Checkpoint is not evidence and does not satisfy acceptance criteria.",
 		],
 		parameters: Type.Object({
@@ -379,6 +390,8 @@ export function registerTaskTools(
 			"Check whether the current pi-tasks step is atomic before implementation",
 		promptGuidelines: [
 			"Use this before implementation when task_focus shows a non-atomic step.",
+			"Smart models: classify any hidden subtask, second output, or second verification method as non-atomic.",
+			"Weak models: if any atomicity field is false, call task_decompose instead of executing the step.",
 			"Atomic means one agent action, one observable output, one verification method, and no hidden subtasks.",
 			"If the step is not atomic, call task_decompose with smaller child steps.",
 		],
@@ -431,6 +444,8 @@ export function registerTaskTools(
 			"Recursively break down a non-atomic pi-tasks step into atomic child steps",
 		promptGuidelines: [
 			"Use task_decompose when task_focus or task_granularity_check says the current step needs breakdown.",
+			"Smart models: preserve the parent objective and criteria; do not add unsolicited features or release gates.",
+			"Weak models: make each child one verb, one output, one evidence method, and copy criterionIds only from task_focus/task_resume.",
 			"Each child step must include expectedOutput, evidenceRequired, allowedActions, and granularityCheck.",
 			"Omit child step criterionIds unless you are carrying forward known generated IDs from task_focus or task_resume.",
 			"Only mark a child atomic when it truly has one action, one output, one verification method, and no hidden subtasks.",
@@ -483,6 +498,8 @@ export function registerTaskTools(
 			"Inspect current pi-tasks task status, blockers, and verification gaps",
 		promptGuidelines: [
 			"Use task_list before resuming work after session reload or branch navigation.",
+			"Smart models: use task_list for selection or debugging only, then switch to task_focus/task_next for execution control.",
+			"Weak models: if an active task exists, do not choose manually from the list; call task_next.",
 			"Do not treat task_list as evidence; attach verification with task_evidence.",
 		],
 		parameters: Type.Object({
@@ -512,6 +529,8 @@ export function registerTaskTools(
 			"Update pi-tasks progress, current ordered step, next action, status, or blocker details",
 		promptGuidelines: [
 			"Use step_id with step_status=done when the current planned step is finished.",
+			"Smart models: record one state transition per call; do not bundle drift, evidence, and completion into one update.",
+			"Weak models: use task_focus current step_id; for done, include step_evidence_ids when evidence was just recorded.",
 			"Only atomic steps can be marked done; use task_decompose first if a step still needs breakdown.",
 			"Evidence-required steps need linked evidence before step_status=done.",
 			"Do not skip ahead; ordered plan steps must be completed or skipped in the displayed order.",
@@ -600,9 +619,12 @@ export function registerTaskTools(
 			"Record verification evidence before claiming a task is complete",
 		promptGuidelines: [
 			"Use task_evidence for tests, commands, reviews, files, dogfood, or explicit user acceptance.",
+			"Smart models: record the exact observed result; do not turn failed evidence into a note or hide it from linked step/criterion lineage.",
+			"Weak models: copy task_focus IDs exactly; use passed=false for failed runs and passed=true only for observed passes.",
 			"Passing non-note evidence must use a verification level stronger than not_verified.",
 			"Attach criterion IDs when evidence proves specific acceptance criteria.",
 			"Attach step_ids when evidence proves specific atomic steps, especially when multiple steps share the same criterion.",
+			"When a passing rerun resolves prior linked failed evidence, set supersedes to the failed evidence IDs and link the rerun to the same step_ids/criterion_ids.",
 			"Always provide references plus quality.source, quality.reproducible, quality.verifier, quality.command, quality.artifactRefs, and quality.observedOutput; for non-command evidence, quality.command should name the verification action.",
 		],
 		parameters: taskEvidenceParametersSchema(),
@@ -630,6 +652,7 @@ export function registerTaskTools(
 					passed: parsePassed(params.passed),
 					references: params.references ?? [],
 					...(params.quality ? { quality: params.quality } : {}),
+					...(params.supersedes ? { supersedes: params.supersedes } : {}),
 				},
 				...(params.criterion_ids ? { criterionIds: params.criterion_ids } : {}),
 				...(params.step_ids ? { stepIds: params.step_ids } : {}),
@@ -653,6 +676,8 @@ export function registerTaskTools(
 			"Record explicit decisions that affect pi-tasks scope, tradeoffs, or acceptance",
 		promptGuidelines: [
 			"Use task_decision for user-facing scope choices and meaningful agent tradeoffs.",
+			"Smart models: record only durable choices that affect scope, tradeoffs, or implementation; do not log routine observations.",
+			"Weak models: set question to the choice, decision to the selected option, and impact to what changes next.",
 			"Do not hide unresolved user choices in notes; record them as blockers or decisions.",
 		],
 		parameters: Type.Object({
@@ -695,6 +720,8 @@ export function registerTaskTools(
 			"Complete a pi-tasks task only when acceptance criteria have evidence",
 		promptGuidelines: [
 			"Call task_complete only after task_evidence has recorded supporting evidence.",
+			"Smart models: complete only after gaps are empty and all linked failures are superseded by later passing evidence.",
+			"Weak models: copy evidence_ids from task_resume/task_focus; if rejected, call task_next instead of retrying the same call.",
 			"Unsupported completion is rejected unless force_with_reason documents the verification gap.",
 			"Forced completion must be reported as not fully verified.",
 		],
@@ -757,6 +784,14 @@ function taskEvidenceParametersSchema() {
 		references: Type.Array(Type.String()),
 		criterion_ids: Type.Optional(Type.Array(Type.String())),
 		step_ids: Type.Optional(Type.Array(Type.String())),
+		supersedes: Type.Optional(
+			Type.Array(
+				Type.String({
+					description:
+						"Prior failed evidence IDs resolved by this passing rerun; rerun must link the same step_ids/criterion_ids.",
+				}),
+			),
+		),
 		quality: evidenceQualitySchema(),
 		override_reason: Type.Optional(
 			Type.String({
@@ -901,6 +936,7 @@ function buildEvidenceRetryExample(
 	};
 	if (event.criterionIds) example.criterion_ids = event.criterionIds;
 	if (event.stepIds) example.step_ids = event.stepIds;
+	if (event.evidence.supersedes) example.supersedes = event.evidence.supersedes;
 	if (event.overrideReason) example.override_reason = event.overrideReason;
 	return example;
 }
@@ -973,7 +1009,9 @@ function findDuplicateEvidenceForParams(
 			evidence.passed === passed &&
 			evidence.summary.trim() === params.summary.trim() &&
 			normalizedReferences(evidence.references) ===
-				normalizedReferences(references),
+				normalizedReferences(references) &&
+			normalizedReferences(evidence.supersedes ?? []) ===
+				normalizedReferences(params.supersedes ?? []),
 	);
 }
 

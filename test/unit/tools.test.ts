@@ -126,6 +126,9 @@ describe("registered task tools", () => {
 		expect(schema.properties?.type?.enum).toEqual(
 			expect.arrayContaining(["command", "test", "dogfood", "review"]),
 		);
+		expect(schema.properties?.supersedes).toMatchObject({
+			type: "array",
+		});
 		expect(schema.properties?.quality?.required).toEqual(
 			expect.arrayContaining([
 				"source",
@@ -181,6 +184,7 @@ describe("registered task tools", () => {
 				level: "e2e_smoke",
 				summary: "npm test passed",
 				passed: "true",
+				supersedes: ["E0"],
 				references: ["npm test"],
 				criterion_ids: ["T1-AC1"],
 				step_ids: ["T1-S1"],
@@ -207,6 +211,7 @@ describe("registered task tools", () => {
 			retry_example: {
 				task_id: "T1",
 				type: "command",
+				supersedes: ["E0"],
 				quality: {
 					command: "npm test",
 					observedOutput:

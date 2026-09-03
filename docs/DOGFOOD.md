@@ -4,9 +4,9 @@ This document tracks real Pi dogfood evidence. Skipped items are not counted as 
 
 ## Current Status
 
-Date: 2026-08-24
+Date: 2026-09-03
 
-Result: passed for the scoped MVP dogfood gate, release-hardening dogfood gate, weak-model release gate, installed-package smoke, 0.1.5 receiver-bound append compatibility release gate, 0.2.0 state-event source/resume/fork/live-TTY/manual-compaction/installed-package smoke, and 0.2.4 Issue #3 weak-model/Oh My Pi evidence-schema release gate.
+Result: passed for the scoped MVP dogfood gate, release-hardening dogfood gate, weak-model release gate, installed-package smoke, 0.1.5 receiver-bound append compatibility release gate, 0.2.0 state-event source/resume/fork/live-TTY/manual-compaction/installed-package smoke, 0.2.4 Issue #3 weak-model/Oh My Pi evidence-schema release gate, and 0.2.5 Issue #4 superseded-evidence release gate.
 
 Environment:
 
@@ -71,6 +71,15 @@ Environment:
 - 0.2.4 Issue #3 weak-model session root: `/private/tmp/pi-tasks-issue3-ornith15-fixed`
 - 0.2.4 Issue #3 weak-model summary: `/private/tmp/pi-tasks-issue3-ornith15-fixed/summary2.json`
 - 0.2.4 Issue #3 weak-model model: `llama.cpp/bartowski/Ornith-1.5-35B-A3B-GGUF:Q6_K_L`
+- 0.2.5 Issue #4 source session root: `/private/tmp/pi-tasks-release-025/sessions`
+- 0.2.5 Issue #4 source lifecycle session ID: `release-025-source-lifecycle`
+- 0.2.5 Issue #4 fork replay session name: `release-025-fork-replay`
+- 0.2.5 Issue #4 installed package smoke root: `/private/tmp/pi-tasks-release-025-installed`
+- 0.2.5 Issue #4 installed package session ID: `release-025-installed-smoke`
+- 0.2.5 weak-model prompt session root: `/private/tmp/pi-tasks-release-025-weak/sessions`
+- 0.2.5 English weak-model session ID: `release-025-weak-en-final`
+- 0.2.5 Traditional Chinese weak-model session ID: `release-025-weak-zh-final`
+- 0.2.5 installed weak-model session ID: `release-025-installed-weak`
 
 ## Passed Scenarios
 
@@ -153,6 +162,15 @@ Environment:
 - Confirmed 0.2.4 `task_evidence type=test` and `type=review` remain usable with the flat OMP-compatible quality schema; review evidence uses `quality.command` as a verification-action label rather than a fake shell command.
 - Confirmed 0.2.4 Traditional Chinese weak-model command evidence records successfully on the first attempt after `references` was made schema-required.
 - Confirmed 0.2.4 Issue #3 transcript analysis found zero duplicate `task_evidence` payload loops across final ornith1.5 sessions.
+- Confirmed 0.2.5 `task_complete` accepts a step/criterion-linked failed evidence item only after a later passing evidence item explicitly lists it in `supersedes` and links to the same step/criterion.
+- Confirmed 0.2.5 `task_list include_evidence=true` renders `supersedes:E1` so the failed gate stays visible in lineage.
+- Confirmed 0.2.5 same-session resume restores completed task `T1` with `E2 supersedes:E1` and evidence `E3`.
+- Confirmed 0.2.5 fork replay restores completed task `T1` with superseded failed evidence lineage intact.
+- Confirmed 0.2.5 live TTY `/tasks` default excludes completed tasks, `/tasks detail` renders completed supersedes evidence, and `/quit` exits cleanly with exit code 0.
+- Confirmed 0.2.5 installed package runtime creates and completes a supersedes smoke task through `./node_modules/pi-tasks/dist/index.js`.
+- Confirmed 0.2.5 English weak-model source prompt rejects compound atomic wording, future-step evidence without override, and oversized evidence summary while `task_next` keeps `task_evidence` as the only next tool.
+- Confirmed 0.2.5 Traditional Chinese weak-model source prompt rejects compound atomic wording, future-step evidence without override, and oversized evidence summary while `task_next` keeps `task_evidence` as the only next tool.
+- Confirmed 0.2.5 installed weak-model smoke rejects compound atomic wording and returns structured recovery with `retry_with: task_plan` and `do_not_retry_same_call: true`.
 
 ## Commands
 
@@ -762,9 +780,118 @@ pi --no-extensions \
 
 Observed result: tarball `pi-tasks-0.2.0.tgz` was created; clean consumer import passed; installed runtime created task `T1`; `state_event_report` returned `count: 2`, reasons `session_start`, `task_mutation`, stable widget id `pi-tasks`, active task `T1`, and `lastHasRawEvents: false`.
 
+0.2.5 Issue #4 source supersedes lifecycle:
+
+```sh
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-025/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./index.ts \
+  --no-builtin-tools \
+  --tools task_plan,task_update,task_evidence,task_complete,task_list,task_resume,task_next \
+  --session-id release-025-source-lifecycle \
+  --name release-025-source-lifecycle \
+  -p "Release 0.2.5 source dogfood. Create a supersedes task, record failed linked evidence E1, record passing linked evidence E2 with supersedes E1, complete the task, and list evidence."
+```
+
+Observed result: created `T1`; recorded failed evidence `E1`; recorded passing evidence `E2` with `supersedes:E1`; recorded unit-test evidence `E3`; completed `T1` at 100%; `task_list include_evidence=true` rendered `E2 ... supersedes:E1`.
+
+0.2.5 same-session resume and fork replay:
+
+```sh
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-025/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./index.ts \
+  --no-builtin-tools \
+  --tools task_list,task_resume \
+  --session-id release-025-source-lifecycle \
+  -p "Release 0.2.5 resume dogfood. Call task_resume and task_list with include_done=true and include_evidence=true."
+
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-025/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./index.ts \
+  --no-builtin-tools \
+  --tools task_list,task_resume \
+  --fork release-025-source-lifecycle \
+  --name release-025-fork-replay \
+  -p "Release 0.2.5 fork replay dogfood. Call task_list with include_done=true and include_evidence=true."
+```
+
+Observed result: resume and fork replay both restored `T1 [done] 100%`, `E2 supersedes:E1`, `E3`, and `2/2` satisfied criteria.
+
+0.2.5 live TTY `/tasks`, `/tasks detail`, and clean exit:
+
+```sh
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-025/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./index.ts \
+  --session-id release-025-source-lifecycle
+```
+
+Observed result: `/tasks` returned `No tasks on this branch.` because compact default excludes completed tasks; `/tasks detail` rendered `T1 [done]` with `E2 ... supersedes:E1`; `/quit` exited cleanly with exit code 0.
+
+0.2.5 installed package supersedes smoke:
+
+```sh
+mkdir -p /private/tmp/pi-tasks-release-025-installed/tarball /private/tmp/pi-tasks-release-025-installed/consumer /private/tmp/pi-tasks-release-025-installed/sessions
+npm pack --pack-destination /private/tmp/pi-tasks-release-025-installed/tarball
+cd /private/tmp/pi-tasks-release-025-installed/consumer
+npm init -y
+npm install /private/tmp/pi-tasks-release-025-installed/tarball/pi-tasks-0.2.5.tgz
+node -e "import('pi-tasks')"
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-025-installed/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./node_modules/pi-tasks/dist/index.js \
+  --no-builtin-tools \
+  --tools task_plan,task_update,task_evidence,task_complete,task_list \
+  --session-id release-025-installed-smoke \
+  --name release-025-installed-smoke \
+  -p "Release 0.2.5 installed-package smoke. Create and complete a supersedes evidence task."
+```
+
+Observed result: clean tarball install supported `import('pi-tasks')`; installed runtime completed `T1` at 100%; `E2 supersedes:E1`.
+
+0.2.5 weak-model source prompts:
+
+```sh
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-025-weak/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./index.ts \
+  --no-builtin-tools \
+  --tools task_next,task_plan,task_evidence,task_list \
+  --session-id release-025-weak-en-final \
+  --name release-025-weak-en-final \
+  -p @/private/tmp/pi-tasks-release-025-weak/en-source-prompt.md
+
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-025-weak/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./index.ts \
+  --no-builtin-tools \
+  --tools task_next,task_plan,task_evidence,task_list \
+  --session-id release-025-weak-zh-final \
+  --name release-025-weak-zh-final \
+  -p @/private/tmp/pi-tasks-release-025-weak/zh-source-prompt.md
+```
+
+Observed result: English and Traditional Chinese source prompts both rejected compound atomic wording, future-step evidence without override, and oversized evidence summary; final `task_next` reported only next tool `task_evidence` and current step lock `T1-S1`.
+
+0.2.5 installed weak-model smoke:
+
+```sh
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-025-installed/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./node_modules/pi-tasks/dist/index.js \
+  --no-builtin-tools \
+  --tools task_next,task_plan \
+  --session-id release-025-installed-weak \
+  --name release-025-installed-weak \
+  -p "Installed weak-model smoke. Call task_next with no active task. Then call task_plan with one deliberately invalid atomic step text 'Run tests and update docs' and report whether compound wording is rejected with structured recovery."
+```
+
+Observed result: installed runtime rejected compound wording and returned structured recovery with `retry_with: task_plan` and `do_not_retry_same_call: true`.
+
 ## Package Gates
 
-Also passed on 2026-06-19:
+Also passed across release gates:
 
 - `npm run typecheck`
 - `npm run check`
@@ -790,10 +917,15 @@ Also passed on 2026-06-19:
 - 0.2.0 `npm run release:check`
 - 0.2.0 source state-event lifecycle, same-session resume, fork replay, live `/tasks`, large-session manual `/compact`, and clean `/quit`
 - 0.2.0 clean tarball install plus installed-package Pi state-event smoke through `./node_modules/pi-tasks/dist/index.js`
+- 0.2.5 `npm run release:check`
+- 0.2.5 source superseded-evidence lifecycle, same-session resume, fork replay, live `/tasks detail`, and clean `/quit`
+- 0.2.5 clean tarball install plus installed-package superseded-evidence smoke through `./node_modules/pi-tasks/dist/index.js`
+- 0.2.5 English and Traditional Chinese weak-model prompt dogfood for compound plan rejection, current-step evidence lock, oversized evidence rejection, and `task_next` convergence
+- 0.2.5 installed-package weak-model smoke for compound plan rejection and structured recovery
 
 ## Remaining Runtime Coverage
 
-No remaining runtime coverage gaps are known for the 0.1.0 or 0.2.0 release scope.
+No remaining runtime coverage gaps are known for the 0.1.0, 0.2.0, or 0.2.5 release scope.
 
 Known runtime note:
 

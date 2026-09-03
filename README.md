@@ -129,8 +129,14 @@ the registered tool description while still keeping `promptSnippet` and
 - Unresolved blockers remain
 - Unresolved scope drift warnings remain
 - All evidence is only `not_verified`
+- Linked failing step/criterion evidence remains unresolved by a later passing `supersedes` rerun
 
 Forced completion requires `force_with_reason` and produces a low-confidence warning.
+
+When a rerun passes after an honest failed gate, record the passing `task_evidence`
+with `supersedes: ["<failed evidence id>"]` and the same linked `step_ids` /
+`criterion_ids`; the failed evidence remains in lineage but no longer blocks
+completion.
 
 ## Token Efficiency
 

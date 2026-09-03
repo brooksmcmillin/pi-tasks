@@ -288,6 +288,9 @@ function addEvidence(
 		summary: event.evidence.summary.trim(),
 		references: event.evidence.references ?? [],
 		quality: normalizeEvidenceQuality(event.evidence.quality, event.evidence),
+		...(event.evidence.supersedes
+			? { supersedes: event.evidence.supersedes }
+			: {}),
 		createdAt: event.createdAt,
 	};
 	validateEvidence(evidence);
@@ -328,6 +331,7 @@ function addEvidence(
 			event.overrideReason,
 		);
 	}
+	validateEvidenceSupersedes(task, evidence);
 	recalculateProgress(task);
 	task.updatedAt = event.createdAt;
 	return state;
@@ -397,6 +401,48 @@ function validateEvidenceStepLock(
 		throw new TaskTransitionError(
 			`Evidence step_ids must target current step ${currentStep.id}; overrideReason is required for ${outsideCurrentStep.join(",")}`,
 		);
+	}
+}
+function validateEvidenceSupersedes(task: Task, evidence: TaskEvidence): void {
+	const supersededIds = evidence.supersedes ?? [];
+	if (supersededIds.length === 0) return;
+	if (evidence.passed !== true) {
+		throw new TaskTransitionError(
+			`Evidence ${evidence.id} must pass to supersede failed evidence`,
+		);
+	}
+	for (const supersededId of unique(supersededIds)) {
+		const superseded = requireEvidence(task, supersededId);
+		if (superseded.passed !== false) {
+			throw new TaskTransitionError(
+				`Evidence ${evidence.id} can only supersede failed evidence ${supersededId}`,
+			);
+		}
+		if (Date.parse(evidence.createdAt) <= Date.parse(superseded.createdAt)) {
+			throw new TaskTransitionError(
+				`Evidence ${evidence.id} must be later than superseded evidence ${supersededId}`,
+			);
+		}
+		for (const criterion of task.acceptanceCriteria) {
+			if (
+				criterion.evidenceIds.includes(supersededId) &&
+				!criterion.evidenceIds.includes(evidence.id)
+			) {
+				throw new TaskTransitionError(
+					`Evidence ${evidence.id} must link criterion ${criterion.id} to supersede evidence ${supersededId}`,
+				);
+			}
+		}
+		for (const step of task.planSteps) {
+			if (
+				step.evidenceIds.includes(supersededId) &&
+				!step.evidenceIds.includes(evidence.id)
+			) {
+				throw new TaskTransitionError(
+					`Evidence ${evidence.id} must link step ${step.id} to supersede evidence ${supersededId}`,
+				);
+			}
+		}
 	}
 }
 
@@ -914,8 +960,12 @@ function validateCompletion(
 			);
 		}
 		for (const evidenceId of criterion.evidenceIds) {
-			const criterionEvidence = requireEvidence(task, evidenceId);
-			if (criterionEvidence.passed === false && !forceReason) {
+			if (
+				hasBlockingFailedEvidence(task, evidenceId, {
+					criterionId: criterion.id,
+				}) &&
+				!forceReason
+			) {
 				throw new TaskTransitionError(
 					`Criterion ${criterion.id} has failing evidence ${evidenceId}`,
 				);
@@ -936,7 +986,10 @@ function validateCompletion(
 		for (const evidenceId of step.evidenceIds) {
 			const stepEvidence = requireEvidence(task, evidenceId);
 			validateEvidenceQualityScore(stepEvidence);
-			if (stepEvidence.passed === false && !forceReason) {
+			if (
+				hasBlockingFailedEvidence(task, evidenceId, { stepId: step.id }) &&
+				!forceReason
+			) {
 				throw new TaskTransitionError(
 					`Plan step ${step.id} has failing evidence ${evidenceId}`,
 				);
@@ -947,6 +1000,38 @@ function validateCompletion(
 		for (const evidenceItem of evidence)
 			validateEvidenceQualityScore(evidenceItem);
 	}
+}
+
+export function hasBlockingFailedEvidence(
+	task: Task,
+	evidenceId: string,
+	scope: { criterionId?: string; stepId?: string },
+): boolean {
+	const evidence = requireEvidence(task, evidenceId);
+	if (evidence.passed !== false) return false;
+	return !task.evidence.some(
+		(candidate) =>
+			candidate.passed === true &&
+			(candidate.supersedes ?? []).includes(evidenceId) &&
+			Date.parse(candidate.createdAt) > Date.parse(evidence.createdAt) &&
+			isEvidenceLinkedToScope(task, candidate.id, scope),
+	);
+}
+
+function isEvidenceLinkedToScope(
+	task: Task,
+	evidenceId: string,
+	scope: { criterionId?: string; stepId?: string },
+): boolean {
+	if (scope.criterionId) {
+		const criterion = requireCriterion(task, scope.criterionId);
+		return criterion.evidenceIds.includes(evidenceId);
+	}
+	if (scope.stepId) {
+		const step = requireStep(task, scope.stepId);
+		return step.evidenceIds.includes(evidenceId);
+	}
+	return false;
 }
 
 function validateStatusTransition(
@@ -1196,7 +1281,9 @@ function findDuplicateEvidence(
 			existing.passed === evidence.passed &&
 			existing.summary.trim() === evidence.summary.trim() &&
 			normalizedReferences(existing.references) ===
-				normalizedReferences(evidence.references),
+				normalizedReferences(evidence.references) &&
+			normalizedReferences(existing.supersedes ?? []) ===
+				normalizedReferences(evidence.supersedes ?? []),
 	);
 }
 

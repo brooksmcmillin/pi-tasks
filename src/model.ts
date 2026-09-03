@@ -47,6 +47,7 @@ export interface TaskEvidence {
 	references: string[];
 	quality: EvidenceQuality;
 	createdAt: string;
+	supersedes?: string[];
 }
 
 export interface EvidenceQuality {

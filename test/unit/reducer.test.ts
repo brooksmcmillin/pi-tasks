@@ -114,6 +114,47 @@ function evidence(
 		...params,
 	};
 }
+function gateEvidence({
+	id,
+	eventId,
+	passed,
+	createdAt,
+	supersedes,
+	criterionIds = ["T1-AC1", "T1-AC2"],
+	stepIds = ["T1-S1"],
+}: {
+	id: string;
+	eventId: string;
+	passed: boolean;
+	createdAt: string;
+	supersedes?: string[];
+	criterionIds?: string[];
+	stepIds?: string[];
+}): TaskEvent {
+	const result = passed ? "passed" : "failed";
+	return evidence({
+		id: eventId,
+		createdAt,
+		evidence: {
+			id,
+			type: "review",
+			level: "release_grade_e2e",
+			summary: `techlead gate ${result}`,
+			passed,
+			references: ["techlead gate"],
+			quality: {
+				source: "techlead gate",
+				reproducible: true,
+				verifier: "user",
+				artifactRefs: ["techlead gate"],
+				observedOutput: `techlead gate ${result}`,
+			},
+			...(supersedes ? { supersedes } : {}),
+		},
+		criterionIds,
+		stepIds,
+	});
+}
 
 function complete(
 	params: Partial<Extract<TaskEvent, { type: "task.completed" }>> = {},
@@ -570,6 +611,96 @@ describe("task reducer", () => {
 		expect(state.tasks.T1.status).toBe("done");
 		expect(state.tasks.T1.progress).toBe(100);
 		expect(state.activeTaskId).toBeUndefined();
+	});
+
+	it("allows later passing evidence to supersede a linked failed rerun", () => {
+		const state = apply([
+			created(),
+			gateEvidence({
+				id: "E1",
+				eventId: "T1-evidence-failed",
+				passed: false,
+				createdAt: "2026-06-18T00:00:01.000Z",
+			}),
+			gateEvidence({
+				id: "E2",
+				eventId: "T1-evidence-passed",
+				passed: true,
+				createdAt: "2026-06-18T00:00:02.000Z",
+				supersedes: ["E1"],
+			}),
+			stepDone(),
+			complete({ evidenceIds: ["E2"] }),
+		]);
+
+		expect(state.tasks.T1.status).toBe("done");
+		expect(state.tasks.T1.planSteps[0]?.evidenceIds).toEqual(["E1", "E2"]);
+		expect(state.tasks.T1.acceptanceCriteria[0]?.evidenceIds).toEqual([
+			"E1",
+			"E2",
+		]);
+	});
+
+	it("keeps failed evidence blocking until explicitly superseded", () => {
+		expect(() =>
+			apply([
+				created(),
+				gateEvidence({
+					id: "E1",
+					eventId: "T1-evidence-failed",
+					passed: false,
+					createdAt: "2026-06-18T00:00:01.000Z",
+				}),
+				gateEvidence({
+					id: "E2",
+					eventId: "T1-evidence-passed",
+					passed: true,
+					createdAt: "2026-06-18T00:00:02.000Z",
+				}),
+				stepDone(),
+				complete({ evidenceIds: ["E2"] }),
+			]),
+		).toThrow("failing evidence E1");
+	});
+
+	it("rejects supersedes references to missing evidence", () => {
+		expect(() =>
+			apply([
+				created(),
+				gateEvidence({
+					id: "E2",
+					eventId: "T1-evidence-passed",
+					passed: true,
+					createdAt: "2026-06-18T00:00:02.000Z",
+					supersedes: ["E404"],
+				}),
+			]),
+		).toThrow("Evidence E404 not found");
+	});
+
+	it("rejects superseding evidence without the same linked scope", () => {
+		expect(() =>
+			apply([
+				created(),
+				gateEvidence({
+					id: "E1",
+					eventId: "T1-evidence-failed",
+					passed: false,
+					createdAt: "2026-06-18T00:00:01.000Z",
+					criterionIds: [],
+					stepIds: ["T1-S1"],
+				}),
+				gateEvidence({
+					id: "E2",
+					eventId: "T1-evidence-passed",
+					passed: true,
+					createdAt: "2026-06-18T00:00:02.000Z",
+					supersedes: ["E1"],
+					criterionIds: [],
+					stepIds: [],
+				}),
+			]),
+		).toThrow("must link step T1-S1");
 	});
 
 	it("rejects completion while plan steps remain open", () => {
