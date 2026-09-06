@@ -1,9 +1,9 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.6] - 2026-09-06
 
 ### Fixed
-- Stopped rejecting long, concrete passing evidence summaries that merely contain a vague word such as `done`; the vagueness gate now fires only for short summaries or summaries that are entirely a vague phrase, and the error names the matched fragment.
+- Stopped rejecting concrete passing evidence summaries that contain vague words such as `done` or `完成了` when they also include observed result signals; the vagueness gate now rejects whole-summary vague phrases and short vague summaries, and the error names the matched fragment.
 
 ## [0.2.5] - 2026-09-03
 

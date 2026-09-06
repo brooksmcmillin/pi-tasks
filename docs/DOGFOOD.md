@@ -4,9 +4,9 @@ This document tracks real Pi dogfood evidence. Skipped items are not counted as 
 
 ## Current Status
 
-Date: 2026-09-03
+Date: 2026-09-06
 
-Result: passed for the scoped MVP dogfood gate, release-hardening dogfood gate, weak-model release gate, installed-package smoke, 0.1.5 receiver-bound append compatibility release gate, 0.2.0 state-event source/resume/fork/live-TTY/manual-compaction/installed-package smoke, 0.2.4 Issue #3 weak-model/Oh My Pi evidence-schema release gate, and 0.2.5 Issue #4 superseded-evidence release gate.
+Result: passed for the scoped MVP dogfood gate, release-hardening dogfood gate, weak-model release gate, installed-package smoke, 0.1.5 receiver-bound append compatibility release gate, 0.2.0 state-event source/resume/fork/live-TTY/manual-compaction/installed-package smoke, 0.2.4 Issue #3 weak-model/Oh My Pi evidence-schema release gate, 0.2.5 Issue #4 superseded-evidence release gate, and 0.2.6 vague-evidence summary release gate.
 
 Environment:
 
@@ -80,6 +80,13 @@ Environment:
 - 0.2.5 English weak-model session ID: `release-025-weak-en-final`
 - 0.2.5 Traditional Chinese weak-model session ID: `release-025-weak-zh-final`
 - 0.2.5 installed weak-model session ID: `release-025-installed-weak`
+- 0.2.6 vague evidence source session root: `/private/tmp/pi-tasks-release-026/sessions`
+- 0.2.6 source Chinese vague evidence session ID: `release-026-source-vague`
+- 0.2.6 English weak-model session ID: `release-026-weak-en`
+- 0.2.6 resume session ID: `release-026-resume`
+- 0.2.6 fork replay session ID: `release-026-fork`
+- 0.2.6 installed package smoke root: `/private/tmp/pi-tasks-release-026-installed`
+- 0.2.6 installed package session ID: `release-026-installed-vague`
 
 ## Passed Scenarios
 
@@ -889,13 +896,92 @@ env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-025-installed/sess
 
 Observed result: installed runtime rejected compound wording and returned structured recovery with `retry_with: task_plan` and `do_not_retry_same_call: true`.
 
+0.2.6 vague evidence source dogfood:
+
+```sh
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-026/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./index.ts \
+  --no-builtin-tools \
+  --tools task_plan,task_update,task_evidence,task_complete,task_list \
+  --session-id release-026-source-vague \
+  --name release-026-source-vague \
+  -p @/private/tmp/pi-tasks-release-026/prompts/source-vague-evidence.md
+```
+
+Observed result: vague Chinese passing summary `完成了` was rejected with `Evidence summary is too vague for passing evidence (matched "完成了"); describe the observed result`; concrete Chinese summary `畫面顯示完成了並回傳 code 0` was accepted as `E2`; task `T1` completed at `100%`; `task_list include_evidence=true` rendered `E2 evidence integration_test true: 畫面顯示完成了並回傳 code 0`.
+
+0.2.6 resume, fork, live `/tasks`, and clean `/quit`:
+
+```sh
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-026/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./index.ts \
+  --no-builtin-tools \
+  --tools task_list \
+  --session-id release-026-source-vague \
+  --name release-026-resume \
+  -p @/private/tmp/pi-tasks-release-026/prompts/resume-fork.md
+
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-026/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./index.ts \
+  --no-builtin-tools \
+  --tools task_list \
+  --fork release-026-source-vague \
+  --name release-026-fork \
+  -p @/private/tmp/pi-tasks-release-026/prompts/resume-fork.md
+
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-026/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./index.ts \
+  --session-id release-026-source-vague
+```
+
+Observed result: resume and fork replay both restored `T1 [done] 100%` and the concrete Chinese evidence summary; live `/tasks detail` rendered `T1 [done]` and the `E2` evidence line; `/quit` exited with code 0.
+
+0.2.6 English weak-model source prompt:
+
+```sh
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-026/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./index.ts \
+  --no-builtin-tools \
+  --tools task_plan,task_update,task_evidence,task_complete,task_list,task_next \
+  --session-id release-026-weak-en \
+  --name release-026-weak-en \
+  -p @/private/tmp/pi-tasks-release-026/prompts/source-vague-evidence-en.md
+```
+
+Observed result: vague English passing summary `done` was rejected with matched fragment `done`; concrete English summary `CLI returned MATCH Done/Done` was accepted as `E3`; task `T1` completed at `100%`; detailed task output rendered `E3 evidence e2e_smoke true: CLI returned MATCH Done/Done`.
+
+0.2.6 installed package vague evidence smoke:
+
+```sh
+mkdir -p /private/tmp/pi-tasks-release-026-installed/tarball /private/tmp/pi-tasks-release-026-installed/consumer /private/tmp/pi-tasks-release-026-installed/sessions
+npm pack --pack-destination /private/tmp/pi-tasks-release-026-installed/tarball
+cd /private/tmp/pi-tasks-release-026-installed/consumer
+npm install /private/tmp/pi-tasks-release-026-installed/tarball/pi-tasks-0.2.6.tgz
+node -e "import('pi-tasks')"
+env PI_CODING_AGENT_SESSION_DIR=/private/tmp/pi-tasks-release-026-installed/sessions \
+  pi --provider openai-codex --model gpt-5.5 \
+  --no-extensions --extension ./node_modules/pi-tasks/dist/index.js \
+  --no-builtin-tools \
+  --tools task_plan,task_update,task_evidence,task_complete,task_list \
+  --session-id release-026-installed-vague \
+  --name release-026-installed-vague \
+  -p @/private/tmp/pi-tasks-release-026/prompts/installed-vague-evidence.md
+```
+
+Observed result: clean tarball install supported `import('pi-tasks')`; installed runtime accepted `E1 evidence integration_test true: CLI returned MATCH Done/Done`; task `T1` completed at `100%`.
+
 ## Package Gates
 
 Also passed across release gates:
 
 - `npm run typecheck`
 - `npm run check`
-- `npm test` (42 unit tests)
+- `npm test` (76 unit tests)
 - `npm run build`
 - `node --experimental-strip-types -e "import('./index.ts')"`
 - `node -e "import('./dist/index.js')"`
@@ -922,6 +1008,10 @@ Also passed across release gates:
 - 0.2.5 clean tarball install plus installed-package superseded-evidence smoke through `./node_modules/pi-tasks/dist/index.js`
 - 0.2.5 English and Traditional Chinese weak-model prompt dogfood for compound plan rejection, current-step evidence lock, oversized evidence rejection, and `task_next` convergence
 - 0.2.5 installed-package weak-model smoke for compound plan rejection and structured recovery
+- 0.2.6 `npm run release:check`
+- 0.2.6 source vague-evidence lifecycle, same-session resume, fork replay, live `/tasks detail`, and clean `/quit`
+- 0.2.6 clean tarball install plus installed-package vague-evidence smoke through `./node_modules/pi-tasks/dist/index.js`
+- 0.2.6 English and Traditional Chinese prompt dogfood for vague-summary rejection and concrete observed-summary acceptance
 
 ## Remaining Runtime Coverage
 
