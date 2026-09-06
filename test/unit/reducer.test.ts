@@ -503,6 +503,62 @@ describe("task reducer", () => {
 		).toThrow(TaskTransitionError);
 	});
 
+	it("accepts a long concrete passing summary that contains the word Done", () => {
+		const state = apply([
+			created(),
+			evidence({
+				evidence: {
+					id: "E1",
+					type: "command",
+					level: "integration_test",
+					summary:
+						"pi-tasks CLI: ensure --status Done read back MATCH Done/Done; task marked done in board after 3 updates",
+					passed: true,
+					references: ["pi-tasks ensure"],
+					quality: {
+						source: "cli",
+						reproducible: true,
+						verifier: "tool",
+						command: "pi-tasks ensure --status Done",
+						artifactRefs: ["pi-tasks ensure"],
+						observedOutput: "MATCH Done/Done",
+					},
+				},
+			}),
+		]);
+		expect(state.tasks.T1.evidence).toHaveLength(1);
+	});
+
+	it.each(["done", "Done.", "looks good", "vitest done"])(
+		"rejects vague passing summary %j and names the matched fragment",
+		(summary) => {
+			expect(() =>
+				apply([
+					created(),
+					evidence({
+						evidence: {
+							id: "E1",
+							type: "test",
+							level: "unit_test",
+							summary,
+							passed: true,
+							references: ["npm test"],
+							quality: {
+								source: "vitest",
+								reproducible: true,
+								verifier: "tool",
+								artifactRefs: ["npm test"],
+								observedOutput: "Test suite passed",
+							},
+						},
+					}),
+				]),
+			).toThrow(
+				/too vague for passing evidence \(matched "(done|looks good)"\)/i,
+			);
+		},
+	);
+
 	it("rejects low-quality evidence without observed output", () => {
 		expect(() =>
 			apply([

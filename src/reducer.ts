@@ -40,6 +40,9 @@ const VAGUE_EVIDENCE_PATTERNS = [
 	/應該/,
 	/似乎/,
 ];
+const VAGUE_EVIDENCE_WHOLE_PATTERN =
+	/^(done|ok|works|looks good|seems ok|should work|probably.*)[.!]?$/i;
+const VAGUE_EVIDENCE_SHORT_SUMMARY_LENGTH = 60;
 
 export class TaskTransitionError extends Error {
 	constructor(message: string) {
@@ -1207,10 +1210,13 @@ function validateEvidence(evidence: TaskEvidence): void {
 		);
 	}
 	validateEvidenceQualityScore(evidence);
-	if (evidence.passed === true && containsVagueEvidence(evidence.summary)) {
-		throw new TaskTransitionError(
-			"Evidence summary is too vague for passing evidence",
-		);
+	if (evidence.passed === true) {
+		const vagueMatch = findVagueEvidence(evidence.summary);
+		if (vagueMatch !== undefined) {
+			throw new TaskTransitionError(
+				`Evidence summary is too vague for passing evidence (matched "${vagueMatch}"); describe the observed result`,
+			);
+		}
 	}
 	if (evidence.type !== "note" && evidence.references.length === 0) {
 		throw new TaskTransitionError(
@@ -1266,8 +1272,28 @@ function getEvidenceQualityIssues(evidence: TaskEvidence): string[] {
 	return issues;
 }
 
-function containsVagueEvidence(value: string): boolean {
-	return VAGUE_EVIDENCE_PATTERNS.some((pattern) => pattern.test(value.trim()));
+/**
+ * Returns the vague fragment when a passing summary is genuinely vague:
+ * either the whole summary is a vague phrase, or the summary is short and
+ * contains a vague word. Long, concrete summaries that merely contain a word
+ * like "done" are accepted.
+ */
+function findVagueEvidence(value: string): string | undefined {
+	const trimmed = value.trim();
+	const whole = VAGUE_EVIDENCE_WHOLE_PATTERN.exec(trimmed);
+	if (whole) {
+		return whole[1];
+	}
+	if (trimmed.length >= VAGUE_EVIDENCE_SHORT_SUMMARY_LENGTH) {
+		return undefined;
+	}
+	for (const pattern of VAGUE_EVIDENCE_PATTERNS) {
+		const match = pattern.exec(trimmed);
+		if (match) {
+			return match[0];
+		}
+	}
+	return undefined;
 }
 
 function findDuplicateEvidence(
