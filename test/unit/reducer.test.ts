@@ -529,6 +529,62 @@ describe("task reducer", () => {
 		expect(state.tasks.T1.evidence).toHaveLength(1);
 	});
 
+	it.each(["CLI returned MATCH Done/Done", "畫面顯示完成了並回傳 code 0"])(
+		"accepts short concrete passing summary %j",
+		(summary) => {
+			const state = apply([
+				created(),
+				evidence({
+					evidence: {
+						id: "E1",
+						type: "command",
+						level: "integration_test",
+						summary,
+						passed: true,
+						references: ["pi-tasks smoke"],
+						quality: {
+							source: "cli",
+							reproducible: true,
+							verifier: "tool",
+							command: "pi-tasks smoke",
+							artifactRefs: ["pi-tasks smoke"],
+							observedOutput: "MATCH Done/Done",
+						},
+					},
+				}),
+			]);
+			expect(state.tasks.T1.evidence).toHaveLength(1);
+		},
+	);
+
+	it.each(["完成了", "看起來可以", "應該沒問題", "似乎正常"])(
+		"rejects vague Chinese passing summary %j",
+		(summary) => {
+			expect(() =>
+				apply([
+					created(),
+					evidence({
+						evidence: {
+							id: "E1",
+							type: "test",
+							level: "unit_test",
+							summary,
+							passed: true,
+							references: ["npm test"],
+							quality: {
+								source: "vitest",
+								reproducible: true,
+								verifier: "tool",
+								artifactRefs: ["npm test"],
+								observedOutput: "Test suite passed",
+							},
+						},
+					}),
+				]),
+			).toThrow(/too vague for passing evidence \(matched ".+"\)/);
+		},
+	);
+
 	it.each(["done", "Done.", "looks good", "vitest done"])(
 		"rejects vague passing summary %j and names the matched fragment",
 		(summary) => {

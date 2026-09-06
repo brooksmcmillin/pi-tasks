@@ -40,8 +40,15 @@ const VAGUE_EVIDENCE_PATTERNS = [
 	/應該/,
 	/似乎/,
 ];
-const VAGUE_EVIDENCE_WHOLE_PATTERN =
-	/^(done|ok|works|looks good|seems ok|should work|probably.*)[.!]?$/i;
+const VAGUE_EVIDENCE_WHOLE_PATTERNS = [
+	/^(done|ok|works|looks good|seems ok|should work|probably.*)[.!。！]?$/i,
+	/^(完成了?|看起來(可以|沒問題|正常)?|應該(可以|沒問題|正常)?.*|似乎(可以|沒問題|正常)?.*)[.!。！]?$/,
+];
+const CONCRETE_EVIDENCE_SIGNAL_PATTERNS = [
+	/\b(exit code|returned|read back|match(?:ed)?|observed|reported|output|passed|failed|errored?|status)\b/i,
+	/\b\d+\/\d+\b/,
+	/顯示|回傳|返回|輸出|觀察到|通過|失敗|狀態|退出碼|錯誤碼/,
+];
 const VAGUE_EVIDENCE_SHORT_SUMMARY_LENGTH = 60;
 
 export class TaskTransitionError extends Error {
@@ -1273,18 +1280,23 @@ function getEvidenceQualityIssues(evidence: TaskEvidence): string[] {
 }
 
 /**
- * Returns the vague fragment when a passing summary is genuinely vague:
- * either the whole summary is a vague phrase, or the summary is short and
- * contains a vague word. Long, concrete summaries that merely contain a word
- * like "done" are accepted.
+ * Returns the vague fragment when a passing summary is genuinely vague.
+ * Whole-summary vague phrases are always rejected. Short summaries also reject
+ * vague words unless the text includes an observed result signal such as an
+ * output, status, match, count, or exit code.
  */
 function findVagueEvidence(value: string): string | undefined {
 	const trimmed = value.trim();
-	const whole = VAGUE_EVIDENCE_WHOLE_PATTERN.exec(trimmed);
-	if (whole) {
-		return whole[1];
+	for (const pattern of VAGUE_EVIDENCE_WHOLE_PATTERNS) {
+		const whole = pattern.exec(trimmed);
+		if (whole) {
+			return whole[1] ?? whole[0];
+		}
 	}
-	if (trimmed.length >= VAGUE_EVIDENCE_SHORT_SUMMARY_LENGTH) {
+	if (
+		trimmed.length >= VAGUE_EVIDENCE_SHORT_SUMMARY_LENGTH ||
+		CONCRETE_EVIDENCE_SIGNAL_PATTERNS.some((pattern) => pattern.test(trimmed))
+	) {
 		return undefined;
 	}
 	for (const pattern of VAGUE_EVIDENCE_PATTERNS) {
