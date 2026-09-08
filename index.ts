@@ -9,7 +9,7 @@ import {
 	type TaskStateEventReason,
 } from "./src/state-events.ts";
 import { createTaskRuntimeStore, snapshotState } from "./src/store.ts";
-import { registerTaskTools } from "./src/tools.ts";
+import { reconcileTaskTools, registerTaskTools } from "./src/tools.ts";
 import { updateTaskUi } from "./src/widget.ts";
 
 export {
@@ -27,6 +27,7 @@ export default function (pi: ExtensionAPI) {
 		reason: Extract<TaskStateEventReason, "session_start" | "session_tree">,
 	) => {
 		const result = store.replay(ctx.sessionManager.getBranch());
+		reconcileTaskTools(pi, result.state);
 		updateTaskUi(pi, ctx, result.state, reason);
 		if (result.malformedEvents.length > 0) {
 			ctx.ui.notify(

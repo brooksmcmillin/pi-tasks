@@ -48,7 +48,7 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - No `any` unless the boundary truly requires it and the rationale is documented.
 - Keep startup light. Avoid loading optional UI-heavy modules at extension import time unless Pi requires them.
 - Prefer deterministic local state transitions over prompt-only behavior.
-- All agent-facing tools must have clear `promptSnippet` and `promptGuidelines`, and their critical guidance must also be reflected in `description` for hosts that ignore custom prompt fields.
+- `task_plan` and `task_resume` must have clear `promptSnippet` and `promptGuidelines`, with critical guidance reflected in `description` for hosts that ignore custom prompt fields. Lazily activated task controls use compact descriptions without active-only prompt metadata.
 - Long-running operations must support cancellation where applicable.
 - TUI custom renderers and widgets must be width-safe and tested in real Pi TUI sessions.
 

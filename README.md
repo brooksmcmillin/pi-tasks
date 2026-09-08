@@ -76,7 +76,7 @@ task_evidence → attach proof before marking done
 task_complete → only succeeds when all gates pass
 ```
 
-The agent gets 12 tools. The user gets `/tasks`. Everything persists in Pi's session tree.
+Fresh sessions expose only `task_plan` and `task_resume`; after a persisted task is created or restored, pi-tasks activates the available task controls. Explicit Pi tool allowlists, exclusions, and `noTools` remain ceilings, and unrelated active tools are preserved. The user gets `/tasks`. Everything persists in Pi's session tree.
 
 ### Oh My Pi support
 
@@ -97,9 +97,10 @@ the `session_start`, `session_tree`, and `session_before_compact` lifecycle
 events.
 
 Because Oh My Pi renders model-facing tool guidance from `description` and
-`parameters`, every pi-tasks tool mirrors its critical `promptGuidelines` into
-the registered tool description while still keeping `promptSnippet` and
-`promptGuidelines` for Pi hosts that read those fields directly.
+`parameters`, the initial `task_plan` and `task_resume` entrypoints mirror
+their critical guidance into descriptions. Lazily activated controls keep only
+compact descriptions so native Pi can add them without active-only prompt
+metadata.
 
 ## Agent Tools
 
@@ -245,7 +246,7 @@ blockers, and evidence references; custom UI extensions should keep them local.
 - Session replay from `ctx.sessionManager.getBranch()` on `session_start` and `session_tree`
 - Compaction snapshot hook via `session_before_compact`
 - Compact status bar and above-editor widget
-- Oh My Pi-compatible extension manifest and tool descriptions that preserve critical guidance on hosts that ignore custom `promptSnippet`/`promptGuidelines` fields
+- Oh My Pi-compatible extension manifest, with critical entrypoint guidance preserved in descriptions for hosts that ignore custom `promptSnippet`/`promptGuidelines` fields
 
 ### Verification
 
