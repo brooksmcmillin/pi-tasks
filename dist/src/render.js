@@ -103,10 +103,7 @@ export function formatTaskFocus(state) {
         `Active task: ${task.id} ${compactDetail(task.title)}`,
         `Status: ${task.status} ${task.progress}%`,
     ];
-    if (!step) {
-        lines.push("Current step: none open");
-    }
-    else {
+    if (step) {
         lines.push(`Current step: ${step.id} [${step.status}] ${compactDetail(step.text)}`);
         lines.push(`Granularity: ${step.decompositionStatus}`);
         lines.push(`Atomicity reason: ${compactDetail(step.granularityCheck.reason)}`);
@@ -124,6 +121,9 @@ export function formatTaskFocus(state) {
         if (step.decompositionStatus !== "atomic") {
             lines.push(`Next allowed action: task_decompose ${step.id}`);
         }
+    }
+    else {
+        lines.push("Current step: none open");
     }
     const gaps = getVerificationGaps(task);
     if (gaps.length > 0)

@@ -158,9 +158,7 @@ export function formatTaskFocus(state: TaskState): string {
 		`Active task: ${task.id} ${compactDetail(task.title)}`,
 		`Status: ${task.status} ${task.progress}%`,
 	];
-	if (!step) {
-		lines.push("Current step: none open");
-	} else {
+	if (step) {
 		lines.push(
 			`Current step: ${step.id} [${step.status}] ${compactDetail(step.text)}`,
 		);
@@ -187,6 +185,8 @@ export function formatTaskFocus(state: TaskState): string {
 		if (step.decompositionStatus !== "atomic") {
 			lines.push(`Next allowed action: task_decompose ${step.id}`);
 		}
+	} else {
+		lines.push("Current step: none open");
 	}
 	const gaps = getVerificationGaps(task);
 	if (gaps.length > 0) lines.push(`Gaps: ${gaps.join("; ")}`);

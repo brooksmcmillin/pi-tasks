@@ -13,7 +13,7 @@ AI coding agents say "done" without proof. Context compaction loses progress. Mu
 Every other task tool for AI agents is just a todo list. pi-tasks enforces three hard contracts no competitor offers:
 
 | Contract | What it means |
-|----------|---------------|
+| ---------- | --------------- |
 | **Evidence-gated completion** | Agents cannot mark work done without traceable, reproducible proof |
 | **Atomic step decomposition** | Vague or compound steps are rejected; non-atomic steps must be broken down before execution |
 | **Compaction-safe resume** | Context window limits don't lose your progress — snapshot replay picks up exactly where you left off |
@@ -25,7 +25,7 @@ Plus: ordered step execution, scope drift detection, weak-model recovery guidanc
 Different tools solve different parts of the agentic workflow. Pick based on what matters most to your team:
 
 | Tool | Focus | Strengths | Trade-offs |
-|------|-------|-----------|------------|
+| ------ | ------- | ----------- | ------------ |
 | **Claude Code Tasks** (built-in) | Cross-session coordination | Shared task lists, dependency tracking, zero setup | No completion verification, no step-level contracts |
 | **rpiv-pi** (9.4K/mo, 413★) | Structured workflows | 6 end-to-end flows, 12 subagents, code-review loops | Workflow-oriented; task visibility via separate rpiv-todo |
 | **@tintinweb/pi-tasks** (3.2K/mo, 113★) | Task tracking & subagents | Dependency DAG, auto-cascade, file/session/project scoping | Tracks progress; completion is self-reported |
@@ -104,7 +104,7 @@ the registered tool description while still keeping `promptSnippet` and
 ## Agent Tools
 
 | Tool | Purpose |
-|------|---------|
+| ------ | --------- |
 | `task_plan` | Create a task with objectives, criteria, and ordered steps |
 | `task_next` | One-step guidance for weak/small-context models |
 | `task_focus` | What work is in scope right now |

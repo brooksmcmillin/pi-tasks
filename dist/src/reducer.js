@@ -27,6 +27,16 @@ const VAGUE_EVIDENCE_PATTERNS = [
     /應該/,
     /似乎/,
 ];
+const VAGUE_EVIDENCE_WHOLE_PATTERNS = [
+    /^(done|ok|works|looks good|seems ok|should work|probably.*)[.!。！]?$/i,
+    /^(完成了?|看起來(可以|沒問題|正常)?|應該(可以|沒問題|正常)?.*|似乎(可以|沒問題|正常)?.*)[.!。！]?$/,
+];
+const CONCRETE_EVIDENCE_SIGNAL_PATTERNS = [
+    /\b(exit code|returned|read back|match(?:ed)?|observed|reported|output|passed|failed|errored?|status)\b/i,
+    /\b\d+\/\d+\b/,
+    /顯示|回傳|返回|輸出|觀察到|通過|失敗|狀態|退出碼|錯誤碼/,
+];
+const VAGUE_EVIDENCE_SHORT_SUMMARY_LENGTH = 60;
 export class TaskTransitionError extends Error {
     constructor(message) {
         super(message);
@@ -935,8 +945,11 @@ function validateEvidence(evidence) {
         throw new TaskTransitionError("Passing evidence requires a verification level stronger than not_verified");
     }
     validateEvidenceQualityScore(evidence);
-    if (evidence.passed === true && containsVagueEvidence(evidence.summary)) {
-        throw new TaskTransitionError("Evidence summary is too vague for passing evidence");
+    if (evidence.passed === true) {
+        const vagueMatch = findVagueEvidence(evidence.summary);
+        if (vagueMatch !== undefined) {
+            throw new TaskTransitionError(`Evidence summary is too vague for passing evidence (matched "${vagueMatch}"); describe the observed result`);
+        }
     }
     if (evidence.type !== "note" && evidence.references.length === 0) {
         throw new TaskTransitionError("Evidence requires at least one reference for traceability");
@@ -983,8 +996,31 @@ function getEvidenceQualityIssues(evidence) {
     }
     return issues;
 }
-function containsVagueEvidence(value) {
-    return VAGUE_EVIDENCE_PATTERNS.some((pattern) => pattern.test(value.trim()));
+/**
+ * Returns the vague fragment when a passing summary is genuinely vague.
+ * Whole-summary vague phrases are always rejected. Short summaries also reject
+ * vague words unless the text includes an observed result signal such as an
+ * output, status, match, count, or exit code.
+ */
+function findVagueEvidence(value) {
+    const trimmed = value.trim();
+    for (const pattern of VAGUE_EVIDENCE_WHOLE_PATTERNS) {
+        const whole = pattern.exec(trimmed);
+        if (whole) {
+            return whole[1] ?? whole[0];
+        }
+    }
+    if (trimmed.length >= VAGUE_EVIDENCE_SHORT_SUMMARY_LENGTH ||
+        CONCRETE_EVIDENCE_SIGNAL_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+        return undefined;
+    }
+    for (const pattern of VAGUE_EVIDENCE_PATTERNS) {
+        const match = pattern.exec(trimmed);
+        if (match) {
+            return match[0];
+        }
+    }
+    return undefined;
 }
 function findDuplicateEvidence(task, evidence) {
     return task.evidence.find((existing) => existing.type === evidence.type &&

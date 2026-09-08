@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+
 - Added backward-compatible acceptance and diagnostic evidence roles. Diagnostic evidence may support diagnostic steps and remains visible without changing criterion status or satisfying task completion; evidence without a role defaults to acceptance.
 - Added explicit acceptance-evidence supersession through `task_evidence.supersedes_evidence_ids` plus a required reason. Passing acceptance replacements retain failed records, expose both directions of the relationship, and prevent only explicitly superseded failures from blocking completion.
 - Added `task_verify_step`, which records passing evidence and completes the current atomic step through one persisted `task.step_verified` event with idempotent exact retries.
@@ -10,62 +11,93 @@
 - Added `task_list({ include_history: true })` as an explicit full-state recovery path.
 
 ### Changed
+
 - Tool guidance now tells agents to record expected or remediated fail-first results as diagnostic evidence and attach passing acceptance evidence for step and criterion completion.
 - `pi-tasks:state` now publishes a version-2 compact delta/resume contract instead of a full task snapshot. The contract contains the active task, current atomic step, unresolved blockers, evidence gaps, and state version.
 - Weak-model resume guidance now recommends the compound verification tool for the successful current-step path while retaining `task_evidence` and `task_update` for failure, backfill, skip, blocker, and scope workflows.
 
+## [0.2.6] - 2026-09-06
+
+### Fixed
+
+- Stopped rejecting concrete passing evidence summaries that contain vague words such as `done` or `完成了` when they also include observed result signals; the vagueness gate now rejects whole-summary vague phrases and short vague summaries, and the error names the matched fragment.
+
+## [0.2.5] - 2026-09-03
+
+### Added
+
+- Added `task_evidence.supersedes` so a later passing rerun can explicitly resolve prior linked failed evidence without losing audit lineage.
+- Added smart-model and weak-model convergence guidance to every pi-tasks tool prompt.
+
+### Fixed
+
+- Allowed `task_complete` to ignore linked failed evidence only when a later passing evidence item explicitly supersedes it on the same step or criterion.
+
+
 ## [0.2.4] - 2026-08-24
 
 ### Fixed
+
 - Aligned `task_evidence` schema with runtime evidence quality gates for weak-model and Oh My Pi compatibility by requiring traceability references and complete quality fields, and preserving copyable retry examples for rejected command/test/dogfood evidence.
 
 ## [0.2.3] - 2026-08-04
 
 ### Fixed
+
 - Corrected Oh My Pi (`omp`) install documentation to remove the unsupported project-scoped npm package example and list verified npm/local plugin commands.
 
 ## [0.2.2] - 2026-08-04
 
 ### Added
+
 - Documented verified Oh My Pi (`omp`) npm-package and local-development installation paths, plus compatibility details.
 
 ### Changed
+
 - Mirrored tool `promptGuidelines` into registered tool descriptions so Oh My Pi hosts that consume `description`/`parameters` still receive critical task-contract guidance.
 - Removed the local `ctx.mode` compatibility shim from pi-tasks context types and event creation.
 
 ## [0.2.1] - 2026-08-04
 
 ### Fixed
+
 - Emitted explicit `type: "string"` for `Type.Enum()` schemas so Moonshot/Kimi-compatible tool schema validators accept pi-tasks enum parameters.
 
 ### Added
+
 - Added regression coverage for enum schema typing and option preservation.
 
 ### Security
+
 - Refreshed the lockfile to use the patched transitive PostCSS version required for `npm audit --audit-level=low` to pass.
 
 ## [0.2.0] - 2026-07-22
 
 ### Added
+
 - Exposed a versioned `pi-tasks:state` event for custom Pi task UI extensions, with stable `TASK_STATE_EVENT` and `TASK_WIDGET_ID` exports.
 - Published cloned task-state snapshots after session replay, session tree navigation, successful task mutations, and compaction snapshot persistence.
 - Added unit coverage for state-event ordering, consumer-owned widget replacement, cloned payload isolation, rejected mutation suppression, observer failure isolation, and compaction snapshot publication.
 
 ### Changed
+
 - Documented the custom task UI integration contract and local-extension data visibility expectations.
 
 ## [0.1.5] - 2026-06-23
 
 ### Fixed
+
 - Preserved `ExtensionAPI.appendEntry` method receivers when task tools append events, so receiver-bound host API implementations work without callers rebinding methods.
 
 ### Added
+
 - Added unit coverage for receiver-bound `appendEntry` compatibility across task tool event appends.
 - Added 0.1.5 release dogfood evidence for source task lifecycle, decision/evidence replay, fork replay, `/tasks detail`, and clean `/quit`.
 
 ## [0.1.4] - 2026-06-21
 
 ### Changed
+
 - Rewrote README with user-oriented market positioning, competitive landscape comparison, and streamlined structure.
 - Updated package.json description to reflect execution-contract positioning.
 - Set GitHub repo description, topics, and homepage via `gh repo edit`.
@@ -73,6 +105,7 @@
 ## [0.1.3] - 2026-06-20
 
 ### Changed
+
 - Added a token-efficient output contract: mutation tools now return compact `task_resume` guidance instead of full task/evidence dumps.
 - Tool `details` now carry compact resume context instead of full task state for normal tool responses.
 - `/tasks` now defaults to compact task summaries; `/tasks detail` explicitly requests full task details.
@@ -83,6 +116,7 @@
 - Evidence quality now enforces text budgets for summaries, references, artifact refs, command strings, source strings, and observed output.
 
 ### Added
+
 - Unit coverage for compact `/tasks`, explicit detail mode, compact tool `details`, and bounded evidence rendering.
 - Added `task_next` for weak or small-context models to get one recommended next tool, current-step lock, blocked tools, and minimum params.
 - Unit coverage for `task_next`, structured rejection recovery, compound atomic rejection, evidence budgets, and current-step evidence locking.
@@ -98,6 +132,7 @@ Internal release candidate. Superseded by `0.1.3` before npm publication.
 Initial public release candidate.
 
 ### Added
+
 - Initial product planning for a Pi-native task and progress contract extension.
 - MVP source modules for task/event modeling, reducer validation, branch replay, tool registration, `/tasks`, and compact UI status/widget updates.
 - Unit coverage for reducer transitions, custom-entry replay, rendering, registered tools, evidence enforcement, and replay after tool appends.
@@ -111,6 +146,7 @@ Initial public release candidate.
 - Release process and dogfood checklist documents.
 
 ### Changed
+
 - `initial_steps` now become ordered plan steps; `task_update` must advance the current step in order and `task_complete` rejects open steps unless forced.
 - Added structured step contracts with expected output, linked criteria, required evidence, allowed actions, and the `task_focus` tool.
 - Added recursive decomposition gating with `task_granularity_check` and `task_decompose`; non-atomic steps cannot be marked done.
