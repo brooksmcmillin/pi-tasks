@@ -47,6 +47,7 @@
 		"prepack": "npm run build",
 		"release:check": "scripts/release-check.sh",
 		"test": "vitest --run test/unit/",
+		"test:native": "vitest --run test/extension.test.ts",
 		"typecheck": "tsc --noEmit"
 	},
 	"engines": {
@@ -57,7 +58,7 @@
 		"@biomejs/biome": "2.3.5",
 		"@types/node": "22.19.19",
 		"typescript": "5.9.3",
-		"vitest": "3.2.6"
+		"vitest": "5.0.0"
 	},
 	"overrides": {
 		"esbuild": "0.28.1"
