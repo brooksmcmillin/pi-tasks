@@ -176,6 +176,16 @@ interface ToolActivationApi {
 	setActiveTools(names: string[]): void;
 }
 
+function hasToolActivationApi(
+	pi: ExtensionAPI,
+): pi is ExtensionAPI & ToolActivationApi {
+	return (
+		typeof pi.getActiveTools === "function" &&
+		typeof pi.getAllTools === "function" &&
+		typeof pi.setActiveTools === "function"
+	);
+}
+
 function registerGuidedTool<TParams extends Record<string, unknown>>(
 	pi: ExtensionAPI,
 	tool: GuidedTaskToolDefinition<TParams>,
@@ -186,7 +196,8 @@ function registerGuidedTool<TParams extends Record<string, unknown>>(
 		registeredTaskToolNames.set(pi, names);
 	}
 	if (
-		TASK_ENTRYPOINT_NAMES.includes(tool.name as "task_plan" | "task_resume")
+		TASK_ENTRYPOINT_NAMES.includes(tool.name as "task_plan" | "task_resume") ||
+		!hasToolActivationApi(pi)
 	) {
 		pi.registerTool({
 			...tool,
@@ -222,14 +233,8 @@ function formatToolDescription(
 }
 
 function getToolActivationApi(pi: ExtensionAPI): ToolActivationApi | undefined {
-	if (
-		typeof pi.getActiveTools !== "function" ||
-		typeof pi.getAllTools !== "function" ||
-		typeof pi.setActiveTools !== "function"
-	) {
-		return undefined;
-	}
-	return pi as ExtensionAPI & ToolActivationApi;
+	if (!hasToolActivationApi(pi)) return undefined;
+	return pi;
 }
 
 function configuredTaskTools(

@@ -21,6 +21,14 @@ npm run check
 echo "==> unit tests"
 npm test
 
+if [[ -z "${PI_SDK_ROOT:-}" ]]; then
+	echo "PI_SDK_ROOT is required for native Pi SDK extension tests" >&2
+	exit 1
+fi
+
+echo "==> native Pi SDK extension tests"
+npm run test:native
+
 echo "==> build"
 npm run build
 

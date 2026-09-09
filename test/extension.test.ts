@@ -13,11 +13,6 @@ if (!sdkRoot) {
 }
 
 const sdk = await import(pathToFileURL(join(sdkRoot, "dist/index.js")).href);
-const ai = await import(
-	pathToFileURL(
-		join(sdkRoot, "node_modules/@earendil-works/pi-ai/dist/index.js"),
-	).href
-);
 const taskRoot = resolve(import.meta.dirname, "..");
 const taskToolNames = new Set([
 	"task_plan",
@@ -235,10 +230,6 @@ async function createNativeSession(
 		},
 	);
 	const settingsManager = sdk.SettingsManager.inMemory({});
-	const modelRuntime = await sdk.ModelRuntime.create({
-		credentials: new ai.InMemoryCredentialStore(),
-		modelsStorePath: join(agentDir, "models-store.json"),
-	});
 	const resourceLoader = new sdk.DefaultResourceLoader({
 		cwd,
 		agentDir,
@@ -256,8 +247,6 @@ async function createNativeSession(
 		agentDir,
 		resourceLoader,
 		sessionManager,
-		settingsManager,
-		modelRuntime,
 		...(options.tools ? { tools: options.tools } : {}),
 		...(options.excludeTools ? { excludeTools: options.excludeTools } : {}),
 		...(options.noTools ? { noTools: options.noTools } : {}),
