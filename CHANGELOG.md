@@ -1,5 +1,18 @@
 # Changelog
 
+
+## [0.2.7] - 2026-09-10
+
+### Added
+- Lazily activates pi-tasks controls through native Pi tool APIs: fresh sessions expose only `task_plan` and `task_resume`, then restore the available task controls after task creation, session replay, or tree navigation.
+- Added native Pi SDK extension coverage for fresh tool surface, persisted task restoration, branch navigation, host tool ceilings, foreign task tool preservation, and rejected-plan non-activation.
+
+### Changed
+- Compact descriptions for lazily activated task controls when native activation is available while preserving full guidance for entrypoint tools and older hosts without native activation APIs.
+- Added `npm run test:native` to the release gate; `PI_SDK_ROOT` must point at an installed or built `@earendil-works/pi-coding-agent` SDK root.
+
+### Security
+- Upgraded Vitest to `5.0.0` so `npm audit --audit-level=low` reports zero vulnerabilities.
 ## [0.2.6] - 2026-09-06
 
 ### Fixed
