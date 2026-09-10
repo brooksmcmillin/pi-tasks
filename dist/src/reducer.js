@@ -63,6 +63,8 @@ function applyEvent(state, event) {
             return updateTask(state, event);
         case "task.steps_decomposed":
             return decomposeStep(state, event);
+        case "task.reworked":
+            return reworkTask(state, event);
         case "task.evidence_added":
             return addEvidence(state, event);
         case "task.step_verified":
@@ -193,6 +195,94 @@ function decomposeStep(state, event) {
     task.updatedAt = event.createdAt;
     return state;
 }
+function reworkTask(state, event) {
+    const task = requireTask(state, event.taskId);
+    if (typeof event.reason !== "string" || !event.reason.trim()) {
+        throw new TaskTransitionError("Rework reason with review findings is required");
+    }
+    if (task.status === "cancelled") {
+        throw new TaskTransitionError("Cancelled tasks cannot be reworked; create a new task");
+    }
+    if ((state.activeTaskId && state.activeTaskId !== task.id) ||
+        Object.values(state.tasks).some((other) => other.id !== task.id && other.status === "active")) {
+        throw new TaskTransitionError("Rework cannot displace another active task; select the intended task with task_update first");
+    }
+    validateReworkSteps(event.planSteps);
+    // Decomposition removes root steps from the live plan, but their root IDs remain in child IDs.
+    const nextStepNumber = Math.max(0, ...task.planSteps.map((step) => Number(step.id.slice(`${task.id}-S`.length).split(".")[0]))) + 1;
+    const steps = createPlanSteps(task.id, event.planSteps, undefined, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, !getCurrentOpenStep(task), { startIndex: nextStepNumber });
+    const affectedIds = new Set(steps.flatMap((step) => step.criterionIds));
+    for (const criterion of task.acceptanceCriteria) {
+        if (!affectedIds.has(criterion.id))
+            continue;
+        criterion.status = "pending";
+        criterion.evidenceBaseline = task.evidence.length;
+    }
+    task.planSteps.push(...steps);
+    task.status =
+        task.status === "blocked" ||
+            task.blockers.some((blocker) => !blocker.resolvedAt)
+            ? "blocked"
+            : "active";
+    state.activeTaskId = task.id;
+    task.confidence = 0;
+    delete task.completedAt;
+    delete task.completionSummary;
+    const current = getCurrentOpenStep(task);
+    if (current) {
+        current.status = "active";
+        current.startedAt ??= event.createdAt;
+        task.currentStep = current.text;
+        task.nextAction =
+            current.decompositionStatus === "atomic"
+                ? current.text
+                : `Break down ${current.id}`;
+    }
+    task.progress = deriveProgress(task);
+    task.warnings.push(`rework: ${event.reason.trim()} -> ${steps.map((step) => step.id).join(",")}`);
+    task.updatedAt = event.createdAt;
+    return state;
+}
+function validateReworkSteps(steps) {
+    if (!Array.isArray(steps) || steps.length === 0) {
+        throw new TaskTransitionError("Rework requires at least one remediation plan step");
+    }
+    for (const step of steps) {
+        if (!step ||
+            typeof step !== "object" ||
+            typeof step.text !== "string" ||
+            typeof step.expectedOutput !== "string" ||
+            (step.evidenceRequired !== undefined && step.evidenceRequired !== true)) {
+            throw new TaskTransitionError("Rework steps require text, expectedOutput, and evidenceRequired=true");
+        }
+        for (const values of [step.criterionIds, step.allowedActions]) {
+            if (values !== undefined &&
+                (!Array.isArray(values) ||
+                    values.length === 0 ||
+                    values.some((value) => typeof value !== "string" || !value.trim()))) {
+                throw new TaskTransitionError("Rework criterionIds and allowedActions must be non-empty string arrays");
+            }
+        }
+        if (step.decompositionStatus !== undefined &&
+            !["needs_breakdown", "breaking_down", "atomic", "deferred"].includes(step.decompositionStatus)) {
+            throw new TaskTransitionError("Invalid rework decompositionStatus");
+        }
+        const check = step.granularityCheck;
+        if (check !== undefined &&
+            (!check ||
+                typeof check !== "object" ||
+                typeof check.reason !== "string" ||
+                [
+                    check.isAtomic,
+                    check.canBeDoneInOneAgentAction,
+                    check.hasSingleObservableOutput,
+                    check.hasSingleVerificationMethod,
+                    check.hasNoHiddenSubtasks,
+                ].some((value) => typeof value !== "boolean"))) {
+            throw new TaskTransitionError("Rework granularityCheck requires a reason and boolean flags");
+        }
+    }
+}
 function updateTask(state, event) {
     const task = requireTask(state, event.taskId);
     const previousStatus = task.status;
@@ -238,6 +328,12 @@ function addEvidence(state, event) {
     const evidence = materializeEvidence(task, event.evidence, event.createdAt);
     validateEvidence(evidence);
     const duplicate = findDuplicateEvidence(task, evidence);
+    // Keep legacy replay unchanged; rework proof must have unambiguous IDs.
+    if (!duplicate &&
+        task.acceptanceCriteria.some((criterion) => criterion.evidenceBaseline !== undefined) &&
+        task.evidence.some((existing) => existing.id === evidence.id)) {
+        throw new TaskTransitionError(`Evidence ID ${evidence.id} already exists with different content`);
+    }
     if (!duplicate)
         validateEvidenceSupersession(task, evidence);
     const resolvedEvidence = duplicate ?? evidence;
@@ -261,9 +357,9 @@ function materializeEvidence(task, evidenceInput, createdAt) {
         references: evidenceInput.references ?? [],
         quality: normalizeEvidenceQuality(evidenceInput.quality, evidenceInput),
         supersedesEvidenceIds: unique(evidenceInput.supersedesEvidenceIds ?? []),
-        ...(evidenceInput.supersessionReason !== undefined
-            ? { supersessionReason: evidenceInput.supersessionReason.trim() }
-            : {}),
+        ...(evidenceInput.supersessionReason === undefined
+            ? {}
+            : { supersessionReason: evidenceInput.supersessionReason.trim() }),
         createdAt,
     };
 }
@@ -325,7 +421,10 @@ function linkEvidenceToCriteria(task, evidence, criterionIds) {
             continue;
         }
         if (evidence.passed === true) {
-            criterion.status = "satisfied";
+            if (criterion.evidenceBaseline === undefined ||
+                task.evidence.indexOf(evidence) >= criterion.evidenceBaseline) {
+                criterion.status = "satisfied";
+            }
             criterion.evidenceIds = unique([...criterion.evidenceIds, evidence.id]);
         }
         else if (evidence.passed === false) {
@@ -739,6 +838,11 @@ function validateCompletion(task, evidenceIds, forceReason) {
         if (criterion.status === "satisfied" && criterionEvidence.length === 0) {
             throw new TaskTransitionError(`Criterion ${criterion.id} is satisfied without active acceptance evidence`);
         }
+        if (criterion.status === "satisfied" &&
+            !hasFreshCriterionEvidence(task, criterion) &&
+            !forceReason) {
+            throw new TaskTransitionError(`Criterion ${criterion.id} requires passing acceptance evidence recorded after rework`);
+        }
         for (const evidenceItem of criterionEvidence) {
             if (evidenceItem.passed === false && !forceReason) {
                 throw new TaskTransitionError(`Criterion ${criterion.id} has failing evidence ${evidenceItem.id}`);
@@ -907,6 +1011,15 @@ function isEvidenceSuperseded(task, evidenceId) {
         item.passed === true &&
         Boolean(item.supersessionReason?.trim()) &&
         (item.supersedesEvidenceIds ?? []).includes(evidenceId));
+}
+export function hasFreshCriterionEvidence(task, criterion) {
+    if (criterion.evidenceBaseline === undefined)
+        return true;
+    return task.evidence
+        .slice(criterion.evidenceBaseline)
+        .some((evidence) => criterion.evidenceIds.includes(evidence.id) &&
+        evidence.passed === true &&
+        isActiveAcceptanceEvidence(task, evidence));
 }
 function isActiveAcceptanceEvidence(task, evidence) {
     return (getEvidenceRole(evidence) === "acceptance" &&

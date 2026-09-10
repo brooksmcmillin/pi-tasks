@@ -1,3 +1,4 @@
+import { hasFreshCriterionEvidence } from "./reducer.js";
 import { isSupportAction, SUPPORT_ACTIONS } from "./support-actions.js";
 const STATUS_ORDER = [
     "active",
@@ -97,7 +98,7 @@ function compactRef(text) {
 export function formatTaskFocus(state) {
     const task = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
     if (!task)
-        return "No active pi-tasks task. Create one with task_plan.";
+        return buildTaskResume(state).resumeInstruction;
     const step = (task.planSteps ?? []).find((item) => item.status !== "done" && item.status !== "skipped");
     const lines = [
         `Active task: ${task.id} ${compactDetail(task.title)}`,
@@ -118,13 +119,14 @@ export function formatTaskFocus(state) {
         if (step.allowedActions.length > 0) {
             lines.push(`Allowed actions: ${step.allowedActions.map(compactRef).join(", ")}`);
         }
-        if (step.decompositionStatus !== "atomic") {
-            lines.push(`Next allowed action: task_decompose ${step.id}`);
-        }
     }
     else {
         lines.push("Current step: none open");
     }
+    const resume = buildTaskResume(state);
+    lines.push(`Recommended tool: ${resume.recommendedTool}`);
+    lines.push(`Next allowed actions: ${resume.nextAllowedActions.join(", ")}`);
+    lines.push("Review findings: use task_rework for in-scope remediation; do not force-complete known gaps.");
     const gaps = getVerificationGaps(task);
     if (gaps.length > 0)
         lines.push(`Gaps: ${gaps.join("; ")}`);
@@ -137,6 +139,7 @@ export function formatTaskFocus(state) {
 export function buildTaskResume(state) {
     const task = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
     if (!task) {
+        const hasTasks = Object.keys(state.tasks).length > 0;
         return {
             mode: "planning",
             recommendedTool: "task_plan",
@@ -146,12 +149,16 @@ export function buildTaskResume(state) {
             evidenceIds: [],
             criterionIds: [],
             allowedActions: [],
-            nextAllowedActions: withSupportActions(["task_plan"]),
+            nextAllowedActions: withSupportActions(hasTasks
+                ? ["task_plan", "task_list", "task_rework", "task_decision"]
+                : ["task_plan"]),
             verificationGaps: [],
             blockers: [],
             decisions: [],
             warnings: [...state.warnings],
-            resumeInstruction: "No active pi-tasks task. Create one with task_plan before implementation work.",
+            resumeInstruction: hasTasks
+                ? "No active pi-tasks task. Use task_list to find an existing task, then task_rework with findings and remediation steps when review discovers gaps (including done tasks). Create a new objective with task_plan only when needed."
+                : "No active pi-tasks task. Create one with task_plan before implementation work.",
         };
     }
     const step = getCurrentOpenStep(task);
@@ -162,11 +169,14 @@ export function buildTaskResume(state) {
     const decisions = task.decisions
         .slice(-3)
         .map((decision) => `${decision.id}: ${compactDetail(decision.question)} -> ${compactDetail(decision.decision)}`);
-    const nextAllowedActions = step
-        ? getNextAllowedActions(step, blockers.length > 0)
-        : withSupportActions(["task_complete"]);
     const mode = getExecutionMode(task, step, blockers.length > 0, gaps);
     const recommendedTool = getRecommendedTool(mode, step);
+    const nextAllowedActions = withSupportActions([
+        recommendedTool,
+        ...(step ? getNextAllowedActions(step, mode === "blocked") : []),
+        "task_rework",
+        "task_decision",
+    ]);
     return {
         ...(state.activeTaskId ? { activeTaskId: state.activeTaskId } : {}),
         taskId: task.id,
@@ -270,7 +280,7 @@ export function formatTaskNext(state) {
     }
     lines.push(`Task: ${resume.taskId} - ${resume.title}`);
     lines.push(`Mode: ${resume.mode ?? "executing"}`);
-    lines.push(`Only next tool: ${resume.recommendedTool ?? resume.nextAllowedActions[0] ?? "task_resume"}`);
+    lines.push(`Recommended tool: ${resume.recommendedTool ?? resume.nextAllowedActions[0] ?? "task_resume"}`);
     lines.push(`Always allowed: ${SUPPORT_ACTIONS.join(", ")}`);
     if (resume.currentStepId) {
         lines.push(`Current step lock: ${resume.currentStepId}`);
@@ -281,6 +291,8 @@ export function formatTaskNext(state) {
     if (resume.blockedTools && resume.blockedTools.length > 0) {
         lines.push(`Do not call: ${resume.blockedTools.join(", ")}`);
     }
+    lines.push(`Next allowed actions: ${resume.nextAllowedActions.join(", ")}`);
+    lines.push("Review findings: task_rework is the explicit remediation path, even when completion is recommended.");
     lines.push(`Stop condition: ${resume.resumeInstruction}`);
     if (resume.verificationGaps.length > 0) {
         lines.push(`Gaps: ${resume.verificationGaps.join("; ")}`);
@@ -310,7 +322,8 @@ export function getVerificationGaps(task) {
         if (criterion.status !== "satisfied" && criterion.status !== "skipped")
             gaps.push(`${criterion.id} pending`);
         if (criterion.status === "satisfied" &&
-            !hasActiveAcceptanceEvidence(task, criterion.evidenceIds)) {
+            (!hasActiveAcceptanceEvidence(task, criterion.evidenceIds) ||
+                !hasFreshCriterionEvidence(task, criterion))) {
             gaps.push(`${criterion.id} lacks acceptance evidence`);
         }
     }
@@ -417,8 +430,12 @@ function getMinimumParams(task, step, recommendedTool) {
     if (recommendedTool === "task_evidence") {
         return {
             task_id: task.id,
-            step_ids: step ? [step.id] : ["<current step id>"],
-            criterion_ids: step?.criterionIds ?? [],
+            step_ids: step ? [step.id] : [],
+            criterion_ids: step?.criterionIds ??
+                task.acceptanceCriteria
+                    .filter((criterion) => criterion.status !== "satisfied" &&
+                    criterion.status !== "skipped")
+                    .map((criterion) => criterion.id),
             references: ["<artifact path or command>"],
         };
     }
@@ -428,6 +445,15 @@ function getMinimumParams(task, step, recommendedTool) {
             step_id: step.id,
             criterion_ids: step.criterionIds,
             references: ["<artifact path or command>"],
+        };
+    }
+    if (recommendedTool === "task_update" &&
+        (task.status === "blocked" ||
+            task.blockers.some((blocker) => !blocker.resolvedAt))) {
+        return {
+            task_id: task.id,
+            status: "active",
+            reason: "<how the blocker was resolved>",
         };
     }
     if (recommendedTool === "task_update" && step) {
@@ -520,12 +546,12 @@ function getStepLineage(task, step) {
 }
 function buildResumeInstruction(task, step, gaps, nextAllowedActions) {
     if (task.status === "blocked") {
-        return "Resolve the blocker with task_update before continuing execution.";
+        return "Resolve the blocker with task_update before continuing execution. task_rework can record remediation but does not resolve blockers.";
     }
     if (!step) {
         return gaps.length > 0
-            ? "No open step remains, but verification gaps remain. Resolve gaps before task_complete."
-            : "No open step remains. Use task_complete with supporting evidence.";
+            ? "No open step remains, but verification gaps remain. Use task_evidence for verification or task_rework with findings and remediation steps for missing implementation. Do not force-complete known gaps."
+            : "No open step remains. Use task_complete only if implementation is verified; if review finds gaps, use task_rework with findings and remediation steps without requesting permission for in-scope repairs.";
     }
     if (step.decompositionStatus !== "atomic") {
         return `Resume by decomposing ${step.id}; do not execute or mark it done until it is atomic.`;

@@ -76,7 +76,7 @@ task_verify_step → atomically attach passing proof and advance
 task_complete → only succeeds when all gates pass
 ```
 
-The agent gets 13 tools. The user gets `/tasks`. Everything persists in Pi's session tree.
+The agent gets 14 tools. The user gets `/tasks`. Everything persists in Pi's session tree.
 
 ### Oh My Pi support
 
@@ -112,12 +112,53 @@ the registered tool description while still keeping `promptSnippet` and
 | `task_checkpoint` | Save a durable snapshot for compaction resilience |
 | `task_granularity_check` | Verify a step is truly atomic |
 | `task_decompose` | Break non-atomic steps into child steps |
+| `task_rework` | Record review findings and append remediation steps, including reopening done tasks |
 | `task_list` | List tasks with optional filtering |
 | `task_update` | Advance steps, record activity, flag scope drift |
 | `task_evidence` | Attach acceptance or diagnostic evidence and supersede linked failures |
 | `task_verify_step` | Atomically attach passing evidence and complete the current atomic step |
 | `task_decision` | Record explicit user decisions |
 | `task_complete` | Close a task (only if all gates pass) |
+
+## Review remediation
+
+An exhausted plan is not proof that implementation is complete. When review finds
+missing or defective work within the original objective, use `task_rework` instead
+of force-completing or asking permission just to extend the plan. Genuine scope or
+architecture choices still need an explicit `task_decision`; rework does not grant
+approval or resolve blockers.
+
+```json
+{
+  "task_id": "T1",
+  "reason": "Final review found replication progress advancing past a failed record",
+  "plan_steps": [{
+    "text": "Guard replication progress after record failure",
+    "expectedOutput": "Failed batches retain the previous replication cursor",
+    "allowedActions": ["task_decompose"],
+    "evidenceRequired": true,
+    "decompositionStatus": "needs_breakdown"
+  }]
+}
+```
+
+`plan_steps` uses the same contracts as `task_plan`. Omit `criterionIds` to
+re-verify all criteria, or specify affected existing criterion IDs. New root step
+IDs follow existing roots, including decomposed ones. Existing open work stays
+first; the first new step becomes current when the old plan is exhausted.
+
+Rework retains prior steps, evidence links, findings, decisions, blockers, and
+warnings. It resets affected criteria to pending, clears completion metadata and
+confidence, and recalculates progress. Affected criteria require **new passing
+acceptance evidence recorded after rework**. Relinking old proof, including an
+identical deduplicated record, cannot re-verify them; describe the observed rerun
+distinctly. Failed acceptance evidence still needs explicit passing supersession.
+
+`task_next`, `task_resume`, and `task_focus` expose rework even when completion is
+recommended or no open step remains with verification gaps. If no task is active,
+use `task_list` (`include_done: true` for completed tasks) to recover its ID.
+Rework can reopen a done task but cannot reopen a cancelled task or silently
+displace another active task. No prior session entries are rewritten.
 
 ## Completion Gates
 

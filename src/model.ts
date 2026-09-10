@@ -64,6 +64,8 @@ export interface EvidenceQuality {
 }
 
 export interface AcceptanceCriterion {
+	/** Evidence before this append-only index cannot re-verify a reworked criterion. */
+	evidenceBaseline?: number;
 	id: string;
 	text: string;
 	status: "pending" | "satisfied" | "failed" | "skipped";
@@ -264,6 +266,12 @@ export interface TaskStepsDecomposedEvent extends TaskEventBase {
 	reason: string;
 }
 
+export interface TaskReworkedEvent extends TaskEventBase {
+	type: "task.reworked";
+	reason: string;
+	planSteps: TaskStepInput[];
+}
+
 export interface TaskEvidenceAddedEvent extends TaskEventBase {
 	type: "task.evidence_added";
 	evidence: Omit<TaskEvidence, "taskId" | "createdAt" | "quality"> & {
@@ -317,6 +325,7 @@ export type TaskEvent =
 	| TaskCreatedEvent
 	| TaskUpdatedEvent
 	| TaskStepsDecomposedEvent
+	| TaskReworkedEvent
 	| TaskEvidenceAddedEvent
 	| TaskStepVerifiedEvent
 	| TaskDecisionRecordedEvent

@@ -43,6 +43,7 @@ const GRANULARITY_STATUSES = [
     "atomic",
     "deferred",
 ];
+const REWORK_GUIDANCE = "Use task_rework when review discovers missing or defective work within the original objective, even if no open step remains or task_complete is recommended. Record findings and append remediation steps without asking permission for in-scope repairs; record genuine scope or architecture decisions with task_decision before proceeding.";
 function registerGuidedTool(pi, tool) {
     pi.registerTool({
         ...tool,
@@ -67,6 +68,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
         promptSnippet: "Create a pi-tasks execution contract before non-trivial implementation work",
         promptGuidelines: [
             "Use task_plan for multi-step work before implementation when no suitable active task exists.",
+            REWORK_GUIDANCE,
             "Smart models: constrain the plan to the user's stated objective; do not add speculative scope, gates, or abstractions.",
             "Weak models: omit unknown generated IDs and make each acceptance criterion a separately verifiable sentence.",
             "Prefer plan_steps with expectedOutput, criterionIds, evidenceRequired, and allowedActions for commercial-quality work.",
@@ -117,12 +119,11 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
         name: "task_next",
         label: "Task Next",
         description: "Return the single recommended next pi-tasks tool call for weak or small-context models.",
-        promptSnippet: "Ask pi-tasks for the only next tool to call before continuing",
+        promptSnippet: "Ask pi-tasks for the recommended next tool or review-remediation path",
         promptGuidelines: [
             "Call task_next after rejection, compaction, branch navigation, or uncertainty.",
-            "Smart models: treat the returned recommendation as the control contract; do not override it from memory or intuition.",
-            "Weak models: call exactly the Only next tool with the shown minimum params; if a tool is blocked, do not call it.",
-            "Follow Only next tool and Current step lock exactly.",
+            "Follow the recommended tool and current step lock unless new review findings require the explicit task_rework path; do not call blocked tools.",
+            REWORK_GUIDANCE,
             "Do not call blocked tools listed by task_next.",
         ],
         parameters: Type.Object({}),
@@ -135,6 +136,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
         promptSnippet: "Inspect the current pi-tasks focus before acting, then work only on the active step",
         promptGuidelines: [
             "Call task_focus before implementation, verification, or step completion work.",
+            REWORK_GUIDANCE,
             "Smart models: compare intended work to the current step lock before acting; record drift before off-step work.",
             "Weak models: copy the current step ID, criterion IDs, and evidence IDs exactly into the next tool call.",
             "If Granularity is not atomic, use task_decompose before doing implementation work.",
@@ -152,7 +154,8 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
         promptGuidelines: [
             "Call task_resume after context compaction, session resume, or when unsure what to do next.",
             "Smart models: trust the persisted resume contract after compaction; do not reconstruct stale plan state from memory.",
-            "Weak models: read recommendedTool, blockedTools, and minimumParams, then call only the recommended tool.",
+            "Read recommendedTool, blockedTools, and minimumParams; use the recommendation unless review findings require task_rework.",
+            REWORK_GUIDANCE,
             "Follow next allowed actions; do not complete tasks while verification gaps remain.",
             "Use task_decompose when the resume instruction says the current step is not atomic.",
         ],
@@ -274,6 +277,39 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
         },
     });
     registerGuidedTool(pi, {
+        name: "task_rework",
+        label: "Task Rework",
+        description: "Record review findings and append remediation steps to an existing task without discarding prior evidence or history.",
+        promptSnippet: "Extend or reopen a pi-tasks task for review-discovered remediation",
+        promptGuidelines: [
+            REWORK_GUIDANCE,
+            "task_rework requires task_id, a non-empty reason describing findings, and non-empty plan_steps using the same contracts as task_plan. Omit criterionIds to re-verify all criteria, or name affected existing criteria.",
+            "task_rework preserves prior steps, evidence, decisions, blockers, and warnings. It resets affected criteria and confidence; re-verify with new passing acceptance evidence. An identical old evidence record is deduplicated, not fresh proof; describe the observed rerun distinctly.",
+            "task_rework never resolves blockers or supersedes failed evidence. Explicitly supersede linked acceptance failures with task_evidence after remediation. Never force-complete known gaps.",
+            "task_rework can reopen done tasks, but not cancelled tasks, and cannot displace another active task. Use task_list to find the task ID when no task is active.",
+        ],
+        parameters: Type.Object({
+            task_id: Type.String(),
+            reason: Type.String({ minLength: 1 }),
+            plan_steps: Type.Array(Type.Object({
+                text: Type.String(),
+                expectedOutput: Type.String(),
+                criterionIds: Type.Optional(Type.Array(Type.String())),
+                evidenceRequired: Type.Optional(Type.Boolean()),
+                allowedActions: Type.Optional(Type.Array(Type.String())),
+                decompositionStatus: Type.Optional(Type.Enum(GRANULARITY_STATUSES)),
+                granularityCheck: Type.Optional(granularityCheckSchema()),
+            }), { minItems: 1 }),
+        }),
+        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+            const event = baseEvent("task.reworked", params.task_id, ctx, {
+                reason: params.reason,
+                planSteps: params.plan_steps,
+            });
+            return appendAndReport(pi, store, ctx, event, `Added remediation steps to task ${params.task_id}`);
+        },
+    });
+    registerGuidedTool(pi, {
         name: "task_list",
         label: "Task List",
         description: "List pi-tasks tasks on the current session branch. Set include_history only to recover full task state after an explicit request or compact-contract failure.",
@@ -362,30 +398,30 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
         execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
             const event = baseEvent("task.updated", params.task_id, ctx, {
                 ...(params.status ? { status: params.status } : {}),
-                ...(params.progress !== undefined ? { progress: params.progress } : {}),
-                ...(params.current_step !== undefined
-                    ? { currentStep: params.current_step }
-                    : {}),
-                ...(params.next_action !== undefined
-                    ? { nextAction: params.next_action }
-                    : {}),
-                ...(params.step_id !== undefined ? { stepId: params.step_id } : {}),
-                ...(params.step_status !== undefined
-                    ? { stepStatus: params.step_status }
-                    : {}),
-                ...(params.step_evidence_ids !== undefined
-                    ? { stepEvidenceIds: params.step_evidence_ids }
-                    : {}),
-                ...(params.activity !== undefined ? { activity: params.activity } : {}),
-                ...(params.scope !== undefined ? { scope: params.scope } : {}),
-                ...(params.scope_reason !== undefined
-                    ? { scopeReason: params.scope_reason }
-                    : {}),
-                ...(params.note !== undefined ? { note: params.note } : {}),
-                ...(params.reason !== undefined ? { reason: params.reason } : {}),
-                ...(params.resolve_warnings !== undefined
-                    ? { resolveWarnings: params.resolve_warnings }
-                    : {}),
+                ...(params.progress === undefined ? {} : { progress: params.progress }),
+                ...(params.current_step === undefined
+                    ? {}
+                    : { currentStep: params.current_step }),
+                ...(params.next_action === undefined
+                    ? {}
+                    : { nextAction: params.next_action }),
+                ...(params.step_id === undefined ? {} : { stepId: params.step_id }),
+                ...(params.step_status === undefined
+                    ? {}
+                    : { stepStatus: params.step_status }),
+                ...(params.step_evidence_ids === undefined
+                    ? {}
+                    : { stepEvidenceIds: params.step_evidence_ids }),
+                ...(params.activity === undefined ? {} : { activity: params.activity }),
+                ...(params.scope === undefined ? {} : { scope: params.scope }),
+                ...(params.scope_reason === undefined
+                    ? {}
+                    : { scopeReason: params.scope_reason }),
+                ...(params.note === undefined ? {} : { note: params.note }),
+                ...(params.reason === undefined ? {} : { reason: params.reason }),
+                ...(params.resolve_warnings === undefined
+                    ? {}
+                    : { resolveWarnings: params.resolve_warnings }),
                 ...(params.blocker ? { blocker: params.blocker } : {}),
             });
             return appendAndReport(pi, store, ctx, event, `Updated task ${params.task_id}`);
@@ -415,7 +451,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 criteriaAlreadyLinked(store.getState(), params, duplicate)) {
                 return textResult(`Evidence already recorded as ${duplicate.id} for task ${params.task_id}\n\n${formatTaskResume(store.getState())}`, buildTaskResume(store.getState()));
             }
-            const evidenceId = idGenerator.next("E");
+            const evidenceId = nextEvidenceId(store.getState(), idGenerator);
             const event = baseEvent("task.evidence_added", params.task_id, ctx, {
                 evidence: {
                     id: evidenceId,
@@ -510,7 +546,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 evidenceQualityEqual(requestedQuality, duplicate.quality)) {
                 return textResult(`Step ${params.step_id} already verified by ${duplicate.id}; retry made no changes\n\n${formatTaskResume(state)}`, buildTaskResume(state));
             }
-            const evidenceId = duplicate?.id ?? idGenerator.next("E");
+            const evidenceId = duplicate?.id ?? nextEvidenceId(state, idGenerator);
             const event = baseEvent("task.step_verified", params.task_id, ctx, {
                 stepId: params.step_id,
                 evidence: {
@@ -572,6 +608,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
         promptSnippet: "Complete a pi-tasks task only when acceptance criteria have evidence",
         promptGuidelines: [
             "Call task_complete only after task_evidence has recorded supporting evidence.",
+            REWORK_GUIDANCE,
             "Smart models: complete only after gaps are empty and all linked failures are superseded by later passing evidence.",
             "Weak models: copy evidence_ids from task_resume/task_focus; if rejected, call task_next instead of retrying the same call.",
             "Unsupported completion is rejected unless force_with_reason documents the verification gap.",
@@ -698,8 +735,26 @@ function buildRejectionRecovery(error, state, event) {
     return {
         rejected: true,
         reason: errorText(error),
-        retry_with: resume.recommendedTool ?? resume.nextAllowedActions[0] ?? "task_resume",
-        minimum_params: resume.minimumParams ?? {},
+        retry_with: event?.type === "task.reworked"
+            ? "task_rework"
+            : (resume.recommendedTool ??
+                resume.nextAllowedActions[0] ??
+                "task_resume"),
+        minimum_params: event?.type === "task.reworked"
+            ? {
+                task_id: event.taskId,
+                reason: "<review findings requiring remediation>",
+                plan_steps: [
+                    {
+                        text: "Describe the bounded remediation step",
+                        expectedOutput: "Observed regression result for the review finding",
+                        allowedActions: ["task_decompose"],
+                        evidenceRequired: true,
+                        decompositionStatus: "needs_breakdown",
+                    },
+                ],
+            }
+            : (resume.minimumParams ?? {}),
         do_not_retry_same_call: true,
         ...(retryExample ? { retry_example: retryExample } : {}),
         resume,
@@ -762,6 +817,13 @@ function selectTask(state, taskId) {
     if (taskId)
         return state.tasks[taskId];
     return state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
+}
+function nextEvidenceId(state, generator) {
+    const usedIds = new Set(Object.values(state.tasks).flatMap((task) => task.evidence.map((evidence) => evidence.id)));
+    let id = generator.next("E");
+    while (usedIds.has(id))
+        id = generator.next("E");
+    return id;
 }
 function nextTaskId(state) {
     const maxId = Object.keys(state.tasks).reduce((max, id) => {
@@ -849,12 +911,12 @@ function filterStateByStatus(state, status) {
 }
 function formatListOptions(params) {
     return {
-        ...(params.include_done !== undefined
-            ? { includeDone: params.include_done }
-            : {}),
-        ...(params.include_evidence !== undefined
-            ? { includeEvidence: params.include_evidence }
-            : {}),
-        ...(params.limit !== undefined ? { limit: params.limit } : {}),
+        ...(params.include_done === undefined
+            ? {}
+            : { includeDone: params.include_done }),
+        ...(params.include_evidence === undefined
+            ? {}
+            : { includeEvidence: params.include_evidence }),
+        ...(params.limit === undefined ? {} : { limit: params.limit }),
     };
 }
