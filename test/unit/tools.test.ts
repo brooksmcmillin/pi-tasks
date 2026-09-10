@@ -25,13 +25,18 @@ type ReceiverBoundPi = ExtensionAPI & {
 function createHarness() {
 	const tools = new Map<string, ToolDefinition<Record<string, unknown>>>();
 	const entries: TaskEvent[] = [];
+	const publications: string[] = [];
 	const ui = {
 		status: undefined as string | undefined,
 		widget: undefined as string[] | undefined,
 	};
 	const pi: ReceiverBoundPi = {
 		runtime: { entries },
-		events: { emit: () => {} },
+		events: {
+			emit: (name) => {
+				publications.push(name);
+			},
+		},
 		on: () => {},
 		registerTool: (tool) => tools.set(tool.name, tool),
 		registerCommand: () => {},
@@ -62,7 +67,7 @@ function createHarness() {
 	};
 	const store = createTaskRuntimeStore();
 	registerTaskTools(pi, store, new FixedIds());
-	return { tools, entries, ctx, store, ui };
+	return { tools, entries, ctx, store, ui, publications, pi };
 }
 
 async function execute(
@@ -83,6 +88,139 @@ function requireTool(
 }
 
 describe("registered task tools", () => {
+	it("registers evidence-preserving rework with discoverable guidance and persisted publication", async () => {
+		const { tools, entries, ctx, store, ui, publications, pi } =
+			createHarness();
+		const rework = requireTool(tools, "task_rework");
+		for (const name of [
+			"task_next",
+			"task_focus",
+			"task_resume",
+			"task_complete",
+			"task_plan",
+			"task_rework",
+		]) {
+			const tool = requireTool(tools, name);
+			expect(tool.promptSnippet).toBeTruthy();
+			expect(tool.promptGuidelines?.join(" ")).toContain("task_rework");
+			expect(tool.description).toContain(
+				"without asking permission for in-scope repairs",
+			);
+			expect(tool.description).toContain("task_decision");
+			expect(tool.description).not.toContain("call only the recommended tool");
+		}
+		expect(rework.parameters.required).toEqual([
+			"task_id",
+			"reason",
+			"plan_steps",
+		]);
+		const step = {
+			text: "Guard failed batch progress",
+			expectedOutput: "Failed batch retains previous cursor",
+			allowedActions: ["edit"],
+			evidenceRequired: true,
+			decompositionStatus: "atomic",
+			granularityCheck: {
+				isAtomic: true,
+				reason: "Single cursor guard",
+				canBeDoneInOneAgentAction: true,
+				hasSingleObservableOutput: true,
+				hasSingleVerificationMethod: true,
+				hasNoHiddenSubtasks: true,
+			},
+		};
+		await execute(
+			requireTool(tools, "task_plan"),
+			{
+				title: "Replica cursor",
+				objective: "Preserve failed batch cursor",
+				acceptance_criteria: ["Cursor remains safe"],
+				plan_steps: [step],
+			},
+			ctx,
+		);
+		await execute(
+			requireTool(tools, "task_verify_step"),
+			{
+				task_id: "T1",
+				step_id: "T1-S1",
+				type: "review",
+				level: "static_read",
+				summary: "Observed cursor guard in source",
+				references: ["review.md"],
+				quality: {
+					source: "review",
+					reproducible: true,
+					verifier: "agent",
+					artifactRefs: ["review.md"],
+				},
+			},
+			ctx,
+		);
+		const oldEvidence = structuredClone(store.getState().tasks.T1?.evidence);
+		const count = entries.length;
+		const publicationCount = publications.length;
+		const result = await execute(
+			rework,
+			{
+				task_id: "T1",
+				reason: "Review found batch progress regression",
+				plan_steps: [step],
+			},
+			ctx,
+		);
+		expect(result.isError).not.toBe(true);
+		expect(entries).toHaveLength(count + 1);
+		expect(entries.at(-1)?.type).toBe("task.reworked");
+		expect(publications.slice(publicationCount)).toContain("pi-tasks:state");
+		expect(ui.widget?.join("\n")).toContain("T1-S2");
+		expect(result.content[0]?.text).toContain("T1-S2");
+		expect(store.getState().tasks.T1?.evidence).toEqual(oldEvidence);
+		const restored = createTaskRuntimeStore();
+		restored.replay(ctx.sessionManager.getBranch());
+		expect(restored.getState()).toEqual(store.getState());
+		const beforeRejection = structuredClone(store.getState());
+		const priorPublications = [...publications];
+		for (const params of [
+			{ task_id: "T1", reason: " ", plan_steps: [step] },
+			{ task_id: "T1", reason: "Review gaps", plan_steps: null },
+			{ task_id: "missing", reason: "Review gaps", plan_steps: [step] },
+		]) {
+			const rejected = await execute(rework, params, ctx);
+			expect(rejected.isError).toBe(true);
+			expect(rejected.content[0]?.text).toContain("retry_with: task_rework");
+		}
+		expect(store.getState()).toEqual(beforeRejection);
+		expect(entries).toHaveLength(count + 1);
+		expect(publications).toEqual(priorPublications);
+		registerTaskTools(pi, restored, new FixedIds());
+		const fresh = await execute(
+			requireTool(tools, "task_verify_step"),
+			{
+				task_id: "T1",
+				step_id: "T1-S2",
+				type: "review",
+				level: "static_read",
+				summary: "Observed passing cursor regression after rework",
+				references: ["rework-review.md"],
+				quality: {
+					source: "review",
+					reproducible: true,
+					verifier: "agent",
+					artifactRefs: ["rework-review.md"],
+				},
+			},
+			ctx,
+		);
+		expect(fresh.isError).not.toBe(true);
+		expect(
+			restored.getState().tasks.T1?.evidence.map((item) => item.id),
+		).toEqual(["E1", "E2"]);
+		expect(restored.getState().tasks.T1?.acceptanceCriteria[0]?.status).toBe(
+			"satisfied",
+		);
+	});
+
 	it("projects prompt guidelines into tool descriptions for hosts that ignore custom fields", () => {
 		const { tools } = createHarness();
 		const plan = requireTool(tools, "task_plan");
@@ -640,7 +778,7 @@ describe("registered task tools", () => {
 		expect(focused.content[0]?.text).toContain("Current step: T1-S1");
 		expect(focused.content[0]?.text).toContain("Expected output");
 		const nextResult = await execute(next, {}, ctx);
-		expect(nextResult.content[0]?.text).toContain("Only next tool");
+		expect(nextResult.content[0]?.text).toContain("Recommended tool");
 		expect(nextResult.content[0]?.text).toContain("Current step lock: T1-S1");
 		const resumed = await execute(resume, {}, ctx);
 		expect(resumed.content[0]?.text).toContain("pi-tasks resume");

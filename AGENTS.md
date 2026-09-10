@@ -70,6 +70,14 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - A linked acceptance failure may stop blocking completion only through an explicit passing acceptance replacement that names the superseded evidence and gives a non-empty reason; retain both records and never infer supersession from a later pass.
 - The agent may propose task changes, but user-facing decisions must be recorded explicitly.
 
+## Review Rework Contract
+
+- Review findings within the original objective may use `task_rework` without user permission solely to extend the plan; genuine scope or architecture decisions still require explicit `task_decision` records.
+- Persist `task.reworked` with a non-empty findings reason and validated, evidence-required remediation steps. Append steps with collision-free root IDs; never discard or rewrite prior steps, evidence, decisions, blockers, warnings, or events.
+- Rework may reopen done tasks, but not cancelled tasks, and must not displace another active task. Existing open work remains ordered before appended steps. Unresolved blockers stay blocked.
+- Reset affected criteria to pending, require fresh passing acceptance evidence after their rework evidence baseline, clear completion metadata/confidence, and recalculate progress. Retain old evidence links; neither relinking old proof nor rework itself supersedes failing acceptance evidence.
+- `task_next`, `task_resume`, and `task_focus` must expose the explicit rework path for review findings, including exhausted plans with verification gaps. The recommended tool must be in nextAllowedActions and must not be blocked. Completion recommendations are conditional on verified implementation, not an instruction to ignore new findings.
+
 ## Verification Rules
 
 Before claiming readiness:
@@ -93,4 +101,3 @@ Skipped gates must be reported as skipped, not passed.
 - User-facing capabilities belong in `README.md`.
 - Product and architecture planning belongs in `docs/`.
 - Release process must be documented before the first npm release.
-

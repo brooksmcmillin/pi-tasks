@@ -141,39 +141,39 @@ export type TaskStatus = "pending" | "active" | "blocked" | "review" | "done" | 
 
 ```ts
 export type VerificationLevel =
-	| "not_verified"
-	| "static_read"
-	| "unit_test"
-	| "integration_test"
-	| "e2e_smoke"
-	| "release_grade_e2e"
-	| "pi_dogfood"
-	| "external_unverified";
+ | "not_verified"
+ | "static_read"
+ | "unit_test"
+ | "integration_test"
+ | "e2e_smoke"
+ | "release_grade_e2e"
+ | "pi_dogfood"
+ | "external_unverified";
 ```
 
 ### 5.3 Evidence
 
 ```ts
 export interface TaskEvidence {
-	id: string;
-	taskId: string;
-	type: "test" | "command" | "review" | "file" | "commit" | "dogfood" | "user_acceptance" | "external" | "note";
-	role?: "acceptance" | "diagnostic";
-	level: VerificationLevel;
-	summary: string;
-	passed: boolean | "unknown";
-	references: string[];
-	quality: {
-		source: string;
-		reproducible: boolean;
-		verifier: "agent" | "tool" | "user" | "external";
-		command?: string;
-		artifactRefs: string[];
-		observedOutput?: string;
-	};
-	supersedesEvidenceIds?: string[];
-	supersessionReason?: string;
-	createdAt: string;
+ id: string;
+ taskId: string;
+ type: "test" | "command" | "review" | "file" | "commit" | "dogfood" | "user_acceptance" | "external" | "note";
+ role?: "acceptance" | "diagnostic";
+ level: VerificationLevel;
+ summary: string;
+ passed: boolean | "unknown";
+ references: string[];
+ quality: {
+  source: string;
+  reproducible: boolean;
+  verifier: "agent" | "tool" | "user" | "external";
+  command?: string;
+  artifactRefs: string[];
+  observedOutput?: string;
+ };
+ supersedesEvidenceIds?: string[];
+ supersessionReason?: string;
+ createdAt: string;
 }
 ```
 
@@ -196,11 +196,11 @@ Rules:
 
 ```ts
 export interface AcceptanceCriterion {
-	id: string;
-	text: string;
-	status: "pending" | "satisfied" | "failed" | "skipped";
-	evidenceIds: string[];
-	note?: string;
+ id: string;
+ text: string;
+ status: "pending" | "satisfied" | "failed" | "skipped";
+ evidenceIds: string[];
+ note?: string;
 }
 ```
 
@@ -213,14 +213,14 @@ Rules:
 
 ```ts
 export interface TaskDecision {
-	id: string;
-	taskId: string;
-	question: string;
-	decision: string;
-	decidedBy: "user" | "agent";
-	rationale?: string;
-	impact?: string;
-	createdAt: string;
+ id: string;
+ taskId: string;
+ question: string;
+ decision: string;
+ decidedBy: "user" | "agent";
+ rationale?: string;
+ impact?: string;
+ createdAt: string;
 }
 ```
 
@@ -228,13 +228,13 @@ export interface TaskDecision {
 
 ```ts
 export interface TaskBlocker {
-	id: string;
-	taskId: string;
-	reason: string;
-	blockedBy: "user" | "external" | "environment" | "dependency" | "ambiguity";
-	neededToUnblock: string;
-	since: string;
-	resolvedAt?: string;
+ id: string;
+ taskId: string;
+ reason: string;
+ blockedBy: "user" | "external" | "environment" | "dependency" | "ambiguity";
+ neededToUnblock: string;
+ since: string;
+ resolvedAt?: string;
 }
 ```
 
@@ -242,38 +242,38 @@ export interface TaskBlocker {
 
 ```ts
 export interface TaskStep {
-	id: string;
-	taskId: string;
-	text: string;
-	expectedOutput: string;
-	status: "pending" | "active" | "done" | "skipped";
-	decompositionStatus:
-		| "needs_breakdown"
-		| "breaking_down"
-		| "atomic"
-		| "deferred";
-	granularityCheck: {
-		isAtomic: boolean;
-		reason: string;
-		canBeDoneInOneAgentAction: boolean;
-		hasSingleObservableOutput: boolean;
-		hasSingleVerificationMethod: boolean;
-		hasNoHiddenSubtasks: boolean;
-	};
-	parentStepId?: string;
-	childStepIds: string[];
-	depth: number;
-	evidenceIds: string[];
-	criterionIds: string[];
-	evidenceRequired: boolean;
-	allowedActions: string[];
-	planQuality: {
-		score: number;
-		issues: string[];
-	};
-	note?: string;
-	startedAt?: string;
-	completedAt?: string;
+ id: string;
+ taskId: string;
+ text: string;
+ expectedOutput: string;
+ status: "pending" | "active" | "done" | "skipped";
+ decompositionStatus:
+  | "needs_breakdown"
+  | "breaking_down"
+  | "atomic"
+  | "deferred";
+ granularityCheck: {
+  isAtomic: boolean;
+  reason: string;
+  canBeDoneInOneAgentAction: boolean;
+  hasSingleObservableOutput: boolean;
+  hasSingleVerificationMethod: boolean;
+  hasNoHiddenSubtasks: boolean;
+ };
+ parentStepId?: string;
+ childStepIds: string[];
+ depth: number;
+ evidenceIds: string[];
+ criterionIds: string[];
+ evidenceRequired: boolean;
+ allowedActions: string[];
+ planQuality: {
+  score: number;
+  issues: string[];
+ };
+ note?: string;
+ startedAt?: string;
+ completedAt?: string;
 }
 ```
 
@@ -298,29 +298,29 @@ Rules:
 
 ```ts
 export interface Task {
-	id: string;
-	title: string;
-	objective: string;
-	status: TaskStatus;
-	priority: "low" | "normal" | "high" | "urgent";
-	progress: number;
-	currentStep?: string;
-	nextAction?: string;
-	planSteps: TaskStep[];
-	acceptanceCriteria: AcceptanceCriterion[];
-	evidence: TaskEvidence[];
-	decisions: TaskDecision[];
-	blockers: TaskBlocker[];
-	parentId?: string;
-	dependencies: string[];
-	tags: string[];
-	linkedFiles: string[];
-	linkedCommits: string[];
-	confidence?: number;
-	createdAt: string;
-	updatedAt: string;
-	completedAt?: string;
-	cancelledAt?: string;
+ id: string;
+ title: string;
+ objective: string;
+ status: TaskStatus;
+ priority: "low" | "normal" | "high" | "urgent";
+ progress: number;
+ currentStep?: string;
+ nextAction?: string;
+ planSteps: TaskStep[];
+ acceptanceCriteria: AcceptanceCriterion[];
+ evidence: TaskEvidence[];
+ decisions: TaskDecision[];
+ blockers: TaskBlocker[];
+ parentId?: string;
+ dependencies: string[];
+ tags: string[];
+ linkedFiles: string[];
+ linkedCommits: string[];
+ confidence?: number;
+ createdAt: string;
+ updatedAt: string;
+ completedAt?: string;
+ cancelledAt?: string;
 }
 ```
 
@@ -337,21 +337,21 @@ Rules:
 
 ```ts
 export type TaskEvent =
-	| TaskCreatedEvent
-	| TaskUpdatedEvent
-	| TaskEvidenceAddedEvent
-	| TaskDecisionRecordedEvent
-	| TaskBlockedEvent
-	| TaskUnblockedEvent
-	| TaskCompletedEvent
-	| TaskCancelledEvent;
+ | TaskCreatedEvent
+ | TaskUpdatedEvent
+ | TaskEvidenceAddedEvent
+ | TaskDecisionRecordedEvent
+ | TaskBlockedEvent
+ | TaskUnblockedEvent
+ | TaskCompletedEvent
+ | TaskCancelledEvent;
 
 export interface TaskEventBase {
-	id: string;
-	type: string;
-	taskId: string;
-	createdAt: string;
-	source: "tool" | "command" | "system" | "import";
+ id: string;
+ type: string;
+ taskId: string;
+ createdAt: string;
+ source: "tool" | "command" | "system" | "import";
 }
 ```
 
@@ -369,10 +369,10 @@ State:
 
 ```ts
 export interface TaskState {
-	tasks: Record<string, Task>;
-	activeTaskId?: string;
-	events: TaskEvent[];
-	lastUpdatedAt?: string;
+ tasks: Record<string, Task>;
+ activeTaskId?: string;
+ events: TaskEvent[];
+ lastUpdatedAt?: string;
 }
 ```
 
@@ -390,7 +390,7 @@ Reducer requirements:
 Allowed transitions:
 
 | From | To | Allowed | Requirements |
-|---|---|---:|---|
+| --- | --- | ---: | --- |
 | pending | active | yes | none |
 | pending | cancelled | yes | reason |
 | active | blocked | yes | blocker |
@@ -402,7 +402,7 @@ Allowed transitions:
 | review | active | yes | rework reason |
 | review | done | yes | criteria evidence |
 | review | blocked | yes | blocker |
-| done | active | no by default | use reopen event in future version |
+| done | active | explicit rework only | task.reworked with findings and remediation steps |
 | cancelled | active | no by default | create new task instead |
 
 Completion rejection cases:
@@ -469,7 +469,7 @@ Behavior:
 
 - no mutation,
 - returns execution mode: `planning`, `decomposing`, `executing`, `verifying`, `blocked`, or `completing`,
-- returns the only recommended next tool,
+- returns the recommended next tool plus an explicit task_rework path for newly discovered review findings,
 - returns current-step lock when a step is open,
 - returns blocked tools that should not be called now,
 - returns minimum params for the recommended tool,
@@ -562,6 +562,27 @@ Behavior:
 - rejects decomposition beyond the maximum supported depth,
 - replaces the parent step with ordered child steps such as `T1-S1.1`,
 - keeps the first child in the parent's current status so focus can continue.
+
+### 8.7.1 `task_rework`
+
+Append review remediation to the existing task with required `task_id`, non-empty
+`reason` containing findings, and non-empty `plan_steps` in the `task_plan` shape.
+The `task.reworked` event preserves history and all evidence links. New root IDs
+follow the highest existing root, including roots represented by descendants.
+Existing open steps remain ahead of appended steps.
+
+Affected criteria are the union of remediation step criterion links (omitting
+links selects all criteria). Their status resets to pending and their optional
+`evidenceBaseline` becomes the current append-only evidence count. Completion
+requires passing acceptance evidence at or after that index for affected satisfied
+criteria; existing evidence and unresolved failures remain linked and enforced.
+Missing baselines preserve legacy behavior. Rework clears completion metadata and
+confidence, recalculates progress, and activates the task unless blockers remain.
+
+Rework supports done tasks, rejects cancelled tasks or displacement of another
+active task, and never resolves blockers, drift warnings, or user decisions.
+In-objective review remediation requires no separate permission; new scope or
+architecture choices must still be recorded with `task_decision`.
 
 ### 8.8 `task_list`
 
@@ -865,7 +886,7 @@ suggest
 Modes:
 
 | Mode | Behavior |
-|---|---|
+| --- | --- |
 | off | no warning |
 | suggest | warn when write-like operation has no active task |
 | require | block write-like operation without active task |

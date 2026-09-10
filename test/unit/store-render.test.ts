@@ -297,7 +297,7 @@ describe("store replay and render helpers", () => {
 			{ type: "custom", customType: TASK_EVENT_CUSTOM_TYPE, data: createEvent },
 		]).state;
 		const output = formatTaskNext(state);
-		expect(output).toContain("Only next tool: task_verify_step");
+		expect(output).toContain("Recommended tool: task_verify_step");
 		expect(output).toContain("Current step lock: T1-S1");
 		expect(output).toContain("Do not call: task_update done, task_complete");
 	});
