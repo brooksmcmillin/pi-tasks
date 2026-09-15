@@ -198,14 +198,56 @@ type GuidedTaskToolDefinition<TParams extends Record<string, unknown>> =
 		promptGuidelines: string[];
 	};
 
+const TASK_ENTRYPOINT_NAMES = ["task_plan", "task_resume"] as const;
+const registeredTaskToolNames = new WeakMap<ExtensionAPI, Set<string>>();
+
+interface ToolActivationApi {
+	getActiveTools(): string[];
+	getAllTools(): Array<{ name: string }>;
+	setActiveTools(names: string[]): void;
+}
+
+function hasToolActivationApi(
+	pi: ExtensionAPI,
+): pi is ExtensionAPI & ToolActivationApi {
+	return (
+		typeof pi.getActiveTools === "function" &&
+		typeof pi.getAllTools === "function" &&
+		typeof pi.setActiveTools === "function"
+	);
+}
+
 function registerGuidedTool<TParams extends Record<string, unknown>>(
 	pi: ExtensionAPI,
 	tool: GuidedTaskToolDefinition<TParams>,
 ): void {
-	pi.registerTool({
-		...tool,
-		description: formatToolDescription(tool.description, tool.promptGuidelines),
-	});
+	let names = registeredTaskToolNames.get(pi);
+	if (!names) {
+		names = new Set();
+		registeredTaskToolNames.set(pi, names);
+	}
+	if (
+		TASK_ENTRYPOINT_NAMES.includes(tool.name as "task_plan" | "task_resume") ||
+		!hasToolActivationApi(pi)
+	) {
+		pi.registerTool({
+			...tool,
+			description: formatToolDescription(
+				tool.description,
+				tool.promptGuidelines,
+			),
+		});
+		names.add(tool.name);
+		return;
+	}
+
+	const {
+		promptSnippet: _promptSnippet,
+		promptGuidelines: _promptGuidelines,
+		...lazyTool
+	} = tool;
+	pi.registerTool(lazyTool);
+	names.add(tool.name);
 }
 
 function formatToolDescription(
@@ -219,6 +261,69 @@ function formatToolDescription(
 		"Agent guidance:",
 		...guidelines.map((guideline) => `- ${guideline}`),
 	].join("\n");
+}
+
+function getToolActivationApi(pi: ExtensionAPI): ToolActivationApi | undefined {
+	if (!hasToolActivationApi(pi)) return undefined;
+	return pi;
+}
+
+function configuredTaskTools(
+	pi: ExtensionAPI,
+	api: ToolActivationApi,
+): string[] {
+	const names = registeredTaskToolNames.get(pi);
+	if (!names) return [];
+	const available = new Set(api.getAllTools().map((tool) => tool.name));
+	return [...names].filter((name) => available.has(name));
+}
+
+function setTaskTools(
+	pi: ExtensionAPI,
+	api: ToolActivationApi,
+	taskTools: readonly string[],
+): void {
+	const available = new Set(configuredTaskTools(pi, api));
+	const next = [
+		...api.getActiveTools().filter((name) => !available.has(name)),
+		...taskTools.filter((name) => available.has(name)),
+	];
+	const unique = [...new Set(next)];
+	if (
+		unique.length !== api.getActiveTools().length ||
+		unique.some((name, index) => api.getActiveTools()[index] !== name)
+	) {
+		api.setActiveTools(unique);
+	}
+}
+
+/** Reconciles only registered pi-tasks tools without widening host restrictions. */
+export function reconcileTaskTools(pi: ExtensionAPI, state: TaskState): void {
+	const api = getToolActivationApi(pi);
+	if (!api) return;
+	try {
+		const taskTools = configuredTaskTools(pi, api);
+		const desired =
+			Object.keys(state.tasks).length > 0
+				? taskTools
+				: TASK_ENTRYPOINT_NAMES.filter((name) => taskTools.includes(name));
+		setTaskTools(pi, api, desired);
+	} catch {
+		// Older compatible hosts keep their existing all-tools behavior.
+	}
+}
+
+function activateTaskTools(pi: ExtensionAPI): void {
+	const api = getToolActivationApi(pi);
+	if (!api) return;
+	try {
+		const taskTools = configuredTaskTools(pi, api);
+		const active = api.getActiveTools();
+		const added = taskTools.filter((name) => !active.includes(name));
+		if (added.length > 0) api.setActiveTools([...active, ...added]);
+	} catch {
+		// Persistence succeeded; a legacy host must not turn that success into an error.
+	}
 }
 
 export function registerTaskTools(
@@ -236,13 +341,9 @@ export function registerTaskTools(
 		promptGuidelines: [
 			"Use task_plan for multi-step work before implementation when no suitable active task exists.",
 			REWORK_GUIDANCE,
-			"Smart models: constrain the plan to the user's stated objective; do not add speculative scope, gates, or abstractions.",
-			"Weak models: omit unknown generated IDs and make each acceptance criterion a separately verifiable sentence.",
-			"Prefer plan_steps with expectedOutput, criterionIds, evidenceRequired, and allowedActions for commercial-quality work.",
-			"When creating a new task, omit plan_steps.criterionIds unless you already know the generated criterion IDs; omitted criterionIds link the step to all task criteria.",
-			"Generated criterion IDs use the final task ID, such as T1-AC1. Do not guess IDs from criterion text or array indexes.",
+			"Constrain the plan to the user's stated objective; do not add speculative scope, gates, or abstractions.",
+			"Use concrete acceptance criteria and omit unknown generated criterion IDs during new task creation.",
 			"Mark a plan step atomic only when its granularityCheck proves it has one action, one observable output, one verification method, and no hidden subtasks.",
-			"Acceptance criteria must be concrete enough to verify with evidence before completion.",
 			"Activate only one task unless the user explicitly asks for parallel work.",
 		],
 		parameters: Type.Object({
@@ -298,6 +399,7 @@ export function registerTaskTools(
 				ctx,
 				event,
 				`Created task ${taskId}: ${params.title}`,
+				() => activateTaskTools(pi),
 			);
 		},
 	});
@@ -363,11 +465,15 @@ export function registerTaskTools(
 			"Use task_decompose when the resume instruction says the current step is not atomic.",
 		],
 		parameters: Type.Object({}),
-		execute: async () =>
-			textResult(
+		execute: async () => {
+			if (Object.keys(store.getState().tasks).length > 0) {
+				activateTaskTools(pi);
+			}
+			return textResult(
 				formatTaskResume(store.getState()),
 				buildTaskResume(store.getState()),
-			),
+			);
+		},
 	});
 
 	registerGuidedTool<TaskCheckpointParams>(pi, {
@@ -1040,12 +1146,14 @@ function appendAndReport(
 	ctx: ExtensionContext,
 	event: TaskEvent,
 	success: string,
+	onPersisted?: () => void,
 ): ToolResult {
 	try {
 		const state = store.append(event, (customType, data) => {
 			pi.appendEntry(customType, data);
 		});
 		updateTaskUi(pi, ctx, state, "task_mutation");
+		onPersisted?.();
 		const warning =
 			event.type === "task.completed" && event.forceWithReason
 				? `\nWarning: forced completion: ${event.forceWithReason}`
