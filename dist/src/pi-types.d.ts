@@ -21,12 +21,33 @@ export interface RegisteredCommand {
     description: string;
     handler(args: string, ctx: ExtensionContext): Promise<void> | void;
 }
+export interface TurnEndEvent {
+    message: {
+        role: string;
+        stopReason?: string;
+    };
+}
+export interface TaskToolResultEvent {
+    toolName: string;
+    isError: boolean;
+    input: Record<string, unknown>;
+    details?: unknown;
+}
 export interface ExtensionAPI {
     events: {
         emit<T = unknown>(event: string, data: T): void;
     };
-    on(event: "session_start" | "session_tree", handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void): void;
+    on(event: "session_start" | "session_tree" | "input" | "session_shutdown", handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void): void;
     on(event: "session_before_compact", handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void): void;
+    on(event: "turn_end", handler: (event: TurnEndEvent, ctx: ExtensionContext) => Promise<void> | void): void;
+    on(event: "tool_result", handler: (event: TaskToolResultEvent, ctx: ExtensionContext) => Promise<void> | void): void;
+    sendMessage?(message: {
+        customType: string;
+        content: string;
+        display: boolean;
+    }, options: {
+        deliverAs: "followUp";
+    }): void;
     registerTool<TParams extends Record<string, unknown>>(tool: ToolDefinition<TParams>): void;
     registerCommand(name: string, options: RegisteredCommand): void;
     appendEntry<T = unknown>(customType: string, data?: T): void;
@@ -37,6 +58,8 @@ export interface ExtensionAPI {
     setActiveTools?(names: string[]): void;
 }
 export interface ExtensionContext {
+    signal?: AbortSignal;
+    hasPendingMessages?(): boolean;
     sessionManager: {
         getBranch(): BranchEntry[];
     };
