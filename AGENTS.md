@@ -70,6 +70,14 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - A linked acceptance failure may stop blocking completion only through an explicit passing acceptance replacement that names the superseded evidence and gives a non-empty reason; retain both records and never infer supersession from a later pass.
 - The agent may propose task changes, but user-facing decisions must be recorded explicitly.
 
+## Advisory Yield Contract
+
+- At a normal final `turn_end`, offer at most one follow-up per input after a successful task execution call, using the existing resume contract for the same active task with an open step and no unresolved blocker.
+- Missing prerequisites are next actions, not automatic blockers; never bypass them. Guidance must preserve user stops/redirection, explanation-only requests, human decisions, authority boundaries, and asynchronous waits.
+- Do not infer authorization from a stale active task, parse final-response prose, require a PR, force completion, or implement a retry loop. Read-only task queries and checkpoint/decision calls alone must not arm continuation.
+- Suppress blocked/review/terminal tasks, exhausted plans, abnormal stops, cancellation, and pending messages. Reset engagement on input/session replay/shutdown. Capability-check message delivery and pending-message inspection for compatible hosts.
+- Keep blocker semantics unchanged: pending decisions use unresolved blockers; decision records alone are not waits. The advisory cannot guarantee detection of unrecorded waits or progress without task execution calls.
+
 ## Review Rework Contract
 
 - Review findings within the original objective may use `task_rework` without user permission solely to extend the plan; genuine scope or architecture decisions still require explicit `task_decision` records.
