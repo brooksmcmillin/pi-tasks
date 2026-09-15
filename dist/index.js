@@ -2,13 +2,14 @@ import { registerTaskCommands } from "./src/commands.js";
 import { buildTaskResume } from "./src/render.js";
 import { TASK_STATE_EVENT, TASK_TELEMETRY_EVENT, TASK_WIDGET_ID, } from "./src/state-events.js";
 import { createTaskRuntimeStore, snapshotState } from "./src/store.js";
-import { registerTaskTools } from "./src/tools.js";
+import { reconcileTaskTools, registerTaskTools } from "./src/tools.js";
 import { updateTaskUi } from "./src/widget.js";
 export { TASK_STATE_EVENT, TASK_TELEMETRY_EVENT, TASK_WIDGET_ID, };
 export default function (pi) {
     const store = createTaskRuntimeStore();
     const replay = (ctx, reason) => {
         const result = store.replay(ctx.sessionManager.getBranch());
+        reconcileTaskTools(pi, result.state);
         updateTaskUi(pi, ctx, result.state, reason);
         if (result.malformedEvents.length > 0) {
             ctx.ui.notify(`pi-tasks skipped ${result.malformedEvents.length} malformed event(s)`, "warning");

@@ -12,8 +12,8 @@ export interface ToolDefinition<TParams extends Record<string, unknown>> {
     name: string;
     label: string;
     description: string;
-    promptSnippet: string;
-    promptGuidelines: string[];
+    promptSnippet?: string;
+    promptGuidelines?: string[];
     parameters: Schema;
     execute(toolCallId: string, params: TParams, signal: AbortSignal | undefined, onUpdate: unknown, ctx: ExtensionContext): Promise<ToolResult>;
 }
@@ -30,6 +30,11 @@ export interface ExtensionAPI {
     registerTool<TParams extends Record<string, unknown>>(tool: ToolDefinition<TParams>): void;
     registerCommand(name: string, options: RegisteredCommand): void;
     appendEntry<T = unknown>(customType: string, data?: T): void;
+    getActiveTools?(): string[];
+    getAllTools?(): Array<{
+        name: string;
+    }>;
+    setActiveTools?(names: string[]): void;
 }
 export interface ExtensionContext {
     sessionManager: {

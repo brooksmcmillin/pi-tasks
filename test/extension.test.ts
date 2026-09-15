@@ -1,0 +1,534 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { afterEach, describe, expect, it } from "vitest";
+import type { TaskStateEvent } from "../src/state-events.ts";
+
+const sdkRoot = process.env.PI_SDK_ROOT;
+if (!sdkRoot) {
+	throw new Error(
+		"PI_SDK_ROOT is required for native extension tests; the test must not skip.",
+	);
+}
+
+const sdk = await import(pathToFileURL(join(sdkRoot, "dist/index.js")).href);
+const taskRoot = resolve(import.meta.dirname, "..");
+const taskToolNames = new Set([
+	"task_plan",
+	"task_next",
+	"task_focus",
+	"task_resume",
+	"task_checkpoint",
+	"task_granularity_check",
+	"task_decompose",
+	"task_rework",
+	"task_verify_step",
+	"task_list",
+	"task_update",
+	"task_evidence",
+	"task_decision",
+	"task_complete",
+]);
+
+const cleanups: string[] = [];
+
+afterEach(async () => {
+	await Promise.all(
+		cleanups
+			.splice(0)
+			.map((path) => rm(path, { recursive: true, force: true })),
+	);
+});
+
+function activeTaskTools(session: {
+	agent: { state: { tools: Array<{ name: string }> } };
+}): string[] {
+	return session.agent.state.tools
+		.map((tool) => tool.name)
+		.filter((name) => taskToolNames.has(name));
+}
+
+function isToolActive(
+	session: { agent: { state: { tools: Array<{ name: string }> } } },
+	name: string,
+): boolean {
+	return session.agent.state.tools.some((tool) => tool.name === name);
+}
+
+type NativeToolResult = {
+	content: Array<{ type: string; text: string }>;
+	isError?: boolean;
+};
+
+type NativeTool = {
+	name: string;
+	execute(...args: unknown[]): Promise<NativeToolResult>;
+};
+
+function requireTool(
+	session: { agent: { state: { tools: NativeTool[] } } },
+	name: string,
+): NativeTool {
+	const tool = session.agent.state.tools.find(
+		(candidate) => candidate.name === name,
+	);
+	if (!tool) throw new Error(`Expected active tool ${name}`);
+	return tool;
+}
+
+function toolSurface(session: {
+	agent: {
+		state: {
+			tools: Array<{
+				name: string;
+				description?: string;
+				parameters?: unknown;
+				promptSnippet?: string;
+				promptGuidelines?: string[];
+			}>;
+			systemPrompt: string;
+		};
+	};
+}): { schemaAndDescriptionChars: number; systemPromptChars: number } {
+	const schemaAndDescriptionChars = session.agent.state.tools
+		.filter((tool) => taskToolNames.has(tool.name))
+		.reduce(
+			(total, tool) =>
+				total +
+				(tool.description?.length ?? 0) +
+				JSON.stringify(tool.parameters ?? {}).length,
+			0,
+		);
+	return {
+		schemaAndDescriptionChars,
+		systemPromptChars: session.agent.state.systemPrompt.length,
+	};
+}
+
+async function waitForPersistedTaskEvent(
+	sessionFile: string,
+	eventType: "task.created" | "task.updated" = "task.created",
+): Promise<void> {
+	for (let attempt = 0; attempt < 20; attempt += 1) {
+		const contents = await readFile(sessionFile, "utf8");
+		if (
+			contents.includes('"customType":"pi-tasks:event"') &&
+			contents.includes(`"type":"${eventType}"`)
+		) {
+			return;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	throw new Error(`pi-tasks ${eventType} event was not persisted to JSONL`);
+}
+
+function appendNativeToolCall(sessionManager: {
+	appendMessage(message: unknown): string;
+}): void {
+	sessionManager.appendMessage({
+		role: "assistant",
+		content: [
+			{
+				type: "toolCall",
+				id: "native-plan-call",
+				name: "task_plan",
+				arguments: validPlan(),
+			},
+		],
+		api: "native-test",
+		provider: "native-test",
+		model: "native-test",
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "toolUse",
+		timestamp: Date.now(),
+	});
+}
+
+function validPlan() {
+	return {
+		title: "Native persistence slice",
+		objective: "Persist and restore a task without a model call",
+		acceptance_criteria: ["The persisted task state restores"],
+		plan_steps: [
+			{
+				text: "Persist task state",
+				expectedOutput: "One pi-tasks custom event",
+				criterionIds: ["T1-AC1"],
+				evidenceRequired: true,
+				allowedActions: ["task_plan"],
+				decompositionStatus: "atomic",
+				granularityCheck: {
+					isAtomic: true,
+					reason: "One tool call writes one custom event",
+					canBeDoneInOneAgentAction: true,
+					hasSingleObservableOutput: true,
+					hasSingleVerificationMethod: true,
+					hasNoHiddenSubtasks: true,
+				},
+			},
+		],
+	};
+}
+
+async function createNativeSession(
+	options: {
+		base?: string;
+		sessionFile?: string;
+		tools?: string[];
+		excludeTools?: string[];
+		foreignTaskNotes?: boolean;
+		noTools?: "all" | "builtin";
+	} = {},
+) {
+	const base =
+		options.base ?? (await mkdtemp(join(tmpdir(), "pi-tasks-native-")));
+	if (!options.base) cleanups.push(base);
+	const cwd = join(base, "cwd");
+	const agentDir = join(base, "agent");
+	const sessionDir = join(base, "sessions");
+	await Promise.all([
+		mkdir(cwd, { recursive: true }),
+		mkdir(agentDir, { recursive: true }),
+	]);
+	const events: TaskStateEvent[] = [];
+	const extensionPaths = [join(taskRoot, "index.ts")];
+	if (options.foreignTaskNotes) {
+		const extensionPath = join(base, "foreign-task-notes.js");
+		await writeFile(
+			extensionPath,
+			`export default function (pi) {
+	pi.registerTool({
+		name: "task_notes",
+		label: "Foreign Task Notes",
+		description: "Foreign extension task notes.",
+		parameters: { type: "object", properties: {}, additionalProperties: false },
+		execute: async () => ({ content: [{ type: "text", text: "foreign" }] }),
+	});
+}`,
+		);
+		extensionPaths.push(extensionPath);
+	}
+	const eventBus = sdk.createEventBus();
+	eventBus.on("pi-tasks:state", (event: TaskStateEvent) => {
+		events.push(event);
+	});
+	const settingsManager = sdk.SettingsManager.inMemory({});
+	const resourceLoader = new sdk.DefaultResourceLoader({
+		cwd,
+		agentDir,
+		settingsManager,
+		eventBus,
+		additionalExtensionPaths: extensionPaths,
+	});
+	await resourceLoader.reload();
+	expect(resourceLoader.getExtensions().errors).toEqual([]);
+	const sessionManager = options.sessionFile
+		? sdk.SessionManager.open(options.sessionFile, sessionDir)
+		: sdk.SessionManager.create(cwd, sessionDir);
+	const result = await sdk.createAgentSession({
+		cwd,
+		agentDir,
+		resourceLoader,
+		sessionManager,
+		...(options.tools ? { tools: options.tools } : {}),
+		...(options.excludeTools ? { excludeTools: options.excludeTools } : {}),
+		...(options.noTools ? { noTools: options.noTools } : {}),
+	});
+	await result.session.bindExtensions(result.extensionsResult);
+	return { ...result, base, cwd, sessionDir, events, sessionManager };
+}
+
+describe("native Pi dynamic task tools", () => {
+	it("runs the persistent plan-to-event-to-new-session restore slice before broader cases", async () => {
+		const first = await createNativeSession();
+		try {
+			expect(activeTaskTools(first.session)).toEqual([
+				"task_plan",
+				"task_resume",
+			]);
+			const fresh = toolSurface(first.session);
+			expect(first.session.agent.state.systemPrompt).toContain(
+				"Use task_plan for multi-step work before implementation when no suitable active task exists.",
+			);
+
+			appendNativeToolCall(first.sessionManager);
+			const created = await requireTool(first.session, "task_plan").execute(
+				"native-plan",
+				validPlan(),
+				undefined,
+				undefined,
+			);
+			expect(created.content[0]?.text).toContain("Created task T1");
+			expect(
+				first.sessionManager
+					.getEntries()
+					.some(
+						(entry: { type: string; customType?: string }) =>
+							entry.type === "custom" && entry.customType === "pi-tasks:event",
+					),
+			).toBe(true);
+			expect(activeTaskTools(first.session)).toContain("task_update");
+			expect(new Set(activeTaskTools(first.session))).toEqual(taskToolNames);
+			const taskEntry = first.sessionManager.getEntries().at(-1);
+			const precedingEntry = first.sessionManager.getEntries().at(-2);
+			assert.ok(taskEntry);
+			assert.ok(precedingEntry);
+			await first.session.navigateTree(precedingEntry.id, { summarize: false });
+			expect(first.events).toContainEqual(
+				expect.objectContaining({
+					reason: "session_tree",
+					widgetId: "pi-tasks",
+				}),
+			);
+			expect(activeTaskTools(first.session)).toEqual([
+				"task_plan",
+				"task_resume",
+			]);
+			await first.session.navigateTree(taskEntry.id, { summarize: false });
+			expect(new Set(activeTaskTools(first.session))).toEqual(taskToolNames);
+			expect(
+				first.session.agent.state.tools.some(
+					(tool: { name: string }) => tool.name === "read",
+				),
+			).toBe(true);
+			const active = toolSurface(first.session);
+			expect(active.schemaAndDescriptionChars).toBeGreaterThan(
+				fresh.schemaAndDescriptionChars,
+			);
+			expect(first.session.agent.state.systemPrompt).toContain(
+				"Use task_plan for multi-step work before implementation when no suitable active task exists.",
+			);
+			console.info(
+				`pi-tasks surface chars fresh schema+description=${fresh.schemaAndDescriptionChars}, system-prompt=${fresh.systemPromptChars}; active schema+description=${active.schemaAndDescriptionChars}, system-prompt=${active.systemPromptChars}`,
+			);
+
+			const sessionFile = first.sessionManager.getSessionFile();
+			assert.ok(sessionFile);
+			await waitForPersistedTaskEvent(sessionFile);
+			first.session.dispose();
+			const restored = await createNativeSession({
+				base: first.base,
+				sessionFile,
+			});
+			try {
+				expect(activeTaskTools(restored.session)).toContain("task_update");
+				expect(restored.events).toContainEqual(
+					expect.objectContaining({
+						reason: "session_start",
+						widgetId: "pi-tasks",
+					}),
+				);
+			} finally {
+				restored.session.dispose();
+			}
+		} finally {
+			first.session.dispose();
+		}
+	});
+
+	it("keeps foreign task_notes outside pi-tasks reconciliation", async () => {
+		const active = await createNativeSession({ foreignTaskNotes: true });
+		try {
+			expect(isToolActive(active.session, "task_notes")).toBe(true);
+			appendNativeToolCall(active.sessionManager);
+			await requireTool(active.session, "task_plan").execute(
+				"foreign-active-plan",
+				validPlan(),
+				undefined,
+				undefined,
+			);
+			expect(isToolActive(active.session, "task_notes")).toBe(true);
+			await requireTool(active.session, "task_resume").execute(
+				"foreign-active-resume",
+				{},
+				undefined,
+				undefined,
+			);
+			expect(isToolActive(active.session, "task_notes")).toBe(true);
+			const taskEntry = active.sessionManager.getEntries().at(-1);
+			assert.ok(taskEntry);
+			await active.session.navigateTree(taskEntry.id, { summarize: false });
+			expect(isToolActive(active.session, "task_notes")).toBe(true);
+		} finally {
+			active.session.dispose();
+		}
+
+		const inactive = await createNativeSession({
+			foreignTaskNotes: true,
+			tools: ["read", "task_plan", "task_resume"],
+		});
+		try {
+			expect(isToolActive(inactive.session, "task_notes")).toBe(false);
+			await requireTool(inactive.session, "task_plan").execute(
+				"foreign-inactive-plan",
+				validPlan(),
+				undefined,
+				undefined,
+			);
+			expect(isToolActive(inactive.session, "task_notes")).toBe(false);
+			await requireTool(inactive.session, "task_resume").execute(
+				"foreign-inactive-resume",
+				{},
+				undefined,
+				undefined,
+			);
+			expect(isToolActive(inactive.session, "task_notes")).toBe(false);
+			const taskEntry = inactive.sessionManager.getEntries().at(-1);
+			assert.ok(taskEntry);
+			await inactive.session.navigateTree(taskEntry.id, { summarize: false });
+			expect(isToolActive(inactive.session, "task_notes")).toBe(false);
+		} finally {
+			inactive.session.dispose();
+		}
+	});
+
+	it("preserves allowlists, exclusions, noTools, and unrelated active tools", async () => {
+		const planOnly = await createNativeSession({
+			tools: ["read", "task_plan"],
+		});
+		try {
+			expect(activeTaskTools(planOnly.session)).toEqual(["task_plan"]);
+			await requireTool(planOnly.session, "task_plan").execute(
+				"plan-only",
+				validPlan(),
+				undefined,
+				undefined,
+			);
+			expect(activeTaskTools(planOnly.session)).toEqual(["task_plan"]);
+			expect(
+				planOnly.session.agent.state.tools.some(
+					(tool: { name: string }) => tool.name === "read",
+				),
+			).toBe(true);
+		} finally {
+			planOnly.session.dispose();
+		}
+
+		const excluded = await createNativeSession({
+			tools: ["read", "task_plan", "task_resume", "task_update"],
+			excludeTools: ["task_update"],
+		});
+		try {
+			await requireTool(excluded.session, "task_plan").execute(
+				"excluded",
+				validPlan(),
+				undefined,
+				undefined,
+			);
+			expect(activeTaskTools(excluded.session)).toEqual([
+				"task_plan",
+				"task_resume",
+			]);
+			expect(
+				excluded.session.agent.state.tools.some(
+					(tool: { name: string }) => tool.name === "read",
+				),
+			).toBe(true);
+		} finally {
+			excluded.session.dispose();
+		}
+
+		const disabled = await createNativeSession({ noTools: "all" });
+		try {
+			expect(activeTaskTools(disabled.session)).toEqual([]);
+		} finally {
+			disabled.session.dispose();
+		}
+	});
+
+	it("does not activate controls after a rejected plan and restores blocked task controls", async () => {
+		const rejected = await createNativeSession();
+		try {
+			const result = await requireTool(rejected.session, "task_plan").execute(
+				"rejected",
+				{
+					title: "Rejected plan",
+					objective: "Verify rejected persistence does not activate controls",
+					acceptance_criteria: ["No controls activate"],
+					plan_steps: [],
+				},
+				undefined,
+				undefined,
+			);
+			expect(result.isError).toBe(true);
+			expect(activeTaskTools(rejected.session)).toEqual([
+				"task_plan",
+				"task_resume",
+			]);
+		} finally {
+			rejected.session.dispose();
+		}
+
+		const first = await createNativeSession();
+		try {
+			appendNativeToolCall(first.sessionManager);
+			await requireTool(first.session, "task_plan").execute(
+				"blocked-plan",
+				validPlan(),
+				undefined,
+				undefined,
+			);
+			const blocked = await requireTool(first.session, "task_update").execute(
+				"blocked-update",
+				{
+					task_id: "T1",
+					status: "blocked",
+					blocker: {
+						reason: "Waiting for a required decision",
+						blockedBy: "user",
+						neededToUnblock: "User decision",
+					},
+				},
+				undefined,
+				undefined,
+			);
+			expect(blocked.isError).not.toBe(true);
+			const sessionFile = first.sessionManager.getSessionFile();
+			assert.ok(sessionFile);
+			await waitForPersistedTaskEvent(sessionFile, "task.updated");
+			first.session.dispose();
+			const restored = await createNativeSession({
+				base: first.base,
+				sessionFile,
+			});
+			try {
+				expect(new Set(activeTaskTools(restored.session))).toEqual(
+					taskToolNames,
+				);
+				const recovered = await requireTool(
+					restored.session,
+					"task_list",
+				).execute(
+					"blocked-recovery",
+					{ include_history: true },
+					undefined,
+					undefined,
+				);
+				expect(recovered.content[0]?.text).toContain("blocked");
+				expect(restored.events.every((event) => !("state" in event))).toBe(
+					true,
+				);
+				expect(restored.events).toContainEqual(
+					expect.objectContaining({
+						reason: "session_start",
+						version: 2,
+						context: expect.objectContaining({ version: 1 }),
+					}),
+				);
+			} finally {
+				restored.session.dispose();
+			}
+		} finally {
+			first.session.dispose();
+		}
+	});
+});

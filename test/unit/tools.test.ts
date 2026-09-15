@@ -22,7 +22,7 @@ type ReceiverBoundPi = ExtensionAPI & {
 	};
 };
 
-function createHarness() {
+function createHarness(options: { dynamicTools?: boolean } = {}) {
 	const tools = new Map<string, ToolDefinition<Record<string, unknown>>>();
 	const entries: TaskEvent[] = [];
 	const publications: string[] = [];
@@ -30,6 +30,7 @@ function createHarness() {
 		status: undefined as string | undefined,
 		widget: undefined as string[] | undefined,
 	};
+	const activeTools: string[] = [];
 	const pi: ReceiverBoundPi = {
 		runtime: { entries },
 		events: {
@@ -45,6 +46,16 @@ function createHarness() {
 			this.runtime.entries.push(data as TaskEvent);
 		},
 	};
+	if (options.dynamicTools) {
+		Object.assign(pi, {
+			getActiveTools: () => activeTools,
+			getAllTools: () =>
+				[...tools.values()].map((tool) => ({ name: tool.name })),
+			setActiveTools: (names: string[]) => {
+				activeTools.splice(0, activeTools.length, ...names);
+			},
+		});
+	}
 	const ctx: ExtensionContext = {
 		sessionManager: {
 			getBranch: () =>
@@ -224,6 +235,7 @@ describe("registered task tools", () => {
 	it("projects prompt guidelines into tool descriptions for hosts that ignore custom fields", () => {
 		const { tools } = createHarness();
 		const plan = requireTool(tools, "task_plan");
+		const evidence = requireTool(tools, "task_evidence");
 
 		expect(plan.promptGuidelines).toContain(
 			"Use task_plan for multi-step work before implementation when no suitable active task exists.",
@@ -231,6 +243,26 @@ describe("registered task tools", () => {
 		expect(plan.description).toContain("Agent guidance:");
 		expect(plan.description).toContain(
 			"Use task_plan for multi-step work before implementation when no suitable active task exists.",
+		);
+		expect(evidence.promptGuidelines).toContain(
+			"Use task_evidence for tests, commands, reviews, files, dogfood, or explicit user acceptance.",
+		);
+		expect(evidence.description).toContain("Agent guidance:");
+		expect(evidence.description).toContain(
+			"Use task_evidence for tests, commands, reviews, files, dogfood, or explicit user acceptance.",
+		);
+	});
+
+	it("keeps lazy control descriptions compact when native tool activation is available", () => {
+		const { tools } = createHarness({ dynamicTools: true });
+		const plan = requireTool(tools, "task_plan");
+		const evidence = requireTool(tools, "task_evidence");
+
+		expect(plan.description).toContain("Agent guidance:");
+		expect(evidence.promptGuidelines).toBeUndefined();
+		expect(evidence.description).not.toContain("Agent guidance:");
+		expect(evidence.description).toBe(
+			"Attach verification evidence to a task and optionally satisfy acceptance criteria.",
 		);
 	});
 
