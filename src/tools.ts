@@ -98,6 +98,9 @@ interface TaskReworkParams extends Record<string, unknown> {
 	plan_steps: TaskStepInput[];
 }
 
+const PLAN_REPAIR_GUIDANCE =
+	"task_rework is append-only review remediation, not plan replacement. Reconcile a malformed or duplicate plan before implementation: use task_replan when available to explicitly replace mistaken open steps, then resume the corrected contract. If repair is unavailable, report the tracking blocker; do not bypass the contract or cancel completed work merely to clear tracking warnings.";
+
 const REWORK_GUIDANCE =
 	"Use task_rework when review discovers missing or defective work within the original objective, even if no open step remains or task_complete is recommended. Record findings and append remediation steps without asking permission for in-scope repairs; record genuine scope or architecture decisions with task_decision before proceeding.";
 
@@ -345,7 +348,9 @@ export function registerTaskTools(
 			"Create a pi-tasks execution contract before non-trivial implementation work",
 		promptGuidelines: [
 			"Use task_plan for multi-step work before implementation when no suitable active task exists.",
+			"task_plan steps describe deliverables, not support reads or inspection. Supply structured plan_steps with expectedOutput and bounded allowedActions; mark atomic only with a truthful granularityCheck.",
 			REWORK_GUIDANCE,
+			PLAN_REPAIR_GUIDANCE,
 			"Constrain the plan to the user's stated objective; do not add speculative scope, gates, or abstractions.",
 			"Use concrete acceptance criteria and omit unknown generated criterion IDs during new task creation.",
 			"Mark a plan step atomic only when its granularityCheck proves it has one action, one observable output, one verification method, and no hidden subtasks.",
@@ -446,6 +451,7 @@ export function registerTaskTools(
 			"Smart models: trust the persisted resume contract after compaction; do not reconstruct stale plan state from memory.",
 			"Read recommendedTool, blockedTools, and minimumParams; use the recommendation unless review findings require task_rework.",
 			REWORK_GUIDANCE,
+			PLAN_REPAIR_GUIDANCE,
 			"Follow next allowed actions; do not complete tasks while verification gaps remain.",
 			"For non-atomic steps, use task_decompose for compound work or task_update with step_granularity_check to classify an already-simple current step without inventing children.",
 		],
@@ -628,7 +634,7 @@ export function registerTaskTools(
 		name: "task_rework",
 		label: "Task Rework",
 		description:
-			"Record review findings and append remediation steps to an existing task without discarding prior evidence or history.",
+			"Append-only review remediation: record findings and add steps after existing work without discarding evidence or history. This does not replace a malformed plan; use task_replan when available for that.",
 		promptSnippet:
 			"Extend or reopen a pi-tasks task for review-discovered remediation",
 		promptGuidelines: [
@@ -707,7 +713,7 @@ export function registerTaskTools(
 		name: "task_update",
 		label: "Task Update",
 		description:
-			"Update task progress, ordered plan step, status, next action, or blocker state. To classify an already-simple current step as atomic without splitting it, supply step_id and step_granularity_check with a reason and all flags true. This preserves its ID and verification obligations; genuine compound work still requires task_decompose.",
+			"Update task progress, ordered plan step, status, next action, or blocker state. Scope requires activity; cancellation requires reason. Cancel only when the objective is withdrawn, never merely to clear tracking warnings after completed delivery. To classify an already-simple current step as atomic without splitting it, supply step_id and step_granularity_check with a reason and all flags true. This preserves its ID and verification obligations; genuine compound work still requires task_decompose.",
 		promptSnippet:
 			"Update pi-tasks progress, current ordered step, next action, status, or blocker details",
 		promptGuidelines: [

@@ -78,6 +78,13 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Suppress blocked/review/terminal tasks, exhausted plans, abnormal stops, cancellation, and pending messages. Reset engagement on input/session replay/shutdown. Capability-check message delivery and pending-message inspection for compatible hosts.
 - Keep blocker semantics unchanged: pending decisions use unresolved blockers; decision records alone are not waits. The advisory cannot guarantee detection of unrecorded waits or progress without task execution calls.
 
+## Agent Planning Discipline
+
+- Plan deliverables, not support reads or inspection. Provide structured `plan_steps` with expected output, bounded actions, and truthful atomicity declarations.
+- Reconcile malformed or duplicate steps before implementation. `task_rework` only appends review remediation; it never replaces the current plan. Use `task_replan` when available for explicit replacement, then follow the corrected resume contract.
+- If plan repair is unavailable, report the tracking blocker rather than ignoring the execution contract. Cancellation means the objective was withdrawn, not that completed work is inconvenient to reconcile; retain evidence and repair the tracking instead.
+- Correct missing arguments on the rejected tool call before retrying. A missing scope `activity` or cancellation `reason` is not solved by unrelated decomposition.
+
 ## Review Rework Contract
 
 - Review findings within the original objective may use `task_rework` without user permission solely to extend the plan; genuine scope or architecture decisions still require explicit `task_decision` records.

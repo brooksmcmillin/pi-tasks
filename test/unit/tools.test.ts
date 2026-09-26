@@ -1387,4 +1387,34 @@ describe("registered task tools", () => {
 			latestEntry?.type === "task.snapshot" && latestEntry.resume.currentStepId,
 		).toBe("T1-S1");
 	});
+
+	it("exposes plan reconciliation discipline in Pi and description-only hosts", () => {
+		const { tools } = createHarness();
+		for (const name of ["task_plan", "task_resume"]) {
+			const tool = requireTool(tools, name);
+			for (const guidance of [
+				tool.description,
+				tool.promptGuidelines?.join(" ") ?? "",
+			]) {
+				expect(guidance).toContain("task_rework is append-only");
+				expect(guidance).toContain("before implementation");
+				expect(guidance).toContain("task_replan when available");
+				expect(guidance).toContain("do not bypass the contract");
+			}
+		}
+		expect(requireTool(tools, "task_rework").description).toContain(
+			"does not replace a malformed plan",
+		);
+		const updateGuidance = requireTool(tools, "task_update").description;
+		for (const clause of [
+			"never merely to clear tracking warnings",
+			"Scope requires activity",
+			"cancellation requires reason",
+			"step_granularity_check",
+			"preserves its ID and verification obligations",
+			"genuine compound work still requires task_decompose",
+		]) {
+			expect(updateGuidance).toContain(clause);
+		}
+	});
 });
