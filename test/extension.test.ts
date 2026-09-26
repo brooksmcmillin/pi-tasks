@@ -80,6 +80,7 @@ function requireTool(
 }
 
 function toolSurface(session: {
+	systemPrompt: string;
 	agent: {
 		state: {
 			tools: Array<{
@@ -89,7 +90,6 @@ function toolSurface(session: {
 				promptSnippet?: string;
 				promptGuidelines?: string[];
 			}>;
-			systemPrompt: string;
 		};
 	};
 }): { schemaAndDescriptionChars: number; systemPromptChars: number } {
@@ -104,7 +104,7 @@ function toolSurface(session: {
 		);
 	return {
 		schemaAndDescriptionChars,
-		systemPromptChars: session.agent.state.systemPrompt.length,
+		systemPromptChars: session.systemPrompt.length,
 	};
 }
 
@@ -257,7 +257,7 @@ describe("native Pi dynamic task tools", () => {
 				"task_resume",
 			]);
 			const fresh = toolSurface(first.session);
-			expect(first.session.agent.state.systemPrompt).toContain(
+			expect(first.session.systemPrompt).toContain(
 				"Use task_plan for multi-step work before implementation when no suitable active task exists.",
 			);
 
@@ -305,7 +305,7 @@ describe("native Pi dynamic task tools", () => {
 			expect(active.schemaAndDescriptionChars).toBeGreaterThan(
 				fresh.schemaAndDescriptionChars,
 			);
-			expect(first.session.agent.state.systemPrompt).toContain(
+			expect(first.session.systemPrompt).toContain(
 				"Use task_plan for multi-step work before implementation when no suitable active task exists.",
 			);
 			console.info(

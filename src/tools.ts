@@ -1120,8 +1120,9 @@ function evidenceQualitySchema() {
 		reproducible: Type.Boolean(),
 		verifier: Type.Enum(["agent", "tool", "user", "external"] as const),
 		command: Type.String({
+			maxLength: 300,
 			description:
-				"Exact command for command evidence; for non-command evidence, name the verification action.",
+				"Exact command or verification action (maximum 300 characters). For longer commands, preserve the original command and observed output in an artifact, use a short artifact reference here, and link it in artifactRefs. Do not shorten or rerun a successful check just to fit this field.",
 		}),
 		artifactRefs: Type.Array(Type.String()),
 		observedOutput: Type.String({
@@ -1192,7 +1193,7 @@ function appendAndReport(
 					...(recovery.retry_example
 						? [
 								"",
-								"Minimal working task_evidence params:",
+								"Corrected evidence params (fill artifact placeholders before retrying; do not rerun successful verification):",
 								"```json",
 								JSON.stringify(recovery.retry_example, null, 2),
 								"```",
@@ -1300,7 +1301,11 @@ function buildUpdateArgumentRepair(
 function buildEvidenceRetryExample(
 	event: TaskEvent | undefined,
 ): Record<string, unknown> | undefined {
-	if (event?.type !== "task.evidence_added") return undefined;
+	if (
+		event?.type !== "task.evidence_added" &&
+		event?.type !== "task.step_verified"
+	)
+		return undefined;
 	if (
 		event.evidence.type !== "command" &&
 		event.evidence.type !== "test" &&
@@ -1326,11 +1331,13 @@ function buildEvidenceRetryExample(
 			event.evidence.quality?.observedOutput?.trim() ||
 			"<concise observed output from the command/test/dogfood run>",
 	};
-	if (event.evidence.type === "command") {
-		quality.command =
-			event.evidence.quality?.command?.trim() ||
-			references[0] ||
-			"<exact command>";
+	const command = event.evidence.quality?.command?.trim();
+	quality.command =
+		command || references[0] || "<exact command or verification action>";
+	if (command && command.length > 300) {
+		const artifact = "<path-to-saved-command-and-output>";
+		quality.command = `Original command recorded in ${artifact}`;
+		quality.artifactRefs = [...artifactRefs, artifact];
 	}
 	const example: Record<string, unknown> = {
 		task_id: event.taskId,
@@ -1343,14 +1350,19 @@ function buildEvidenceRetryExample(
 		quality,
 	};
 	if (event.criterionIds) example.criterion_ids = event.criterionIds;
-	if (event.stepIds) example.step_ids = event.stepIds;
+	if (event.type === "task.step_verified") {
+		example.step_id = event.stepId;
+		delete example.passed;
+		delete example.role;
+	} else if (event.stepIds) example.step_ids = event.stepIds;
 	if (event.evidence.supersedesEvidenceIds) {
 		example.supersedes_evidence_ids = event.evidence.supersedesEvidenceIds;
 	}
 	if (event.evidence.supersessionReason) {
 		example.reason = event.evidence.supersessionReason;
 	}
-	if (event.overrideReason) example.override_reason = event.overrideReason;
+	if (event.type === "task.evidence_added" && event.overrideReason)
+		example.override_reason = event.overrideReason;
 	return example;
 }
 

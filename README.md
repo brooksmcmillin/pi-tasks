@@ -277,6 +277,19 @@ replacement with a non-empty reason removes that failure from completion
 validation. Diagnostic evidence cannot supersede acceptance failures, and a later
 pass never implicitly supersedes earlier failures.
 
+### Long verification commands
+
+`quality.command` accepts at most 300 characters. If the original command is
+longer, save that exact command and its observed output in an artifact, reference
+that artifact briefly in `quality.command`, and include its path in
+`quality.artifactRefs`. Do not weaken, shorten, or rerun a successful check merely
+to fit the evidence field. Recovery examples contain placeholders to fill with
+real artifact paths, not evidence that an artifact already exists.
+
+Reasoned skipped steps, including legacy session entries without `supersededBy`,
+do not require execution evidence. Skipping does not satisfy acceptance criteria
+or erase linked failures; those still require ordinary verification.
+
 ## Token Efficiency
 
 Normal tool results return only the compact resume contract needed for the next action — not the full task state.

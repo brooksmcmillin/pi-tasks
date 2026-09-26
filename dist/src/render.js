@@ -314,8 +314,7 @@ export function getVerificationGaps(task) {
     }
     for (const step of task.planSteps ?? []) {
         if (step.evidenceRequired &&
-            !step.supersededBy?.length &&
-            (step.status === "done" || step.status === "skipped") &&
+            step.status === "done" &&
             step.evidenceIds.length === 0) {
             gaps.push(`${step.id} lacks evidence`);
         }
