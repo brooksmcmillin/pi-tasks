@@ -95,6 +95,8 @@ export interface TaskBlocker {
 }
 
 export interface TaskStep {
+	/** Retired planning entry; replacement steps retain its acceptance obligations. */
+	supersededBy?: string[];
 	id: string;
 	taskId: string;
 	text: string;
@@ -266,6 +268,13 @@ export interface TaskStepsDecomposedEvent extends TaskEventBase {
 	reason: string;
 }
 
+export interface TaskReplannedEvent extends TaskEventBase {
+	type: "task.replanned";
+	reason: string;
+	stepIds: string[];
+	planSteps: TaskStepInput[];
+}
+
 export interface TaskReworkedEvent extends TaskEventBase {
 	type: "task.reworked";
 	reason: string;
@@ -326,6 +335,7 @@ export type TaskEvent =
 	| TaskUpdatedEvent
 	| TaskStepsDecomposedEvent
 	| TaskReworkedEvent
+	| TaskReplannedEvent
 	| TaskEvidenceAddedEvent
 	| TaskStepVerifiedEvent
 	| TaskDecisionRecordedEvent

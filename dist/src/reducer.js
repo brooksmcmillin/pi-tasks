@@ -65,6 +65,8 @@ function applyEvent(state, event) {
             return decomposeStep(state, event);
         case "task.reworked":
             return reworkTask(state, event);
+        case "task.replanned":
+            return replanTask(state, event);
         case "task.evidence_added":
             return addEvidence(state, event);
         case "task.step_verified":
@@ -195,6 +197,59 @@ function decomposeStep(state, event) {
     task.updatedAt = event.createdAt;
     return state;
 }
+function replanTask(state, event) {
+    const task = requireTask(state, event.taskId);
+    if (!event.reason?.trim())
+        throw new TaskTransitionError("Replan reason is required");
+    if (TERMINAL_STATUSES.includes(task.status)) {
+        throw new TaskTransitionError("Only nonterminal tasks can be replanned");
+    }
+    if (state.activeTaskId && state.activeTaskId !== task.id) {
+        throw new TaskTransitionError("Select the intended task with task_update before replanning");
+    }
+    if (!event.stepIds.length ||
+        unique(event.stepIds).length !== event.stepIds.length) {
+        throw new TaskTransitionError("Replan requires distinct step_ids to replace");
+    }
+    const targets = event.stepIds.map((id) => {
+        const step = task.planSteps.find((candidate) => candidate.id === id);
+        if (!step || step.status === "done" || step.status === "skipped") {
+            throw new TaskTransitionError(`Replan target ${id} must be an open plan step`);
+        }
+        return step;
+    });
+    validateReworkSteps(event.planSteps);
+    const replacements = createPlanSteps(task.id, event.planSteps, undefined, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, false, { startIndex: nextRootStepNumber(task) });
+    const covered = new Set(replacements.flatMap((step) => step.criterionIds));
+    if (targets.some((step) => step.criterionIds.some((id) => !covered.has(id)))) {
+        throw new TaskTransitionError("Replacement steps must cover all replaced criterion links");
+    }
+    const index = Math.min(...targets.map((step) => task.planSteps.indexOf(step)));
+    for (const step of targets) {
+        step.status = "skipped";
+        step.supersededBy = replacements.map((replacement) => replacement.id);
+    }
+    task.planSteps.splice(index, 0, ...replacements);
+    const current = getCurrentOpenStep(task);
+    if (current) {
+        current.status = "active";
+        current.startedAt ??= event.createdAt;
+        task.currentStep = current.text;
+        task.nextAction =
+            current.decompositionStatus === "atomic"
+                ? current.text
+                : `Break down ${current.id}`;
+    }
+    task.confidence = 0;
+    task.progress = deriveProgress(task);
+    task.warnings.push(`replan: ${event.reason.trim()} -> ${replacements.map((step) => step.id).join(",")}`);
+    task.updatedAt = event.createdAt;
+    return state;
+}
+function nextRootStepNumber(task) {
+    // Decomposed roots survive in child IDs; retired roots also reserve their IDs.
+    return (Math.max(0, ...task.planSteps.map((step) => Number(step.id.slice(`${task.id}-S`.length).split(".")[0]))) + 1);
+}
 function reworkTask(state, event) {
     const task = requireTask(state, event.taskId);
     if (typeof event.reason !== "string" || !event.reason.trim()) {
@@ -208,8 +263,7 @@ function reworkTask(state, event) {
         throw new TaskTransitionError("Rework cannot displace another active task; select the intended task with task_update first");
     }
     validateReworkSteps(event.planSteps);
-    // Decomposition removes root steps from the live plan, but their root IDs remain in child IDs.
-    const nextStepNumber = Math.max(0, ...task.planSteps.map((step) => Number(step.id.slice(`${task.id}-S`.length).split(".")[0]))) + 1;
+    const nextStepNumber = nextRootStepNumber(task);
     const steps = createPlanSteps(task.id, event.planSteps, undefined, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, !getCurrentOpenStep(task), { startIndex: nextStepNumber });
     const affectedIds = new Set(steps.flatMap((step) => step.criterionIds));
     for (const criterion of task.acceptanceCriteria) {
@@ -944,7 +998,7 @@ function recalculateProgress(task) {
 }
 function deriveProgress(task) {
     const floor = task.status === "active" ? 1 : 0;
-    const planSteps = task.planSteps ?? [];
+    const planSteps = (task.planSteps ?? []).filter((step) => !step.supersededBy?.length);
     if (planSteps.length > 0) {
         // Deliverable plan-step closure is the dominant, limiting factor for
         // progress: acceptance criteria can be safety invariants unrelated to

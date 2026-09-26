@@ -1,5 +1,6 @@
 import { createEmptyState, TASK_EVENT_CUSTOM_TYPE, } from "./model.js";
 import { reduceTaskState, TaskTransitionError } from "./reducer.js";
+import { classifyMechanicStep, mechanicStepMessage, } from "./support-actions.js";
 export function createTaskRuntimeStore(initialState = createEmptyState()) {
     let state = initialState;
     return {
@@ -12,6 +13,19 @@ export function createTaskRuntimeStore(initialState = createEmptyState()) {
             return replayed;
         },
         append(event, appendEntry) {
+            // Tightened authoring rules must not invalidate previously persisted plans.
+            const steps = event.type === "task.created"
+                ? (event.planSteps ?? event.initialSteps?.map((text) => ({ text })))
+                : event.type === "task.steps_decomposed"
+                    ? event.childSteps
+                    : event.type === "task.reworked" || event.type === "task.replanned"
+                        ? event.planSteps
+                        : undefined;
+            for (const step of steps ?? []) {
+                const kind = classifyMechanicStep(step.text, true);
+                if (kind)
+                    throw new TaskTransitionError(mechanicStepMessage(kind, step.text));
+            }
             const next = reduceTaskState(state, event);
             appendEntry(TASK_EVENT_CUSTOM_TYPE, event);
             state = next;

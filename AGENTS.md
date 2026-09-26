@@ -86,6 +86,14 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Reset affected criteria to pending, require fresh passing acceptance evidence after their rework evidence baseline, clear completion metadata/confidence, and recalculate progress. Retain old evidence links; neither relinking old proof nor rework itself supersedes failing acceptance evidence.
 - `task_next`, `task_resume`, and `task_focus` must expose the explicit rework path for review findings, including exhausted plans with verification gaps. The recommended tool must be in nextAllowedActions and must not be blocked. Completion recommendations are conditional on verified implementation, not an instruction to ignore new findings.
 
+## Planning Repair Contract
+
+- `task_replan` records `task.replanned` to replace explicitly named open steps with non-empty, validated replacements covering all retired criterion links. It is not review remediation; `task_rework` remains append-only.
+- Retain retired steps, IDs, evidence links, decisions, blockers, warnings, and events. Mark retired entries skipped with `supersededBy`; do not count them as completed deliverables or demand execution evidence for the retired planning entry.
+- Replacement steps require ordinary verification. Preserve criterion status, evidence baselines, and failed-evidence gates; repair does not complete work or resolve blockers. Reject terminal tasks and displacement of another active task.
+- Apply tightened inspection-mechanic authoring validation before persistence across creation, decomposition, rework, and replan. Legacy inspection events must remain replayable so they can be repaired.
+- Planning schemas require structured steps with bounded `allowedActions`; argument-error recovery names the corrective tool and exposes missing parameters without pretending an unrelated decomposition fixes the call.
+
 ## Verification Rules
 
 Before claiming readiness:

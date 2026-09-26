@@ -49,7 +49,7 @@ const mutationPlanParams: Record<string, unknown> = {
 	acceptance_criteria: ["Mutation state is published"],
 	plan_steps: [
 		{
-			text: "Inspect mutation event",
+			text: "Validate mutation event",
 			expectedOutput: "Mutation event payload observed",
 			evidenceRequired: true,
 			allowedActions: ["read"],

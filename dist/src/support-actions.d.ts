@@ -22,5 +22,5 @@ export type MechanicStepKind = "read" | "commit";
  * mechanic or a commit mechanic, rather than a deliverable unit of work.
  * Returns undefined when the text is not purely a mechanic action.
  */
-export declare function classifyMechanicStep(text: string): MechanicStepKind | undefined;
+export declare function classifyMechanicStep(text: string, includeInspection?: boolean): MechanicStepKind | undefined;
 export declare function mechanicStepMessage(kind: MechanicStepKind, text: string): string;

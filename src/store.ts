@@ -6,6 +6,10 @@ import {
 	type TaskState,
 } from "./model.ts";
 import { reduceTaskState, TaskTransitionError } from "./reducer.ts";
+import {
+	classifyMechanicStep,
+	mechanicStepMessage,
+} from "./support-actions.ts";
 
 export interface BranchEntry {
 	type: string;
@@ -39,6 +43,20 @@ export function createTaskRuntimeStore(
 			return replayed;
 		},
 		append(event, appendEntry) {
+			// Tightened authoring rules must not invalidate previously persisted plans.
+			const steps =
+				event.type === "task.created"
+					? (event.planSteps ?? event.initialSteps?.map((text) => ({ text })))
+					: event.type === "task.steps_decomposed"
+						? event.childSteps
+						: event.type === "task.reworked" || event.type === "task.replanned"
+							? event.planSteps
+							: undefined;
+			for (const step of steps ?? []) {
+				const kind = classifyMechanicStep(step.text, true);
+				if (kind)
+					throw new TaskTransitionError(mechanicStepMessage(kind, step.text));
+			}
 			const next = reduceTaskState(state, event);
 			appendEntry(TASK_EVENT_CUSTOM_TYPE, event);
 			state = next;

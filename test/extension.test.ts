@@ -24,6 +24,7 @@ const taskToolNames = new Set([
 	"task_granularity_check",
 	"task_decompose",
 	"task_rework",
+	"task_replan",
 	"task_verify_step",
 	"task_list",
 	"task_update",
@@ -310,6 +311,19 @@ describe("native Pi dynamic task tools", () => {
 			console.info(
 				`pi-tasks surface chars fresh schema+description=${fresh.schemaAndDescriptionChars}, system-prompt=${fresh.systemPromptChars}; active schema+description=${active.schemaAndDescriptionChars}, system-prompt=${active.systemPromptChars}`,
 			);
+			const repaired = await requireTool(first.session, "task_replan").execute(
+				"native-replan",
+				{
+					task_id: "T1",
+					step_ids: ["T1-S1"],
+					reason: "Replace synthetic planning mistake",
+					plan_steps: validPlan().plan_steps,
+				},
+				undefined,
+				undefined,
+			);
+			expect(repaired.isError).not.toBe(true);
+			expect(repaired.content[0]?.text).toContain("T1-S2");
 
 			const sessionFile = first.sessionManager.getSessionFile();
 			assert.ok(sessionFile);
@@ -320,7 +334,12 @@ describe("native Pi dynamic task tools", () => {
 				sessionFile,
 			});
 			try {
-				expect(activeTaskTools(restored.session)).toContain("task_update");
+				expect(activeTaskTools(restored.session)).toContain("task_replan");
+				const resumed = await requireTool(
+					restored.session,
+					"task_resume",
+				).execute("resume", {}, undefined, undefined);
+				expect(resumed.content[0]?.text).toContain("T1-S2");
 				expect(restored.events).toContainEqual(
 					expect.objectContaining({
 						reason: "session_start",

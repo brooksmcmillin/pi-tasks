@@ -101,7 +101,7 @@ export function formatTaskList(
 		);
 		const planSteps = (task.planSteps ?? []).map(
 			(step) =>
-				`  - ${step.id} step [${step.status}/${step.decompositionStatus}] ${compactDetail(step.text)}; output: ${compactDetail(step.expectedOutput)}${step.parentStepId ? `; parent:${step.parentStepId}` : ""}; atomic:${step.granularityCheck.isAtomic}; planQuality:${step.planQuality.score}${step.planQuality.issues.length ? ` (${compactDetail(step.planQuality.issues.join("; "))})` : ""}${step.evidenceRequired ? "; evidence required" : ""}${step.criterionIds.length ? `; criteria:${step.criterionIds.join(",")}` : ""}${step.evidenceIds.length ? `; evidence:${step.evidenceIds.join(",")}` : ""}`,
+				`  - ${step.id} step [${step.status}/${step.decompositionStatus}] ${compactDetail(step.text)}; output: ${compactDetail(step.expectedOutput)}${step.parentStepId ? `; parent:${step.parentStepId}` : ""}${step.supersededBy?.length ? `; superseded by:${step.supersededBy.join(",")}` : ""}; atomic:${step.granularityCheck.isAtomic}; planQuality:${step.planQuality.score}${step.planQuality.issues.length ? ` (${compactDetail(step.planQuality.issues.join("; "))})` : ""}${step.evidenceRequired ? "; evidence required" : ""}${step.criterionIds.length ? `; criteria:${step.criterionIds.join(",")}` : ""}${step.evidenceIds.length ? `; evidence:${step.evidenceIds.join(",")}` : ""}`,
 		);
 		const decisions = task.decisions.map(
 			(decision) =>
@@ -247,6 +247,7 @@ export function buildTaskResume(state: TaskState): TaskResumeContext {
 		recommendedTool,
 		...(step ? getNextAllowedActions(step, mode === "blocked") : []),
 		"task_rework",
+		...(step ? ["task_replan"] : []),
 		"task_decision",
 	]);
 	return {
@@ -409,6 +410,7 @@ export function getVerificationGaps(task: Task): string[] {
 	for (const step of task.planSteps ?? []) {
 		if (
 			step.evidenceRequired &&
+			!step.supersededBy?.length &&
 			(step.status === "done" || step.status === "skipped") &&
 			step.evidenceIds.length === 0
 		) {

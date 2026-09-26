@@ -103,6 +103,13 @@ function harness() {
 }
 
 describe("bounded continuation policy", () => {
+	it("arms the advisory for a repair-only input", () => {
+		const { advisory, current } = armed();
+		advisory.reset();
+		advisory.observeToolResult("task_replan", false, { task_id: "T1" });
+		expect(advisory.take(current)).toContain("Recommended tool:");
+		expect(advisory.take(current)).toBeUndefined();
+	});
 	it("treats unrun review/validation as actionable and reuses resume guidance", () => {
 		const { advisory, current } = armed();
 		const content = advisory.take(current);
@@ -214,6 +221,7 @@ describe("affected-task association", () => {
 		"task_update",
 		"task_decompose",
 		"task_rework",
+		"task_replan",
 		"task_evidence",
 		"task_verify_step",
 	])(
