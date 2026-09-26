@@ -4,8 +4,13 @@ import {
 	TASK_EVENT_CUSTOM_TYPE,
 	type TaskEvent,
 	type TaskState,
+	type TaskStepInput,
 } from "./model.ts";
-import { reduceTaskState, TaskTransitionError } from "./reducer.ts";
+import {
+	reduceTaskState,
+	TaskTransitionError,
+	validateAtomicWording,
+} from "./reducer.ts";
 import {
 	classifyMechanicStep,
 	mechanicStepMessage,
@@ -46,7 +51,13 @@ export function createTaskRuntimeStore(
 			// Tightened authoring rules must not invalidate previously persisted plans.
 			const steps =
 				event.type === "task.created"
-					? (event.planSteps ?? event.initialSteps?.map((text) => ({ text })))
+					? (event.planSteps ??
+						event.initialSteps?.map(
+							(text): TaskStepInput => ({
+								text,
+								expectedOutput: `Verified output for: ${text}`,
+							}),
+						))
 					: event.type === "task.steps_decomposed"
 						? event.childSteps
 						: event.type === "task.reworked" || event.type === "task.replanned"
@@ -56,6 +67,13 @@ export function createTaskRuntimeStore(
 				const kind = classifyMechanicStep(step.text, true);
 				if (kind)
 					throw new TaskTransitionError(mechanicStepMessage(kind, step.text));
+				if (
+					step.decompositionStatus === "atomic" ||
+					(step.decompositionStatus === undefined &&
+						step.granularityCheck?.isAtomic)
+				) {
+					validateAtomicWording(step);
+				}
 			}
 			const next = reduceTaskState(state, event);
 			appendEntry(TASK_EVENT_CUSTOM_TYPE, event);

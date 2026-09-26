@@ -99,6 +99,55 @@ function requireTool(
 }
 
 describe("registered task tools", () => {
+	it("classifies a simple current step through task_update without replacing its ID", async () => {
+		const { tools, ctx, store, entries } = createHarness();
+		await execute(
+			requireTool(tools, "task_plan"),
+			{
+				title: "Simple step classification",
+				objective: "Avoid artificial decomposition",
+				acceptance_criteria: ["Regression report passes"],
+				plan_steps: [
+					{
+						text: "Validate backend configuration",
+						expectedOutput: "Configuration regression report",
+						allowedActions: ["bash"],
+					},
+				],
+			},
+			ctx,
+		);
+		const result = await execute(
+			requireTool(tools, "task_update"),
+			{
+				task_id: "T1",
+				step_id: "T1-S1",
+				step_granularity_check: {
+					isAtomic: true,
+					reason: "One regression report",
+					canBeDoneInOneAgentAction: true,
+					hasSingleObservableOutput: true,
+					hasSingleVerificationMethod: true,
+					hasNoHiddenSubtasks: true,
+				},
+			},
+			ctx,
+		);
+		expect(result.isError).not.toBe(true);
+		expect(result.content[0]?.text).toContain("task_verify_step");
+		expect(store.getState().tasks.T1?.planSteps).toHaveLength(1);
+		expect(store.getState().tasks.T1?.planSteps[0]?.id).toBe("T1-S1");
+		expect(entries.at(-1)).toMatchObject({
+			type: "task.updated",
+			stepGranularityCheck: { isAtomic: true },
+		});
+		const full = await execute(
+			requireTool(tools, "task_list"),
+			{ include_history: true },
+			ctx,
+		);
+		expect(full.content[0]?.text).toContain("stepGranularityCheck");
+	});
 	it.each(["task_evidence", "task_verify_step"])(
 		"exposes command limits and artifact recovery for %s",
 		async (name) => {
@@ -936,7 +985,7 @@ describe("registered task tools", () => {
 			],
 			plan_steps: [
 				{
-					text: "Refill and submit the recovery plan",
+					text: "Submit the revised recovery plan",
 					expectedOutput: "Recovery plan creates task T1",
 					criterionIds: ["T1-AC1"],
 					evidenceRequired: true,
@@ -944,7 +993,7 @@ describe("registered task tools", () => {
 					decompositionStatus: "atomic" as const,
 					granularityCheck: {
 						isAtomic: true,
-						reason: "Single refill-and-submit action",
+						reason: "Single plan submission",
 						canBeDoneInOneAgentAction: true,
 						hasSingleObservableOutput: true,
 						hasSingleVerificationMethod: true,
@@ -1361,6 +1410,9 @@ describe("registered task tools", () => {
 			"never merely to clear tracking warnings",
 			"Scope requires activity",
 			"cancellation requires reason",
+			"step_granularity_check",
+			"preserves its ID and verification obligations",
+			"genuine compound work still requires task_decompose",
 		]) {
 			expect(updateGuidance).toContain(clause);
 		}

@@ -145,6 +145,27 @@ function compactDetail(text: string): string {
 	return truncateText(text.replace(/\s+/g, " ").trim(), DETAIL_TEXT_MAX);
 }
 
+function compactItems(items: string[], limit = 5): string[] {
+	const visible = items.slice(0, limit).map(compactDetail);
+	if (items.length > limit)
+		visible.push(
+			`${items.length - limit} more; task_list({ include_history: true }) for full details`,
+		);
+	return visible;
+}
+
+function compactWarnings(state: TaskState, task?: Task): string[] {
+	const warnings = task?.warnings ?? [];
+	const actionable = [
+		...state.warnings,
+		...warnings.filter((warning) => /^(off_plan|scope_change):/.test(warning)),
+	];
+	const history = warnings.filter(
+		(warning) => !/^(off_plan|scope_change):/.test(warning),
+	);
+	return compactItems([...actionable, ...history.slice().reverse()], 3);
+}
+
 function compactRef(text: string): string {
 	return truncateText(text.replace(/\s+/g, " ").trim(), DETAIL_REF_MAX);
 }
@@ -192,12 +213,12 @@ export function formatTaskFocus(state: TaskState): string {
 	lines.push(
 		"Review findings: use task_rework for in-scope remediation; do not force-complete known gaps.",
 	);
-	const gaps = getVerificationGaps(task);
-	if (gaps.length > 0) lines.push(`Gaps: ${gaps.join("; ")}`);
-	if (task.warnings.length > 0) {
-		lines.push("Warnings:");
+	if (resume.verificationGaps.length > 0)
+		lines.push(`Gaps: ${resume.verificationGaps.join("; ")}`);
+	if (resume.warnings.length > 0) {
 		lines.push(
-			...task.warnings.map((warning) => `- ${compactDetail(warning)}`),
+			"Warnings:",
+			...resume.warnings.map((warning) => `- ${warning}`),
 		);
 	}
 	return lines.join("\n");
@@ -224,7 +245,7 @@ export function buildTaskResume(state: TaskState): TaskResumeContext {
 			verificationGaps: [],
 			blockers: [],
 			decisions: [],
-			warnings: [...state.warnings],
+			warnings: compactWarnings(state),
 			resumeInstruction: hasTasks
 				? "No active pi-tasks task. Use task_list to find an existing task, then task_rework with findings and remediation steps when review discovers gaps (including done tasks). Create a new objective with task_plan only when needed."
 				: "No active pi-tasks task. Create one with task_plan before implementation work.",
@@ -278,10 +299,10 @@ export function buildTaskResume(state: TaskState): TaskResumeContext {
 					allowedActions: [],
 				}),
 		nextAllowedActions,
-		verificationGaps: gaps,
-		blockers,
+		verificationGaps: compactItems(gaps),
+		blockers: compactItems(blockers, 3),
 		decisions,
-		warnings: [...state.warnings, ...task.warnings].map(compactDetail),
+		warnings: compactWarnings(state, task),
 		resumeInstruction: buildResumeInstruction(
 			task,
 			step,
@@ -701,7 +722,7 @@ function buildResumeInstruction(
 			: "No open step remains. Use task_complete only if implementation is verified; if review finds gaps, use task_rework with findings and remediation steps without requesting permission for in-scope repairs.";
 	}
 	if (step.decompositionStatus !== "atomic") {
-		return `Resume by decomposing ${step.id}; do not execute or mark it done until it is atomic.`;
+		return `For compound work, decompose ${step.id}. If already simple, use task_update with step_id and step_granularity_check (reason and all flags true) to classify it without inventing children. Do not execute or mark it done until atomic.`;
 	}
 	if (step.evidenceRequired && step.evidenceIds.length === 0) {
 		return `Resume ${step.id} by performing one allowed action, then use task_verify_step to record passing evidence and advance atomically.`;

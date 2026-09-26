@@ -125,6 +125,7 @@ interface TaskUpdateParams extends Record<string, unknown> {
 	step_id?: string;
 	step_status?: Exclude<TaskStepStatus, "pending">;
 	step_evidence_ids?: string[];
+	step_granularity_check?: TaskStepInput["granularityCheck"];
 	activity?: string;
 	scope?: "within_step" | "scope_change" | "off_plan";
 	scope_reason?: string;
@@ -452,7 +453,7 @@ export function registerTaskTools(
 			REWORK_GUIDANCE,
 			PLAN_REPAIR_GUIDANCE,
 			"Follow next allowed actions; do not complete tasks while verification gaps remain.",
-			"Use task_decompose when the resume instruction says the current step is not atomic.",
+			"For non-atomic steps, use task_decompose for compound work or task_update with step_granularity_check to classify an already-simple current step without inventing children.",
 		],
 		parameters: Type.Object({}),
 		execute: async () => {
@@ -522,7 +523,7 @@ export function registerTaskTools(
 			"Smart models: classify any hidden subtask, second output, or second verification method as non-atomic.",
 			"Weak models: if any atomicity field is false, call task_decompose instead of executing the step.",
 			"Atomic means one agent action, one observable output, one verification method, and no hidden subtasks.",
-			"If the step is not atomic, call task_decompose with smaller child steps.",
+			"If the step is already simple but unclassified, use task_update with step_id and step_granularity_check. Otherwise call task_decompose with smaller deliverables, not support reads or implementation mechanics.",
 		],
 		parameters: Type.Object({
 			task_id: Type.Optional(Type.String()),
@@ -557,7 +558,7 @@ export function registerTaskTools(
 					`Reason: ${check.reason}`,
 					step.decompositionStatus === "atomic"
 						? "Next allowed action: task_focus or execution work"
-						: `Next allowed action: task_decompose ${step.id}`,
+						: `Next allowed action: task_decompose ${step.id}, or task_update with step_id and step_granularity_check if already simple`,
 				].join("\n"),
 				buildTaskResume(state),
 			);
@@ -712,14 +713,14 @@ export function registerTaskTools(
 		name: "task_update",
 		label: "Task Update",
 		description:
-			"Update task progress, ordered plan step, status, next action, or blocker state. Scope requires activity; cancellation requires reason. Cancel only when the objective is withdrawn, never merely to clear tracking warnings after completed delivery.",
+			"Update task progress, ordered plan step, status, next action, or blocker state. Scope requires activity; cancellation requires reason. Cancel only when the objective is withdrawn, never merely to clear tracking warnings after completed delivery. To classify an already-simple current step as atomic without splitting it, supply step_id and step_granularity_check with a reason and all flags true. This preserves its ID and verification obligations; genuine compound work still requires task_decompose.",
 		promptSnippet:
 			"Update pi-tasks progress, current ordered step, next action, status, or blocker details",
 		promptGuidelines: [
 			"Use step_id with step_status=done when the current planned step is finished.",
 			"Smart models: record one state transition per call; do not bundle drift, evidence, and completion into one update.",
 			"Weak models: use task_focus current step_id; for done, include step_evidence_ids when evidence was just recorded.",
-			"Only atomic steps can be marked done; use task_decompose first if a step still needs breakdown.",
+			"Only atomic steps can be marked done. Classify an already-simple current step with step_granularity_check; use task_decompose for genuine compound work.",
 			"Evidence-required steps need linked evidence before step_status=done.",
 			"Do not skip ahead; ordered plan steps must be completed or skipped in the displayed order.",
 			"Use activity with scope=within_step, scope_change, or off_plan to document meaningful work and drift.",
@@ -735,6 +736,7 @@ export function registerTaskTools(
 			step_id: Type.Optional(Type.String()),
 			step_status: Type.Optional(Type.Enum(STEP_STATUSES)),
 			step_evidence_ids: Type.Optional(Type.Array(Type.String())),
+			step_granularity_check: Type.Optional(granularityCheckSchema()),
 			activity: Type.Optional(
 				Type.String({
 					minLength: 1,
@@ -784,6 +786,9 @@ export function registerTaskTools(
 				...(params.step_evidence_ids === undefined
 					? {}
 					: { stepEvidenceIds: params.step_evidence_ids }),
+				...(params.step_granularity_check === undefined
+					? {}
+					: { stepGranularityCheck: params.step_granularity_check }),
 				...(params.activity === undefined ? {} : { activity: params.activity }),
 				...(params.scope === undefined ? {} : { scope: params.scope }),
 				...(params.scope_reason === undefined

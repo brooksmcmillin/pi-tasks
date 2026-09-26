@@ -161,6 +161,19 @@ The existing quality and evidence gates still apply to substantive deliverables.
 `activity` or cancellation `reason`, recovery points back to `task_update` and
 prints the required parameters.
 
+## Classify an already-simple step
+
+An unclassified step is not necessarily compound. Use `task_update` with its
+current `step_id` and `step_granularity_check` (a concrete reason and all five
+atomicity flags true) to classify it in place. Its ID, criteria, evidence links,
+and completion requirements remain unchanged. Classification does not perform
+or verify the work, and cannot be bundled with status/evidence updates.
+
+Plan bounded deliverables, not separate support reads, staging commands, or
+receipt bookkeeping. Keep those mechanics within the deliverable's allowed
+execution. If a step genuinely contains multiple outputs or independent work,
+use `task_decompose`; do not assert atomicity just to avoid the gate.
+
 ## Review remediation
 
 An exhausted plan is not proof that implementation is complete. When review finds
@@ -292,7 +305,13 @@ or erase linked failures; those still require ordinary verification.
 
 ## Token Efficiency
 
-Normal tool results return only the compact resume contract needed for the next action — not the full task state.
+Routine resume/next/focus results and their resume details summarize at most five
+verification gaps, three blockers, and three warnings, with explicit omitted
+counts and a full-history recovery instruction. Actionable scope/replay warnings
+come before recent historical warnings. Execution decisions still use the full
+state: summarization never makes a blocked or unverified task complete.
+Current-step execution parameters remain intact rather than truncating IDs.
+Retrieve the complete retained history with `task_list({ include_history: true })`.
 
 ```text
 # Compact defaults during work:
