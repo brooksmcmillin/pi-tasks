@@ -58,6 +58,8 @@ export interface TaskBlocker {
     resolvedAt?: string;
 }
 export interface TaskStep {
+    /** Retired planning entry; replacement steps retain its acceptance obligations. */
+    supersededBy?: string[];
     id: string;
     taskId: string;
     text: string;
@@ -210,6 +212,12 @@ export interface TaskStepsDecomposedEvent extends TaskEventBase {
     childSteps: TaskStepInput[];
     reason: string;
 }
+export interface TaskReplannedEvent extends TaskEventBase {
+    type: "task.replanned";
+    reason: string;
+    stepIds: string[];
+    planSteps: TaskStepInput[];
+}
 export interface TaskReworkedEvent extends TaskEventBase {
     type: "task.reworked";
     reason: string;
@@ -258,7 +266,7 @@ export interface TaskSnapshotEvent extends TaskEventBase {
     resume: TaskResumeContext;
     reason: "compaction" | "resume_repair" | "manual";
 }
-export type TaskEvent = TaskCreatedEvent | TaskUpdatedEvent | TaskStepsDecomposedEvent | TaskReworkedEvent | TaskEvidenceAddedEvent | TaskStepVerifiedEvent | TaskDecisionRecordedEvent | TaskCompletedEvent | TaskCancelledEvent | TaskSnapshotEvent;
+export type TaskEvent = TaskCreatedEvent | TaskUpdatedEvent | TaskStepsDecomposedEvent | TaskReworkedEvent | TaskReplannedEvent | TaskEvidenceAddedEvent | TaskStepVerifiedEvent | TaskDecisionRecordedEvent | TaskCompletedEvent | TaskCancelledEvent | TaskSnapshotEvent;
 export interface ReplayResult {
     state: TaskState;
     malformedEvents: string[];

@@ -93,11 +93,14 @@ function isPureMechanic(trimmed, leadPattern) {
  * mechanic or a commit mechanic, rather than a deliverable unit of work.
  * Returns undefined when the text is not purely a mechanic action.
  */
-export function classifyMechanicStep(text) {
+export function classifyMechanicStep(text, includeInspection = false) {
     const trimmed = text.trim();
     if (!trimmed)
         return undefined;
-    if (READ_MECHANIC_PATTERNS.some((pattern) => isPureMechanic(trimmed, pattern))) {
+    if (READ_MECHANIC_PATTERNS.some((pattern) => isPureMechanic(trimmed, pattern)) ||
+        (includeInspection &&
+            /^inspect\b/i.test(trimmed) &&
+            !/\bto\s+(verify|validate|confirm|analyze|summarize|check)\b/i.test(trimmed))) {
         return "read";
     }
     if (COMMIT_MECHANIC_PATTERNS.some((pattern) => isPureMechanic(trimmed, pattern))) {
@@ -107,7 +110,7 @@ export function classifyMechanicStep(text) {
 }
 export function mechanicStepMessage(kind, text) {
     if (kind === "read") {
-        return `Plan step "${text}" is a read/instruction-load mechanic, not a deliverable unit of work; reads are always-admissible support actions (${SUPPORT_ACTIONS.join(", ")}) and must not be modeled as a nested plan step.`;
+        return `Plan step "${text}" is a read/instruction-load mechanic, not a deliverable unit of work; reads are always-admissible support actions (${SUPPORT_ACTIONS.join(", ")}) and must not be modeled as a plan step. Perform the read outside the plan; plan the resulting deliverable instead.`;
     }
     return `Plan step "${text}" is a commit mechanic, not a deliverable unit of work; handle it inside the parent step's own execution/allowedActions rather than as a separate nested plan step.`;
 }

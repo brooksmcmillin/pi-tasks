@@ -5,6 +5,7 @@ const EXECUTION_TOOLS = new Set([
 	"task_plan",
 	"task_decompose",
 	"task_rework",
+	"task_replan",
 	"task_update",
 	"task_evidence",
 	"task_verify_step",

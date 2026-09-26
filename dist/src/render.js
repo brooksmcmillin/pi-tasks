@@ -65,7 +65,7 @@ export function formatTaskList(state, options = {}) {
         if (!options.includeEvidence)
             return [summary];
         const blockerLines = task.blockers.map((blocker) => `  - blocker ${blocker.id} [${blocker.resolvedAt ? "resolved" : blocker.blockedBy}] ${compactDetail(blocker.reason)}; unblock: ${compactDetail(blocker.neededToUnblock)}`);
-        const planSteps = (task.planSteps ?? []).map((step) => `  - ${step.id} step [${step.status}/${step.decompositionStatus}] ${compactDetail(step.text)}; output: ${compactDetail(step.expectedOutput)}${step.parentStepId ? `; parent:${step.parentStepId}` : ""}; atomic:${step.granularityCheck.isAtomic}; planQuality:${step.planQuality.score}${step.planQuality.issues.length ? ` (${compactDetail(step.planQuality.issues.join("; "))})` : ""}${step.evidenceRequired ? "; evidence required" : ""}${step.criterionIds.length ? `; criteria:${step.criterionIds.join(",")}` : ""}${step.evidenceIds.length ? `; evidence:${step.evidenceIds.join(",")}` : ""}`);
+        const planSteps = (task.planSteps ?? []).map((step) => `  - ${step.id} step [${step.status}/${step.decompositionStatus}] ${compactDetail(step.text)}; output: ${compactDetail(step.expectedOutput)}${step.parentStepId ? `; parent:${step.parentStepId}` : ""}${step.supersededBy?.length ? `; superseded by:${step.supersededBy.join(",")}` : ""}; atomic:${step.granularityCheck.isAtomic}; planQuality:${step.planQuality.score}${step.planQuality.issues.length ? ` (${compactDetail(step.planQuality.issues.join("; "))})` : ""}${step.evidenceRequired ? "; evidence required" : ""}${step.criterionIds.length ? `; criteria:${step.criterionIds.join(",")}` : ""}${step.evidenceIds.length ? `; evidence:${step.evidenceIds.join(",")}` : ""}`);
         const decisions = task.decisions.map((decision) => `  - ${decision.id} decision [${decision.decidedBy}] ${compactDetail(decision.question)}: ${compactDetail(decision.decision)}${decision.rationale ? `; rationale: ${compactDetail(decision.rationale)}` : ""}`);
         return [
             summary,
@@ -175,6 +175,7 @@ export function buildTaskResume(state) {
         recommendedTool,
         ...(step ? getNextAllowedActions(step, mode === "blocked") : []),
         "task_rework",
+        ...(step ? ["task_replan"] : []),
         "task_decision",
     ]);
     return {
@@ -313,7 +314,7 @@ export function getVerificationGaps(task) {
     }
     for (const step of task.planSteps ?? []) {
         if (step.evidenceRequired &&
-            (step.status === "done" || step.status === "skipped") &&
+            step.status === "done" &&
             step.evidenceIds.length === 0) {
             gaps.push(`${step.id} lacks evidence`);
         }

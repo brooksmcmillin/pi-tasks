@@ -99,6 +99,204 @@ function requireTool(
 }
 
 describe("registered task tools", () => {
+	it.each(["task_evidence", "task_verify_step"])(
+		"exposes command limits and artifact recovery for %s",
+		async (name) => {
+			const { tools, ctx, store } = createHarness();
+			await execute(
+				requireTool(tools, "task_plan"),
+				{
+					title: "Long command recovery",
+					objective: "Preserve successful verification",
+					acceptance_criteria: ["Original result retained"],
+					plan_steps: [
+						{
+							text: "Validate command recovery",
+							expectedOutput: "Original verification result retained",
+							allowedActions: ["bash"],
+							decompositionStatus: "atomic",
+							granularityCheck: {
+								isAtomic: true,
+								reason: "One command result",
+								canBeDoneInOneAgentAction: true,
+								hasSingleObservableOutput: true,
+								hasSingleVerificationMethod: true,
+								hasNoHiddenSubtasks: true,
+							},
+						},
+					],
+				},
+				ctx,
+			);
+			const tool = requireTool(tools, name);
+			expect(
+				tool.parameters.properties.quality.properties.command.maxLength,
+			).toBe(300);
+			expect(
+				tool.parameters.properties.quality.properties.command.description,
+			).toContain("Do not shorten or rerun");
+			const result = await execute(
+				tool,
+				{
+					task_id: "T1",
+					...(name === "task_verify_step"
+						? { step_id: "T1-S1" }
+						: { step_ids: ["T1-S1"], passed: "true" }),
+					type: "command",
+					level: "unit_test",
+					summary: "Original filter check passed",
+					references: ["filter.log"],
+					quality: {
+						source: "shell",
+						reproducible: true,
+						verifier: "tool",
+						command: "x".repeat(301),
+						artifactRefs: ["filter.log"],
+						observedOutput: "API matched",
+					},
+				},
+				ctx,
+			);
+			const recovery = result.details as {
+				retry_example: Record<string, unknown>;
+			};
+			expect(result.content[0]?.text).toContain(
+				"do not rerun successful verification",
+			);
+			expect(recovery.retry_example).toMatchObject({
+				task_id: "T1",
+				quality: {
+					command:
+						"Original command recorded in <path-to-saved-command-and-output>",
+					observedOutput: "API matched",
+					artifactRefs: ["filter.log", "<path-to-saved-command-and-output>"],
+				},
+			});
+			if (name === "task_verify_step") {
+				expect(recovery.retry_example).toHaveProperty("step_id", "T1-S1");
+				expect(recovery.retry_example).not.toHaveProperty("step_ids");
+				expect(recovery.retry_example).not.toHaveProperty("passed");
+			}
+			expect(store.getState().tasks.T1?.evidence).toHaveLength(0);
+			const retry = JSON.parse(
+				JSON.stringify(recovery.retry_example).replaceAll(
+					"<path-to-saved-command-and-output>",
+					"original-command.log",
+				),
+			);
+			const accepted = await execute(tool, retry, ctx);
+			expect(accepted.isError).not.toBe(true);
+			expect(store.getState().tasks.T1?.evidence).toHaveLength(1);
+			expect(store.getState().tasks.T1?.evidence[0]?.quality).toMatchObject({
+				command: "Original command recorded in original-command.log",
+				artifactRefs: ["filter.log", "original-command.log"],
+				observedOutput: "API matched",
+			});
+		},
+	);
+	it("requires structured plans with shared bounded step schemas", () => {
+		const { tools } = createHarness();
+		const plan = requireTool(tools, "task_plan").parameters;
+		expect(plan.required).toContain("plan_steps");
+		expect(plan.properties).not.toHaveProperty("initial_steps");
+		for (const [name, field, count] of [
+			["task_plan", "plan_steps", 1],
+			["task_decompose", "child_steps", 2],
+			["task_rework", "plan_steps", 1],
+			["task_replan", "plan_steps", 1],
+		] as const) {
+			const schema = requireTool(tools, name).parameters as {
+				properties: Record<
+					string,
+					{
+						minItems: number;
+						items: { required: string[]; properties: Record<string, unknown> };
+					}
+				>;
+			};
+			expect(schema.properties[field]?.minItems).toBe(count);
+			expect(schema.properties[field]?.items.required).toContain(
+				"allowedActions",
+			);
+			expect(
+				schema.properties[field]?.items.properties.allowedActions,
+			).toMatchObject({ minItems: 1, maxItems: 3 });
+		}
+	});
+
+	it("repairs malformed plans and returns corrected update arguments without decomposition detours", async () => {
+		const { tools, ctx, store, entries, publications } = createHarness();
+		const step = {
+			text: "Validate backend configuration",
+			expectedOutput: "Backend configuration passes",
+			allowedActions: ["bash"],
+		};
+		await execute(
+			requireTool(tools, "task_plan"),
+			{
+				title: "Recovery",
+				objective: "Repair planning mistakes",
+				acceptance_criteria: ["Configuration loads"],
+				plan_steps: [step],
+			},
+			ctx,
+		);
+		const before = entries.length;
+		const published = publications.length;
+		const skipped = await execute(
+			requireTool(tools, "task_update"),
+			{
+				task_id: "T1",
+				step_id: "T1-S1",
+				step_status: "skipped",
+				scope: "within_step",
+				scope_reason: "Mistaken planning step",
+				note: "Retire mistaken inspection",
+			},
+			ctx,
+		);
+		expect(skipped.isError).toBe(true);
+		expect(skipped.details).toMatchObject({
+			retry_with: "task_update",
+			minimum_params: {
+				task_id: "T1",
+				step_id: "T1-S1",
+				activity: "<activity being recorded>",
+			},
+		});
+		expect(skipped.content[0]?.text).toContain("minimum_params:");
+		const cancelled = await execute(
+			requireTool(tools, "task_update"),
+			{ task_id: "T1", status: "cancelled" },
+			ctx,
+		);
+		expect(cancelled.details).toMatchObject({
+			retry_with: "task_update",
+			minimum_params: {
+				task_id: "T1",
+				status: "cancelled",
+				reason: "<why the objective is cancelled>",
+			},
+		});
+		expect(entries).toHaveLength(before);
+		expect(publications).toHaveLength(published);
+		const repaired = await execute(
+			requireTool(tools, "task_replan"),
+			{
+				task_id: "T1",
+				step_ids: ["T1-S1"],
+				reason: "Replace mistaken planning entry",
+				plan_steps: [step],
+			},
+			ctx,
+		);
+		expect(repaired.isError).not.toBe(true);
+		expect(entries.at(-1)?.type).toBe("task.replanned");
+		expect(store.getState().tasks.T1?.planSteps[1]?.supersededBy).toEqual([
+			"T1-S2",
+		]);
+		expect(publications.length).toBeGreaterThan(published);
+	});
 	it("registers evidence-preserving rework with discoverable guidance and persisted publication", async () => {
 		const { tools, entries, ctx, store, ui, publications, pi } =
 			createHarness();
@@ -503,9 +701,7 @@ describe("registered task tools", () => {
 		);
 
 		expect(rejected.isError).toBe(true);
-		expect(rejected.content[0]?.text).toContain(
-			"Minimal working task_evidence params",
-		);
+		expect(rejected.content[0]?.text).toContain("Corrected evidence params");
 		expect(rejected.content[0]?.text).toContain('"command": "npm test"');
 		expect(rejected.content[0]?.text).toContain(
 			'"observedOutput": "<concise observed output',
@@ -930,7 +1126,7 @@ describe("registered task tools", () => {
 						},
 					},
 					{
-						text: "Inspect the package artifact",
+						text: "Validate the package artifact",
 						expectedOutput: "Package artifact is valid",
 						evidenceRequired: true,
 						allowedActions: ["npm pack --dry-run"],

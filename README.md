@@ -114,12 +114,52 @@ metadata.
 | `task_granularity_check` | Verify a step is truly atomic |
 | `task_decompose` | Break non-atomic steps into child steps |
 | `task_rework` | Record review findings and append remediation steps, including reopening done tasks |
+| `task_replan` | Replace explicitly named mistaken open steps without discarding history |
 | `task_list` | List tasks with optional filtering |
 | `task_update` | Advance steps, record activity, flag scope drift |
 | `task_evidence` | Attach acceptance or diagnostic evidence and supersede linked failures |
 | `task_verify_step` | Atomically attach passing evidence and complete the current atomic step |
 | `task_decision` | Record explicit user decisions |
 | `task_complete` | Close a task (only if all gates pass) |
+
+## Repairing a mistaken plan
+
+Use `task_replan` for a planning mistake, not `task_rework` (which only appends
+review remediation). For example, replace an inspection-only step or duplicate
+open steps with the actual deliverable:
+
+```json
+{
+  "task_id": "T1",
+  "step_ids": ["T1-S1"],
+  "reason": "Inspection is support work, not a deliverable",
+  "plan_steps": [{
+    "text": "Rename the Grafana token setting",
+    "expectedOutput": "Settings bind the deployed environment variable",
+    "allowedActions": ["edit"],
+    "decompositionStatus": "needs_breakdown"
+  }]
+}
+```
+
+Replacements occupy the earliest replaced position. Retired steps remain visible
+with `supersededBy` links; their IDs are never reused. Replacement steps must
+cover all replaced criterion links and pass the ordinary evidence gates.
+Existing evidence, failures, criteria, decisions, blockers, and history remain.
+Replan cannot reopen terminal tasks, resolve blockers, or displace another active
+task. It does not turn already performed work into verified completion: attach
+its real evidence to the corrected steps instead.
+
+New plans require non-empty structured `plan_steps`, not `initial_steps` strings.
+All planning tools share a step schema requiring one to three `allowedActions`.
+Pure read/inspection mechanics are rejected when authoring plans; old persisted
+inspection plans still replay for repair. This is an authoring wording check,
+not a natural-language proof of atomicity: an `Inspect` step must name an explicit
+purpose (`to verify`, `to validate`, `to confirm`, `to analyze`, `to summarize`, or
+`to check`), regardless of object length or words such as `test` in the object.
+The existing quality and evidence gates still apply to substantive deliverables. When `task_update` rejects a missing scope
+`activity` or cancellation `reason`, recovery points back to `task_update` and
+prints the required parameters.
 
 ## Review remediation
 
@@ -164,7 +204,7 @@ displace another active task. No prior session entries are rewritten.
 ## Advisory yield check
 
 After successful task execution calls (`task_plan`, `task_decompose`,
-`task_rework`, `task_update`, `task_evidence`, or `task_verify_step`), a normal
+`task_rework`, `task_replan`, `task_update`, `task_evidence`, or `task_verify_step`), a normal
 final response can receive **one advisory follow-up per input** if the same task
 is still active with an open step and no unresolved blocker. It reuses the compact
 resume recommendation: an unrun review or validation is a next action, not itself
@@ -236,6 +276,19 @@ shows `supersedes:E239` and the reason. Only an explicit passing acceptance
 replacement with a non-empty reason removes that failure from completion
 validation. Diagnostic evidence cannot supersede acceptance failures, and a later
 pass never implicitly supersedes earlier failures.
+
+### Long verification commands
+
+`quality.command` accepts at most 300 characters. If the original command is
+longer, save that exact command and its observed output in an artifact, reference
+that artifact briefly in `quality.command`, and include its path in
+`quality.artifactRefs`. Do not weaken, shorten, or rerun a successful check merely
+to fit the evidence field. Recovery examples contain placeholders to fill with
+real artifact paths, not evidence that an artifact already exists.
+
+Reasoned skipped steps, including legacy session entries without `supersededBy`,
+do not require execution evidence. Skipping does not satisfy acceptance criteria
+or erase linked failures; those still require ordinary verification.
 
 ## Token Efficiency
 

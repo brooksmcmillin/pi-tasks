@@ -88,6 +88,10 @@ interface TaskPlanParams extends Record<string, unknown> {
 	activate?: boolean;
 }
 
+interface TaskReplanParams extends TaskReworkParams {
+	step_ids: string[];
+}
+
 interface TaskReworkParams extends Record<string, unknown> {
 	task_id: string;
 	reason: string;
@@ -354,27 +358,7 @@ export function registerTaskTools(
 			acceptance_criteria: Type.Array(
 				Type.String({ description: "Concrete acceptance criterion" }),
 			),
-			initial_steps: Type.Optional(Type.Array(Type.String())),
-			plan_steps: Type.Optional(
-				Type.Array(
-					Type.Object({
-						text: Type.String(),
-						expectedOutput: Type.String(),
-						criterionIds: Type.Optional(
-							Type.Array(
-								Type.String({
-									description:
-										"Known generated criterion IDs, for example T1-AC1. Omit during new task creation to auto-link all criteria.",
-								}),
-							),
-						),
-						evidenceRequired: Type.Optional(Type.Boolean()),
-						allowedActions: Type.Optional(Type.Array(Type.String())),
-						decompositionStatus: Type.Optional(Type.Enum(GRANULARITY_STATUSES)),
-						granularityCheck: Type.Optional(granularityCheckSchema()),
-					}),
-				),
-			),
+			plan_steps: Type.Array(planStepSchema(), { minItems: 1 }),
 			priority: Type.Optional(Type.Enum(PRIORITIES)),
 			tags: Type.Optional(Type.Array(Type.String())),
 			activate: Type.Optional(
@@ -594,24 +578,7 @@ export function registerTaskTools(
 			task_id: Type.String(),
 			step_id: Type.String(),
 			reason: Type.String(),
-			child_steps: Type.Array(
-				Type.Object({
-					text: Type.String(),
-					expectedOutput: Type.String(),
-					criterionIds: Type.Optional(
-						Type.Array(
-							Type.String({
-								description:
-									"Known generated criterion IDs from task_focus/task_resume. Omit to inherit all task criteria.",
-							}),
-						),
-					),
-					evidenceRequired: Type.Optional(Type.Boolean()),
-					allowedActions: Type.Optional(Type.Array(Type.String())),
-					decompositionStatus: Type.Optional(Type.Enum(GRANULARITY_STATUSES)),
-					granularityCheck: Type.Optional(granularityCheckSchema()),
-				}),
-			),
+			child_steps: Type.Array(planStepSchema(), { minItems: 2 }),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 			const event = baseEvent("task.steps_decomposed", params.task_id, ctx, {
@@ -627,6 +594,33 @@ export function registerTaskTools(
 				`Decomposed step ${params.step_id} for task ${params.task_id}`,
 			);
 		},
+	});
+
+	registerGuidedTool<TaskReplanParams>(pi, {
+		name: "task_replan",
+		label: "Task Replan",
+		description:
+			"Replace explicitly named open planning steps, preserving retired steps and evidence. Requires a reason and non-empty replacement plan_steps covering all replaced criteria. Does not complete work, resolve blockers, or supersede failed evidence.",
+		promptSnippet: "Repair mistaken planning steps without cancelling the task",
+		promptGuidelines: [],
+		parameters: Type.Object({
+			task_id: Type.String(),
+			reason: Type.String({ minLength: 1 }),
+			step_ids: Type.Array(Type.String(), { minItems: 1 }),
+			plan_steps: Type.Array(planStepSchema(), { minItems: 1 }),
+		}),
+		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) =>
+			appendAndReport(
+				pi,
+				store,
+				ctx,
+				baseEvent("task.replanned", params.task_id, ctx, {
+					reason: params.reason,
+					stepIds: params.step_ids,
+					planSteps: params.plan_steps,
+				}),
+				`Replaced planning steps for task ${params.task_id}`,
+			),
 	});
 
 	registerGuidedTool<TaskReworkParams>(pi, {
@@ -646,18 +640,7 @@ export function registerTaskTools(
 		parameters: Type.Object({
 			task_id: Type.String(),
 			reason: Type.String({ minLength: 1 }),
-			plan_steps: Type.Array(
-				Type.Object({
-					text: Type.String(),
-					expectedOutput: Type.String(),
-					criterionIds: Type.Optional(Type.Array(Type.String())),
-					evidenceRequired: Type.Optional(Type.Boolean()),
-					allowedActions: Type.Optional(Type.Array(Type.String())),
-					decompositionStatus: Type.Optional(Type.Enum(GRANULARITY_STATUSES)),
-					granularityCheck: Type.Optional(granularityCheckSchema()),
-				}),
-				{ minItems: 1 },
-			),
+			plan_steps: Type.Array(planStepSchema(), { minItems: 1 }),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 			const event = baseEvent("task.reworked", params.task_id, ctx, {
@@ -746,7 +729,12 @@ export function registerTaskTools(
 			step_id: Type.Optional(Type.String()),
 			step_status: Type.Optional(Type.Enum(STEP_STATUSES)),
 			step_evidence_ids: Type.Optional(Type.Array(Type.String())),
-			activity: Type.Optional(Type.String()),
+			activity: Type.Optional(
+				Type.String({
+					minLength: 1,
+					description: "Required when scope is supplied.",
+				}),
+			),
 			scope: Type.Optional(
 				Type.Enum(["within_step", "scope_change", "off_plan"] as const),
 			),
@@ -754,7 +742,10 @@ export function registerTaskTools(
 			note: Type.Optional(Type.String()),
 			resolve_warnings: Type.Optional(Type.Array(Type.String())),
 			reason: Type.Optional(
-				Type.String({ description: "Reason for unblock/rework transition" }),
+				Type.String({
+					minLength: 1,
+					description: "Required for cancellation and unblock transitions.",
+				}),
 			),
 			blocker: Type.Optional(
 				Type.Object({
@@ -1129,14 +1120,38 @@ function evidenceQualitySchema() {
 		reproducible: Type.Boolean(),
 		verifier: Type.Enum(["agent", "tool", "user", "external"] as const),
 		command: Type.String({
+			maxLength: 300,
 			description:
-				"Exact command for command evidence; for non-command evidence, name the verification action.",
+				"Exact command or verification action (maximum 300 characters). For longer commands, preserve the original command and observed output in an artifact, use a short artifact reference here, and link it in artifactRefs. Do not shorten or rerun a successful check just to fit this field.",
 		}),
 		artifactRefs: Type.Array(Type.String()),
 		observedOutput: Type.String({
 			description:
 				"Concise observed output proving what happened; put long logs in artifactRefs.",
 		}),
+	});
+}
+
+function planStepSchema() {
+	return Type.Object({
+		text: Type.String({ minLength: 1 }),
+		expectedOutput: Type.String({ minLength: 1 }),
+		criterionIds: Type.Optional(
+			Type.Array(
+				Type.String({
+					description:
+						"Known criterion IDs from task_resume. Omit during creation to auto-link all criteria.",
+				}),
+				{ minItems: 1 },
+			),
+		),
+		evidenceRequired: Type.Optional(Type.Boolean({ const: true })),
+		allowedActions: Type.Array(Type.String({ minLength: 1 }), {
+			minItems: 1,
+			maxItems: 3,
+		}),
+		decompositionStatus: Type.Optional(Type.Enum(GRANULARITY_STATUSES)),
+		granularityCheck: Type.Optional(granularityCheckSchema()),
 	});
 }
 
@@ -1174,10 +1189,11 @@ function appendAndReport(
 					`- retry_with: ${recovery.retry_with}`,
 					`- do_not_retry_same_call: ${recovery.do_not_retry_same_call}`,
 					`- reason: ${recovery.reason}`,
+					`- minimum_params: ${JSON.stringify(recovery.minimum_params)}`,
 					...(recovery.retry_example
 						? [
 								"",
-								"Minimal working task_evidence params:",
+								"Corrected evidence params (fill artifact placeholders before retrying; do not rerun successful verification):",
 								"```json",
 								JSON.stringify(recovery.retry_example, null, 2),
 								"```",
@@ -1201,42 +1217,95 @@ function buildRejectionRecovery(
 ) {
 	const resume = buildTaskResume(state);
 	const retryExample = buildEvidenceRetryExample(event);
+	const updateRepair = buildUpdateArgumentRepair(event, errorText(error));
+	const authoringTool =
+		event?.type === "task.created"
+			? "task_plan"
+			: event?.type === "task.steps_decomposed"
+				? "task_decompose"
+				: event?.type === "task.replanned"
+					? "task_replan"
+					: undefined;
 	return {
 		rejected: true,
 		reason: errorText(error),
-		retry_with:
-			event?.type === "task.reworked"
-				? "task_rework"
-				: (resume.recommendedTool ??
-					resume.nextAllowedActions[0] ??
-					"task_resume"),
+		retry_with: updateRepair
+			? "task_update"
+			: (authoringTool ??
+				(event?.type === "task.reworked"
+					? "task_rework"
+					: (resume.recommendedTool ??
+						resume.nextAllowedActions[0] ??
+						"task_resume"))),
 		minimum_params:
-			event?.type === "task.reworked"
+			updateRepair ??
+			(event?.type === "task.replanned"
 				? {
 						task_id: event.taskId,
-						reason: "<review findings requiring remediation>",
-						plan_steps: [
-							{
-								text: "Describe the bounded remediation step",
-								expectedOutput:
-									"Observed regression result for the review finding",
-								allowedActions: ["task_decompose"],
-								evidenceRequired: true,
-								decompositionStatus: "needs_breakdown",
-							},
-						],
+						step_ids: event.stepIds,
+						reason: "<why these planning steps are mistaken>",
+						plan_steps:
+							"<non-empty replacement steps covering the replaced criteria>",
 					}
-				: (resume.minimumParams ?? {}),
+				: event?.type === "task.reworked"
+					? {
+							task_id: event.taskId,
+							reason: "<review findings requiring remediation>",
+							plan_steps: [
+								{
+									text: "Describe the bounded remediation step",
+									expectedOutput:
+										"Observed regression result for the review finding",
+									allowedActions: ["task_decompose"],
+									evidenceRequired: true,
+									decompositionStatus: "needs_breakdown",
+								},
+							],
+						}
+					: (resume.minimumParams ?? {})),
 		do_not_retry_same_call: true,
 		...(retryExample ? { retry_example: retryExample } : {}),
 		resume,
 	};
 }
 
+function buildUpdateArgumentRepair(
+	event: TaskEvent | undefined,
+	message: string,
+): Record<string, unknown> | undefined {
+	if (event?.type !== "task.updated") return undefined;
+	if (
+		message !== "Scope updates require an activity" &&
+		message !== "Cancelling a task requires a reason"
+	)
+		return undefined;
+	return {
+		task_id: event.taskId,
+		...(event.status ? { status: event.status } : {}),
+		...(event.stepId ? { step_id: event.stepId } : {}),
+		...(event.stepStatus ? { step_status: event.stepStatus } : {}),
+		...(event.scope
+			? {
+					scope: event.scope,
+					activity: event.activity?.trim() || "<activity being recorded>",
+				}
+			: {}),
+		...(event.scopeReason ? { scope_reason: event.scopeReason } : {}),
+		...(event.note ? { note: event.note } : {}),
+		...(event.status === "cancelled"
+			? { reason: event.reason?.trim() || "<why the objective is cancelled>" }
+			: {}),
+	};
+}
+
 function buildEvidenceRetryExample(
 	event: TaskEvent | undefined,
 ): Record<string, unknown> | undefined {
-	if (event?.type !== "task.evidence_added") return undefined;
+	if (
+		event?.type !== "task.evidence_added" &&
+		event?.type !== "task.step_verified"
+	)
+		return undefined;
 	if (
 		event.evidence.type !== "command" &&
 		event.evidence.type !== "test" &&
@@ -1262,11 +1331,13 @@ function buildEvidenceRetryExample(
 			event.evidence.quality?.observedOutput?.trim() ||
 			"<concise observed output from the command/test/dogfood run>",
 	};
-	if (event.evidence.type === "command") {
-		quality.command =
-			event.evidence.quality?.command?.trim() ||
-			references[0] ||
-			"<exact command>";
+	const command = event.evidence.quality?.command?.trim();
+	quality.command =
+		command || references[0] || "<exact command or verification action>";
+	if (command && command.length > 300) {
+		const artifact = "<path-to-saved-command-and-output>";
+		quality.command = `Original command recorded in ${artifact}`;
+		quality.artifactRefs = [...artifactRefs, artifact];
 	}
 	const example: Record<string, unknown> = {
 		task_id: event.taskId,
@@ -1279,14 +1350,19 @@ function buildEvidenceRetryExample(
 		quality,
 	};
 	if (event.criterionIds) example.criterion_ids = event.criterionIds;
-	if (event.stepIds) example.step_ids = event.stepIds;
+	if (event.type === "task.step_verified") {
+		example.step_id = event.stepId;
+		delete example.passed;
+		delete example.role;
+	} else if (event.stepIds) example.step_ids = event.stepIds;
 	if (event.evidence.supersedesEvidenceIds) {
 		example.supersedes_evidence_ids = event.evidence.supersedesEvidenceIds;
 	}
 	if (event.evidence.supersessionReason) {
 		example.reason = event.evidence.supersessionReason;
 	}
-	if (event.overrideReason) example.override_reason = event.overrideReason;
+	if (event.type === "task.evidence_added" && event.overrideReason)
+		example.override_reason = event.overrideReason;
 	return example;
 }
 
