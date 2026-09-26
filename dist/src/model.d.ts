@@ -198,6 +198,7 @@ export interface TaskUpdatedEvent extends TaskEventBase {
     stepId?: string;
     stepStatus?: TaskStepStatus;
     stepEvidenceIds?: string[];
+    stepGranularityCheck?: TaskGranularityCheck;
     activity?: string;
     scope?: "within_step" | "scope_change" | "off_plan";
     scopeReason?: string;

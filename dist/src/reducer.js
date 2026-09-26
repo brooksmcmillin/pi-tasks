@@ -342,7 +342,10 @@ function updateTask(state, event) {
     const previousStatus = task.status;
     if (event.status)
         validateStatusTransition(task, event.status, event);
-    if (event.stepId || event.stepStatus)
+    if (event.stepGranularityCheck) {
+        classifyCurrentStep(state, task, event);
+    }
+    else if (event.stepId || event.stepStatus)
         updatePlanStep(task, event);
     recordScopeSignal(task, event);
     if (event.progress !== undefined)
@@ -376,6 +379,45 @@ function updateTask(state, event) {
     recalculateProgress(task);
     task.updatedAt = event.createdAt;
     return state;
+}
+function classifyCurrentStep(state, task, event) {
+    const step = getCurrentOpenStep(task);
+    if (state.activeTaskId !== task.id ||
+        TERMINAL_STATUSES.includes(task.status) ||
+        !step ||
+        event.stepId !== step.id) {
+        throw new TaskTransitionError("Atomic classification requires the active task's current open step_id");
+    }
+    if (event.stepStatus || event.stepEvidenceIds || event.status) {
+        throw new TaskTransitionError("Classify atomicity separately from status or evidence updates");
+    }
+    const check = event.stepGranularityCheck;
+    if (!check ||
+        !check.reason?.trim() ||
+        [
+            check.isAtomic,
+            check.canBeDoneInOneAgentAction,
+            check.hasSingleObservableOutput,
+            check.hasSingleVerificationMethod,
+            check.hasNoHiddenSubtasks,
+        ].some((value) => value !== true)) {
+        throw new TaskTransitionError("Atomic classification requires a reason and all atomicity flags true; decompose genuine compound work");
+    }
+    validateAtomicWording(step);
+    const mechanic = classifyMechanicStep(step.text, true);
+    if (mechanic)
+        throw new TaskTransitionError(mechanicStepMessage(mechanic, step.text));
+    const candidate = {
+        ...step,
+        decompositionStatus: "atomic",
+        granularityCheck: check,
+    };
+    candidate.planQuality = assessPlanQuality(candidate);
+    validateGranularityContract(candidate, 0);
+    step.decompositionStatus = candidate.decompositionStatus;
+    step.granularityCheck = structuredClone(check);
+    step.planQuality = candidate.planQuality;
+    task.nextAction = step.text;
 }
 function addEvidence(state, event) {
     const task = requireTask(state, event.taskId);
@@ -708,6 +750,11 @@ function assessPlanQuality(step) {
 }
 function containsVaguePattern(value) {
     return VAGUE_PLAN_PATTERNS.some((pattern) => pattern.test(value.trim()));
+}
+export function validateAtomicWording(step) {
+    if ([step.text, step.expectedOutput, ...(step.allowedActions ?? [])].some(containsCompoundStepPattern)) {
+        throw new TaskTransitionError("Atomic step rejects compound wording; use task_decompose for compound work");
+    }
 }
 function containsCompoundStepPattern(value) {
     return COMPOUND_STEP_PATTERNS.some((pattern) => pattern.test(value.trim()));

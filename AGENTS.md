@@ -94,6 +94,12 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Apply tightened inspection-mechanic authoring validation before persistence across creation, decomposition, rework, and replan. Legacy inspection events must remain replayable so they can be repaired.
 - Planning schemas require structured steps with bounded `allowedActions`; argument-error recovery names the corrective tool and exposes missing parameters without pretending an unrelated decomposition fixes the call.
 
+## Routine Context and Atomic Classification
+
+- Bound routine gap/blocker/warning lists with omitted counts and explicit full-history recovery. Compute execution and completion decisions against full state, never summarized lists; retain exact current-step execution IDs.
+- Classify an already-simple current step through `task_update.step_granularity_check` without replacing its identity or creating artificial children. Require an explicit reason, all atomicity flags, and ordinary quality validation; preserve evidence, criteria, blockers, and completion gates.
+- Plan deliverables rather than support reads, staging, or receipt bookkeeping. Keep mechanics within the deliverable's allowed execution. Decompose genuinely compound work; classification is not verification or authority to bypass an evidence gate.
+
 ## Verification Rules
 
 Before claiming readiness:
