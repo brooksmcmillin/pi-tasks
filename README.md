@@ -213,8 +213,12 @@ The default widget is installed before publication, so a synchronous subscriber
 may replace it through the supported widget key. With no subscriber, existing
 pi-tasks UI behavior is unchanged. Full task history is not published; an agent
 can explicitly request it with `task_list({ include_history: true })` after a
-contract-recovery failure. The `pi-tasks:telemetry` event reports compact
-publication and explicit full-state recovery delivery, including payload size.
+contract-recovery failure. Full-history responses above 64,000 characters are
+rejected with a short error rather than sent partially; use `task_resume` or
+`task_focus` for current work, or `task_list` without history for a summary.
+`limit` applies only to the summary list, not full history. The
+`pi-tasks:telemetry` event reports compact publication and successful explicit
+full-state recovery delivery, including payload size.
 
 ## Technical Details
 
