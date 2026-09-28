@@ -280,6 +280,65 @@ describe("task state event hook", () => {
 		});
 	});
 
+	it("rejects oversized full history even when a list limit is supplied", async () => {
+		const { ctx, handlers, telemetry, tools } = createHarness([
+			{ ...createEvent, objective: "x".repeat(70_000) },
+		]);
+		await handlers.get("session_start")?.({}, ctx);
+		const result = await execute(
+			tools.get("task_list"),
+			{ include_history: true, limit: 1 },
+			ctx,
+		);
+
+		expect(result.isError).toBe(true);
+		expect(result.content[0]?.text).toContain("no history was returned");
+		expect(result.content[0]?.text).toContain("limit does not apply");
+		expect(result.content[0]?.text.length).toBeLessThan(1_000);
+		expect(telemetry).not.toContainEqual(
+			expect.objectContaining({
+				event: "task_context.full_state_recovery_served",
+			}),
+		);
+	});
+
+	it("accepts the exact full-response limit and rejects one character more", async () => {
+		const request = async (objective: string, eventId = createEvent.id) => {
+			const { ctx, handlers, telemetry, tools } = createHarness([
+				{ ...createEvent, id: eventId, objective },
+			]);
+			await handlers.get("session_start")?.({}, ctx);
+			const result = await execute(
+				tools.get("task_list"),
+				{ include_history: true },
+				ctx,
+			);
+			return { result, telemetry };
+		};
+		const baseline = await request("x");
+		const remaining = 64_000 - JSON.stringify(baseline.result).length;
+		const exactLength = Math.floor(remaining / 2) + 1;
+		const eventId = remaining % 2 ? `${createEvent.id}!` : createEvent.id;
+		const exact = await request("x".repeat(exactLength), eventId);
+		const over = await request("x".repeat(exactLength + 1), eventId);
+
+		expect(JSON.stringify(exact.result)).toHaveLength(64_000);
+		expect(exact.result.isError).not.toBe(true);
+		expect(exact.result.content[0]?.text).toContain('"events"');
+		expect(exact.telemetry).toContainEqual(
+			expect.objectContaining({
+				event: "task_context.full_state_recovery_served",
+			}),
+		);
+		expect(over.result.isError).toBe(true);
+		expect(JSON.stringify(over.result).length).toBeLessThan(1_000);
+		expect(over.telemetry).not.toContainEqual(
+			expect.objectContaining({
+				event: "task_context.full_state_recovery_served",
+			}),
+		);
+	});
+
 	it("does not publish rejected mutations", async () => {
 		const { ctx, emitted, handlers, tools } = createHarness();
 		await handlers.get("session_start")?.({}, ctx);

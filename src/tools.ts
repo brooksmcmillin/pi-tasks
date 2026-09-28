@@ -38,6 +38,8 @@ import { TASK_TELEMETRY_EVENT } from "./state-events.ts";
 import { errorText, snapshotState, type TaskRuntimeStore } from "./store.ts";
 import { updateTaskUi } from "./widget.ts";
 
+const MAX_HISTORY_CHARS = 64_000;
+
 const TASK_STATUSES = [
 	"pending",
 	"active",
@@ -668,7 +670,7 @@ export function registerTaskTools(
 		name: "task_list",
 		label: "Task List",
 		description:
-			"List pi-tasks tasks on the current session branch. Set include_history only to recover full task state after an explicit request or compact-contract failure.",
+			"List pi-tasks tasks on the current session branch. Set include_history only for explicit full-state recovery; large histories are rejected rather than returned partially. limit applies only to the summary list.",
 		promptSnippet:
 			"Inspect current pi-tasks task status, blockers, and verification gaps",
 		promptGuidelines: [
@@ -692,7 +694,18 @@ export function registerTaskTools(
 			const output = params.include_history
 				? JSON.stringify(filtered, null, 2)
 				: formatTaskList(filtered, formatListOptions(params));
+			const result = textResult(output, buildTaskResume(filtered));
 			if (params.include_history) {
+				const responseLength = JSON.stringify(result).length;
+				if (responseLength > MAX_HISTORY_CHARS) {
+					return {
+						...textResult(
+							`Full task history response is ${responseLength} characters (maximum ${MAX_HISTORY_CHARS}); no history was returned. Use task_resume or task_focus for current work, or task_list without include_history for a summary. Filtering by status may reduce the history size; limit does not apply to full history.`,
+						),
+						isError: true,
+					};
+				}
+
 				try {
 					pi.events.emit(TASK_TELEMETRY_EVENT, {
 						version: 1,
@@ -705,7 +718,7 @@ export function registerTaskTools(
 					// Observability must not make state recovery unavailable.
 				}
 			}
-			return textResult(output, buildTaskResume(filtered));
+			return result;
 		},
 	});
 
