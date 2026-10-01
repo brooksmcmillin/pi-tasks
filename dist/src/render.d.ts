@@ -10,5 +10,6 @@ export declare function formatTaskList(state: TaskState, options?: {
 export declare function formatTaskFocus(state: TaskState): string;
 export declare function buildTaskResume(state: TaskState): TaskResumeContext;
 export declare function formatTaskResume(state: TaskState): string;
+export declare function formatTaskReceipt(state: TaskState, previous?: TaskState, affectedTaskId?: string): string;
 export declare function formatTaskNext(state: TaskState): string;
 export declare function getVerificationGaps(task: Task): string[];

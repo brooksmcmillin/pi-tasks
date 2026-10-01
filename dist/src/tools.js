@@ -1,11 +1,13 @@
 import { createEventId, SequentialIdGenerator, } from "./ids.js";
 import { evidenceQualityEqual, normalizeEvidenceQuality } from "./reducer.js";
-import { buildTaskResume, formatTaskFocus, formatTaskList, formatTaskNext, formatTaskResume, } from "./render.js";
+import { buildTaskResume, formatTaskFocus, formatTaskList, formatTaskNext, formatTaskReceipt, formatTaskResume, } from "./render.js";
 import { Type } from "./schema.js";
 import { TASK_TELEMETRY_EVENT } from "./state-events.js";
 import { errorText, snapshotState } from "./store.js";
 import { updateTaskUi } from "./widget.js";
 const MAX_HISTORY_CHARS = 64_000;
+// State identity changes on replay/checkpoint, so the next success restores the full contract.
+const reportedStates = new WeakMap();
 const TASK_STATUSES = [
     "pending",
     "active",
@@ -537,7 +539,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             const duplicate = findDuplicateEvidenceForParams(store.getState().tasks[params.task_id], params);
             if (duplicate &&
                 criteriaAlreadyLinked(store.getState(), params, duplicate)) {
-                return textResult(`Evidence already recorded as ${duplicate.id} for task ${params.task_id}\n\n${formatTaskResume(store.getState())}`, buildTaskResume(store.getState()));
+                return successResult(store, store.getState(), `Evidence already recorded as ${duplicate.id} for task ${params.task_id}`, undefined, params.task_id);
             }
             const evidenceId = nextEvidenceId(store.getState(), idGenerator);
             const event = baseEvent("task.evidence_added", params.task_id, ctx, {
@@ -720,7 +722,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 criteriaLinked &&
                 requestedQuality &&
                 evidenceQualityEqual(requestedQuality, duplicate.quality)) {
-                return textResult(`Step ${params.step_id} already verified by ${duplicate.id}; retry made no changes\n\n${formatTaskResume(state)}`, buildTaskResume(state));
+                return successResult(store, state, `Step ${params.step_id} already verified by ${duplicate.id}; retry made no changes`, undefined, params.task_id);
             }
             const evidenceId = duplicate?.id ?? nextEvidenceId(state, idGenerator);
             const event = baseEvent("task.step_verified", params.task_id, ctx, {
@@ -914,8 +916,15 @@ function planStepSchema() {
         granularityCheck: Type.Optional(granularityCheckSchema()),
     });
 }
+function successResult(store, state, success, previous, taskId) {
+    const reported = reportedStates.get(store);
+    const receipt = formatTaskReceipt(state, reported === (previous ?? state) ? reported : undefined, taskId);
+    reportedStates.set(store, state);
+    return textResult(`${success}\n\n${receipt}`, buildTaskResume(state));
+}
 function appendAndReport(pi, store, ctx, event, success, onPersisted) {
     try {
+        const previous = store.getState();
         const state = store.append(event, (customType, data) => {
             pi.appendEntry(customType, data);
         });
@@ -923,8 +932,11 @@ function appendAndReport(pi, store, ctx, event, success, onPersisted) {
         onPersisted?.();
         const warning = event.type === "task.completed" && event.forceWithReason
             ? `\nWarning: forced completion: ${event.forceWithReason}`
-            : "";
-        return textResult(`${success}${warning}\n\n${formatTaskResume(state)}`, buildTaskResume(state));
+            : event.type === "task.evidence_added" &&
+                event.evidence.passed === false
+                ? `\nFailed check: ${event.evidence.id}: ${event.evidence.summary}`
+                : "";
+        return successResult(store, state, `${success}${warning}`, event.type === "task.created" ? undefined : previous, event.taskId);
     }
     catch (error) {
         const resume = formatTaskResume(store.getState());
