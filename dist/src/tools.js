@@ -150,7 +150,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             PLAN_REPAIR_GUIDANCE,
             "Constrain the plan to the user's stated objective; do not add speculative scope, gates, or abstractions.",
             "Use concrete acceptance criteria and omit unknown generated criterion IDs during new task creation.",
-            "Mark a plan step atomic only when its granularityCheck proves it has one action, one observable output, one verification method, and no hidden subtasks.",
+            "Mark atomic only for one observable outcome with bounded work and verification, not unrelated deliverables. For cohesive edit-plus-test work, set granularityCheck.unit=deliverable, boundedScope and verificationPlan, with all flags true; legacy one-action/one-method flags then describe one bounded implementation cycle and verification procedure.",
             "Activate only one task unless the user explicitly asks for parallel work.",
         ],
         parameters: Type.Object({
@@ -568,6 +568,94 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
         },
     });
     registerGuidedTool(pi, {
+        name: "task_evidence_batch",
+        label: "Task Evidence Batch",
+        description: "Submit 1–16 evidence entries (maximum 32000 serialized characters) as one atomic transaction. Record failures without hiding them; verify_step requires passing acceptance evidence and the current step_id. Every entry is validated before anything persists; rejection names the failing entry and leaves all state unchanged.",
+        promptSnippet: "Submit bounded evidence in one all-or-nothing call",
+        promptGuidelines: [
+            "Use entries.operation=record for observed passing, failed or diagnostic evidence; use verify_step with passed=true and role=acceptance to advance the current step after all required checks.",
+            "Entries execute in order, preserving existing linkage, failure supersession and completion checks. Unrelated deliverables still need separate plan steps.",
+            "Each entry requires references and complete quality fields. All evidence types require nonempty quality.artifactRefs; exact command or verification-action references are accepted. Preserve long commands/output in artifacts rather than rerunning successful checks.",
+            "On rejection, no entries persist. Correct the named entry and resubmit the complete batch; do not assume a partial success.",
+        ],
+        parameters: Type.Object({
+            task_id: Type.String(),
+            entries: Type.Array(evidenceBatchEntrySchema(), {
+                minItems: 1,
+                maxItems: 16,
+            }),
+        }),
+        execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+            const state = store.getState();
+            if (!Array.isArray(params.entries) ||
+                params.entries.length < 1 ||
+                params.entries.length > 16 ||
+                JSON.stringify(params.entries).length > 32_000) {
+                return {
+                    ...textResult("Evidence batch rejected: requires 1–16 entries within 32000 serialized characters; no entries persisted"),
+                    isError: true,
+                };
+            }
+            for (const [index, entry] of params.entries.entries()) {
+                const invalid = !["record", "verify_step"].includes(entry.operation) ||
+                    (entry.operation === "record" && entry.step_id !== undefined) ||
+                    (entry.operation === "verify_step" &&
+                        (!entry.step_id ||
+                            entry.passed !== "true" ||
+                            (entry.role !== undefined && entry.role !== "acceptance") ||
+                            entry.step_ids !== undefined ||
+                            entry.supersedes_evidence_ids !== undefined ||
+                            entry.reason !== undefined ||
+                            entry.override_reason !== undefined));
+                if (invalid)
+                    return {
+                        ...textResult(`Evidence batch entry ${index + 1} rejected: invalid operation fields; no entries persisted. verify_step requires step_id, passed=true, acceptance role, and no record-only linkage or supersession fields.`),
+                        isError: true,
+                    };
+            }
+            const entries = params.entries.map((entry) => {
+                const duplicate = findDuplicateEvidenceForParams(state.tasks[params.task_id], { ...entry, task_id: params.task_id });
+                const evidence = {
+                    id: duplicate?.id ?? nextEvidenceId(state, idGenerator),
+                    type: entry.type,
+                    role: entry.role ?? "acceptance",
+                    level: entry.level,
+                    summary: entry.summary,
+                    passed: parsePassed(entry.passed),
+                    references: entry.references,
+                    ...(entry.quality ? { quality: entry.quality } : {}),
+                    ...(entry.supersedes_evidence_ids
+                        ? { supersedesEvidenceIds: entry.supersedes_evidence_ids }
+                        : {}),
+                    ...(entry.reason ? { supersessionReason: entry.reason } : {}),
+                };
+                const links = entry.criterion_ids
+                    ? { criterionIds: entry.criterion_ids }
+                    : {};
+                return entry.operation === "verify_step"
+                    ? {
+                        type: "task.step_verified",
+                        stepId: entry.step_id ?? "",
+                        evidence,
+                        ...links,
+                    }
+                    : {
+                        type: "task.evidence_added",
+                        evidence,
+                        ...links,
+                        ...(entry.step_ids ? { stepIds: entry.step_ids } : {}),
+                        ...(entry.override_reason
+                            ? { overrideReason: entry.override_reason }
+                            : {}),
+                    };
+            });
+            const event = baseEvent("task.evidence_batch", params.task_id, ctx, {
+                entries,
+            });
+            return appendAndReport(pi, store, ctx, event, `Committed ${entries.length} evidence entries for task ${params.task_id}`);
+        },
+    });
+    registerGuidedTool(pi, {
         name: "task_verify_step",
         label: "Verify Task Step",
         description: "Atomically record passing verification evidence with traceable references and complete quality fields, then complete the current atomic plan step.",
@@ -731,6 +819,19 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
 }
 function granularityCheckSchema() {
     return Type.Object({
+        unit: Type.Optional(Type.Enum(["action", "deliverable"], {
+            description: "Default action retains legacy wording checks. Deliverable permits cohesive edit-plus-test work with one observable outcome; all flags must remain true.",
+        })),
+        boundedScope: Type.Optional(Type.String({
+            minLength: 12,
+            maxLength: 500,
+            description: "Required for deliverable unit: named implementation boundary and excluded adjacent outcomes.",
+        })),
+        verificationPlan: Type.Optional(Type.String({
+            minLength: 12,
+            maxLength: 500,
+            description: "Required for deliverable unit: bounded verification procedure for its single outcome. Legacy one-action/one-method flags describe this bounded implementation cycle and verification procedure.",
+        })),
         isAtomic: Type.Boolean(),
         reason: Type.String(),
         canBeDoneInOneAgentAction: Type.Boolean(),
@@ -764,6 +865,21 @@ function taskEvidenceParametersSchema() {
         })),
     });
 }
+function evidenceBatchEntrySchema() {
+    const schema = taskEvidenceParametersSchema();
+    const { task_id: _taskId, ...properties } = schema.properties;
+    for (const [name, property] of Object.entries(properties)) {
+        if (!schema.required.includes(name))
+            properties[name] = Type.Optional(property);
+    }
+    return Type.Object({
+        ...properties,
+        operation: Type.Enum(["record", "verify_step"]),
+        step_id: Type.Optional(Type.String({
+            description: "Required for verify_step; passed must be true and role acceptance. Other step links and supersession/override fields are not accepted for verify_step.",
+        })),
+    });
+}
 function evidenceQualitySchema() {
     return Type.Object({
         source: Type.String(),
@@ -773,7 +889,10 @@ function evidenceQualitySchema() {
             maxLength: 300,
             description: "Exact command or verification action (maximum 300 characters). For longer commands, preserve the original command and observed output in an artifact, use a short artifact reference here, and link it in artifactRefs. Do not shorten or rerun a successful check just to fit this field.",
         }),
-        artifactRefs: Type.Array(Type.String()),
+        artifactRefs: Type.Array(Type.String({ minLength: 1 }), {
+            minItems: 1,
+            description: "Required nonempty field for every evidence type; exact command or verification-action references count as artifacts.",
+        }),
         observedOutput: Type.String({
             description: "Concise observed output proving what happened; put long logs in artifactRefs.",
         }),
@@ -838,7 +957,23 @@ function appendAndReport(pi, store, ctx, event, success, onPersisted) {
 }
 function buildRejectionRecovery(error, state, event) {
     const resume = buildTaskResume(state);
-    const retryExample = buildEvidenceRetryExample(event);
+    const retryExample = event?.type === "task.evidence_batch"
+        ? {
+            task_id: event.taskId,
+            entries: event.entries.map((entry) => {
+                const example = buildEvidenceRetryExample({ ...event, ...entry });
+                if (!example)
+                    throw new Error("Unsupported evidence recovery operation");
+                const { task_id: _taskId, ...fields } = example;
+                return {
+                    ...fields,
+                    operation: entry.type === "task.step_verified" ? "verify_step" : "record",
+                    passed: String(entry.evidence.passed),
+                    role: entry.evidence.role ?? "acceptance",
+                };
+            }),
+        }
+        : buildEvidenceRetryExample(event);
     const updateRepair = buildUpdateArgumentRepair(event, errorText(error));
     const authoringTool = event?.type === "task.created"
         ? "task_plan"
@@ -850,14 +985,16 @@ function buildRejectionRecovery(error, state, event) {
     return {
         rejected: true,
         reason: errorText(error),
-        retry_with: updateRepair
-            ? "task_update"
-            : (authoringTool ??
-                (event?.type === "task.reworked"
-                    ? "task_rework"
-                    : (resume.recommendedTool ??
-                        resume.nextAllowedActions[0] ??
-                        "task_resume"))),
+        retry_with: event?.type === "task.evidence_batch"
+            ? "task_evidence_batch"
+            : updateRepair
+                ? "task_update"
+                : (authoringTool ??
+                    (event?.type === "task.reworked"
+                        ? "task_rework"
+                        : (resume.recommendedTool ??
+                            resume.nextAllowedActions[0] ??
+                            "task_resume"))),
         minimum_params: updateRepair ??
             (event?.type === "task.replanned"
                 ? {
@@ -914,11 +1051,6 @@ function buildEvidenceRetryExample(event) {
     if (event?.type !== "task.evidence_added" &&
         event?.type !== "task.step_verified")
         return undefined;
-    if (event.evidence.type !== "command" &&
-        event.evidence.type !== "test" &&
-        event.evidence.type !== "dogfood") {
-        return undefined;
-    }
     const references = event.evidence.references.length > 0
         ? event.evidence.references
         : ["<artifact-or-command-reference>"];
@@ -928,7 +1060,7 @@ function buildEvidenceRetryExample(event) {
         : references;
     const quality = {
         source: event.evidence.quality?.source?.trim() || event.evidence.type,
-        reproducible: true,
+        reproducible: event.evidence.quality?.reproducible ?? true,
         verifier: event.evidence.quality?.verifier ?? "tool",
         artifactRefs,
         observedOutput: event.evidence.quality?.observedOutput?.trim() ||

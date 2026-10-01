@@ -29,6 +29,7 @@ const taskToolNames = new Set([
 	"task_list",
 	"task_update",
 	"task_evidence",
+	"task_evidence_batch",
 	"task_decision",
 	"task_complete",
 ]);
@@ -249,6 +250,138 @@ async function createNativeSession(
 }
 
 describe("native Pi dynamic task tools", () => {
+	it("dogfoods cohesive batch persistence, task command, resume and branch isolation", async () => {
+		const first = await createNativeSession();
+		try {
+			appendNativeToolCall(first.sessionManager);
+			const plan = validPlan();
+			const step = plan.plan_steps[0];
+			assert.ok(step);
+			Object.assign(step, {
+				text: "Implement storage fields and focused regression tests",
+				expectedOutput: "Storage model and migration fields match",
+				allowedActions: ["edit model and tests", "run focused tests"],
+				granularityCheck: {
+					...step.granularityCheck,
+					unit: "deliverable",
+					boundedScope:
+						"Storage field consistency only; excludes API transport",
+					verificationPlan:
+						"Run focused consistency checks for storage model and migration",
+				},
+			});
+			expect(
+				(
+					await requireTool(first.session, "task_plan").execute(
+						"batch-plan",
+						plan,
+						undefined,
+						undefined,
+					)
+				).isError,
+			).not.toBe(true);
+			expect(
+				(
+					await requireTool(first.session, "task_update").execute(
+						"batch-update",
+						{
+							task_id: "T1",
+							progress: 50,
+							next_action: "Run focused consistency tests",
+						},
+						undefined,
+						undefined,
+					)
+				).isError,
+			).not.toBe(true);
+			const beforeBatch = first.sessionManager.getEntries().at(-1);
+			assert.ok(beforeBatch);
+			const result = await requireTool(
+				first.session,
+				"task_evidence_batch",
+			).execute(
+				"native-batch",
+				{
+					task_id: "T1",
+					entries: [
+						{
+							operation: "verify_step",
+							step_id: "T1-S1",
+							type: "test",
+							level: "unit_test",
+							summary: "Native consistency assertion passed",
+							passed: "true",
+							references: ["test/extension.test.ts"],
+							quality: {
+								source: "native dogfood",
+								reproducible: true,
+								verifier: "tool",
+								command: "PI_SDK_ROOT=<installed SDK> npm run test:native",
+								artifactRefs: ["test/extension.test.ts"],
+								observedOutput: "Batch event persisted and replayed",
+							},
+						},
+					],
+				},
+				undefined,
+				undefined,
+			);
+			expect(result.isError).not.toBe(true);
+			const afterBatch = first.sessionManager.getEntries().at(-1);
+			assert.ok(afterBatch);
+			await first.session.prompt("/tasks detail");
+			await first.session.navigateTree(beforeBatch.id, { summarize: false });
+			expect(
+				(
+					await requireTool(first.session, "task_resume").execute(
+						"before-batch",
+						{},
+						undefined,
+						undefined,
+					)
+				).content[0]?.text,
+			).toContain("T1-S1");
+			await first.session.navigateTree(afterBatch.id, { summarize: false });
+			expect(
+				(
+					await requireTool(first.session, "task_resume").execute(
+						"after-batch",
+						{},
+						undefined,
+						undefined,
+					)
+				).content[0]?.text,
+			).toContain("task_complete");
+			const sessionFile = first.sessionManager.getSessionFile();
+			assert.ok(sessionFile);
+			await waitForPersistedTaskEvent(sessionFile);
+			first.session.dispose();
+			const restored = await createNativeSession({
+				base: first.base,
+				sessionFile,
+			});
+			try {
+				expect(isToolActive(restored.session, "task_evidence_batch")).toBe(
+					true,
+				);
+				expect(
+					(
+						await requireTool(restored.session, "task_resume").execute(
+							"restored-batch",
+							{},
+							undefined,
+							undefined,
+						)
+					).content[0]?.text,
+				).toContain("task_complete");
+			} finally {
+				restored.session.dispose();
+			}
+		} finally {
+			first.session.dispose();
+		}
+	});
+
 	it("runs the persistent plan-to-event-to-new-session restore slice before broader cases", async () => {
 		const first = await createNativeSession();
 		try {

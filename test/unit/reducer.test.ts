@@ -48,6 +48,99 @@ function created(taskId = "T1", activate = true): TaskEvent {
 	};
 }
 
+describe("bounded deliverable granularity", () => {
+	function deliverable(): Extract<TaskEvent, { type: "task.created" }> {
+		const event = created() as Extract<TaskEvent, { type: "task.created" }>;
+		event.planSteps = [
+			{
+				text: "Implement parser normalization and focused regression tests",
+				expectedOutput:
+					"Parser normalizes aliases and preserves existing input behavior",
+				allowedActions: [
+					"edit parser and regression tests",
+					"run focused parser tests",
+				],
+				decompositionStatus: "atomic",
+				granularityCheck: {
+					...atomicCheck,
+					unit: "deliverable",
+					boundedScope:
+						"Parser alias normalization only; no transport or UI changes",
+					verificationPlan:
+						"Run parser unit tests covering aliases and existing input behavior",
+				},
+			},
+		];
+		return event;
+	}
+
+	it("accepts cohesive edit-plus-test wording with bounded outcome proof", () => {
+		const state = reduceTaskState(createEmptyState(), deliverable());
+		expect(state.tasks.T1?.planSteps[0]?.planQuality.issues).toEqual([]);
+		expect(state.tasks.T1?.planSteps[0]?.granularityCheck.unit).toBe(
+			"deliverable",
+		);
+	});
+
+	it("requires decomposition for unrelated outcomes", () => {
+		const event = deliverable();
+		const check = event.planSteps?.[0]?.granularityCheck;
+		if (!check) throw new Error("Fixture check missing");
+		check.hasSingleObservableOutput = false;
+		expect(() => reduceTaskState(createEmptyState(), event)).toThrow(
+			/granularity/,
+		);
+	});
+
+	it.each(["boundedScope", "verificationPlan"] as const)(
+		"rejects absent %s",
+		(field) => {
+			const event = deliverable();
+			const check = event.planSteps?.[0]?.granularityCheck;
+			if (!check) throw new Error("Fixture check missing");
+			delete check[field];
+			expect(() => reduceTaskState(createEmptyState(), event)).toThrow(
+				/Deliverable granularity/,
+			);
+		},
+	);
+
+	it.each(["boundedScope", "verificationPlan"] as const)(
+		"enforces trimmed %s bounds",
+		(field) => {
+			for (const value of ["x".repeat(11), "x".repeat(501), " ".repeat(12)]) {
+				const event = deliverable();
+				const check = event.planSteps?.[0]?.granularityCheck;
+				if (!check) throw new Error("Fixture check missing");
+				check[field] = value;
+				expect(() => reduceTaskState(createEmptyState(), event)).toThrow(
+					/Deliverable granularity/,
+				);
+			}
+			for (const length of [12, 500]) {
+				const event = deliverable();
+				const check = event.planSteps?.[0]?.granularityCheck;
+				if (!check) throw new Error("Fixture check missing");
+				check[field] = "x".repeat(length);
+				expect(
+					reduceTaskState(createEmptyState(), event).tasks.T1?.planSteps[0]
+						?.decompositionStatus,
+				).toBe("atomic");
+			}
+		},
+	);
+
+	it("retains legacy wording rejection without a bounded deliverable", () => {
+		const event = deliverable();
+		const check = event.planSteps?.[0]?.granularityCheck;
+		if (!check) throw new Error("Fixture check missing");
+		delete check.unit;
+		expect(() => reduceTaskState(createEmptyState(), event)).toThrow(
+			/quality gate/,
+		);
+	});
+});
+
 function coarseCreated(): TaskEvent {
 	return {
 		...created(),

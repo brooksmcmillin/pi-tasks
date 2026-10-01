@@ -8,6 +8,7 @@ const EXECUTION_TOOLS = new Set([
 	"task_replan",
 	"task_update",
 	"task_evidence",
+	"task_evidence_batch",
 	"task_verify_step",
 ]);
 

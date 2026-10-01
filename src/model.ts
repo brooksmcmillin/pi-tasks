@@ -134,6 +134,9 @@ export interface PlanQuality {
 }
 
 export interface TaskGranularityCheck {
+	unit?: "action" | "deliverable";
+	boundedScope?: string;
+	verificationPlan?: string;
 	isAtomic: boolean;
 	reason: string;
 	canBeDoneInOneAgentAction: boolean;
@@ -301,6 +304,19 @@ export interface TaskStepVerifiedEvent extends TaskEventBase {
 	criterionIds?: string[];
 }
 
+export type TaskEvidenceBatchEntry =
+	| (Omit<TaskEvidenceAddedEvent, keyof TaskEventBase> & {
+			type: "task.evidence_added";
+	  })
+	| (Omit<TaskStepVerifiedEvent, keyof TaskEventBase> & {
+			type: "task.step_verified";
+	  });
+
+export interface TaskEvidenceBatchEvent extends TaskEventBase {
+	type: "task.evidence_batch";
+	entries: TaskEvidenceBatchEntry[];
+}
+
 export interface TaskDecisionRecordedEvent extends TaskEventBase {
 	type: "task.decision_recorded";
 	decision: Omit<TaskDecision, "taskId" | "createdAt">;
@@ -339,6 +355,7 @@ export type TaskEvent =
 	| TaskReplannedEvent
 	| TaskEvidenceAddedEvent
 	| TaskStepVerifiedEvent
+	| TaskEvidenceBatchEvent
 	| TaskDecisionRecordedEvent
 	| TaskCompletedEvent
 	| TaskCancelledEvent

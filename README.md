@@ -118,6 +118,7 @@ metadata.
 | `task_list` | List tasks with optional filtering |
 | `task_update` | Advance steps, record activity, flag scope drift |
 | `task_evidence` | Attach acceptance or diagnostic evidence and supersede linked failures |
+| `task_evidence_batch` | Submit bounded evidence records or step verification as one all-or-nothing transaction |
 | `task_verify_step` | Atomically attach passing evidence and complete the current atomic step |
 | `task_decision` | Record explicit user decisions |
 | `task_complete` | Close a task (only if all gates pass) |
@@ -174,6 +175,82 @@ receipt bookkeeping. Keep those mechanics within the deliverable's allowed
 execution. If a step genuinely contains multiple outputs or independent work,
 use `task_decompose`; do not assert atomicity just to avoid the gate.
 
+## Cohesive deliverables and batch evidence
+
+An atomic step may represent one independently verifiable outcome rather than one
+mechanical edit. Opt in with `granularityCheck.unit: "deliverable"`, a
+`boundedScope` and `verificationPlan` (12–500 characters each), and all five
+flags true. In this mode the legacy `canBeDoneInOneAgentAction` and
+`hasSingleVerificationMethod` flags mean one bounded implementation cycle and
+one bounded verification procedure, which may include multiple edits and checks.
+For example:
+
+```json
+{
+  "text": "Implement parser aliases and focused regression tests",
+  "expectedOutput": "Parser alias normalization preserves existing inputs",
+  "allowedActions": ["edit parser and tests", "run focused parser tests"],
+  "decompositionStatus": "atomic",
+  "granularityCheck": {
+    "unit": "deliverable",
+    "boundedScope": "Parser alias normalization only; excludes transport and UI",
+    "verificationPlan": "Run focused parser tests covering aliases and existing inputs",
+    "reason": "One parser behavior with bounded implementation and verification",
+    "isAtomic": true,
+    "canBeDoneInOneAgentAction": true,
+    "hasSingleObservableOutput": true,
+    "hasSingleVerificationMethod": true,
+    "hasNoHiddenSubtasks": true
+  }
+}
+```
+
+These declarations are a scoped execution contract, not a semantic proof from
+wording. Independent outcomes still require decomposition. Omitted `unit` or
+`unit: "action"` preserves legacy wording validation and persisted plan replay.
+The same check can classify the current step through `task_update`.
+
+`task_evidence_batch` accepts one task and 1–16 ordered entries within 32,000
+serialized characters. Each entry uses the `task_evidence` fields (without
+`task_id`) plus `operation: "record"` or `"verify_step"`. For `verify_step`,
+provide `step_id`, `passed: "true"` and acceptance role; omit record-only
+`step_ids`, `override_reason`, `supersedes_evidence_ids` and `reason`.
+Record all required checks before the final verification entry advances a step.
+Existing criterion linkage, step locks, failed-evidence supersession and completion
+gates apply unchanged. All entries persist in one event or none persist; errors
+name the rejected entry. Fix that entry and resubmit the entire batch.
+
+```json
+{
+  "task_id": "T1",
+  "entries": [{
+    "operation": "verify_step",
+    "step_id": "T1-S1",
+    "type": "test",
+    "level": "unit_test",
+    "summary": "Parser suite passed 4 tests",
+    "passed": "true",
+    "references": ["npm test -- parser"],
+    "quality": {
+      "source": "vitest",
+      "reproducible": true,
+      "verifier": "tool",
+      "command": "npm test -- parser",
+      "artifactRefs": ["npm test -- parser"],
+      "observedOutput": "4 tests passed"
+    }
+  }]
+}
+```
+
+Every quality field is required, including a nonempty `artifactRefs` array for
+every evidence type. Exact command or verification-action references are
+accepted. A missing artifact does not
+require rerunning successful verification: recovery prints corrected evidence
+parameters using the existing references. Save long commands and output in an
+artifact, link it, and use a short reference in `command` (maximum 300 characters).
+Failed or diagnostic records remain visible; neither can verify a step.
+
 ## Review remediation
 
 An exhausted plan is not proof that implementation is complete. When review finds
@@ -217,7 +294,7 @@ displace another active task. No prior session entries are rewritten.
 ## Advisory yield check
 
 After successful task execution calls (`task_plan`, `task_decompose`,
-`task_rework`, `task_replan`, `task_update`, `task_evidence`, or `task_verify_step`), a normal
+`task_rework`, `task_replan`, `task_update`, `task_evidence`, `task_evidence_batch`, or `task_verify_step`), a normal
 final response can receive **one advisory follow-up per input** if the same task
 is still active with an open step and no unresolved blocker. It reuses the compact
 resume recommendation: an unrun review or validation is a next action, not itself
