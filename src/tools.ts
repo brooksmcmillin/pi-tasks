@@ -31,6 +31,7 @@ import {
 	formatTaskFocus,
 	formatTaskList,
 	formatTaskNext,
+	formatTaskReceipt,
 	formatTaskResume,
 } from "./render.ts";
 import { Type } from "./schema.ts";
@@ -39,6 +40,8 @@ import { errorText, snapshotState, type TaskRuntimeStore } from "./store.ts";
 import { updateTaskUi } from "./widget.ts";
 
 const MAX_HISTORY_CHARS = 64_000;
+// State identity changes on replay/checkpoint, so the next success restores the full contract.
+const reportedStates = new WeakMap<TaskRuntimeStore, TaskState>();
 
 const TASK_STATUSES = [
 	"pending",
@@ -853,9 +856,12 @@ export function registerTaskTools(
 				duplicate &&
 				criteriaAlreadyLinked(store.getState(), params, duplicate)
 			) {
-				return textResult(
-					`Evidence already recorded as ${duplicate.id} for task ${params.task_id}\n\n${formatTaskResume(store.getState())}`,
-					buildTaskResume(store.getState()),
+				return successResult(
+					store,
+					store.getState(),
+					`Evidence already recorded as ${duplicate.id} for task ${params.task_id}`,
+					undefined,
+					params.task_id,
 				);
 			}
 			const evidenceId = nextEvidenceId(store.getState(), idGenerator);
@@ -962,9 +968,12 @@ export function registerTaskTools(
 				requestedQuality &&
 				evidenceQualityEqual(requestedQuality, duplicate.quality)
 			) {
-				return textResult(
-					`Step ${params.step_id} already verified by ${duplicate.id}; retry made no changes\n\n${formatTaskResume(state)}`,
-					buildTaskResume(state),
+				return successResult(
+					store,
+					state,
+					`Step ${params.step_id} already verified by ${duplicate.id}; retry made no changes`,
+					undefined,
+					params.task_id,
 				);
 			}
 			const evidenceId = duplicate?.id ?? nextEvidenceId(state, idGenerator);
@@ -1179,6 +1188,23 @@ function planStepSchema() {
 	});
 }
 
+function successResult(
+	store: TaskRuntimeStore,
+	state: TaskState,
+	success: string,
+	previous?: TaskState,
+	taskId?: string,
+): ToolResult {
+	const reported = reportedStates.get(store);
+	const receipt = formatTaskReceipt(
+		state,
+		reported === (previous ?? state) ? reported : undefined,
+		taskId,
+	);
+	reportedStates.set(store, state);
+	return textResult(`${success}\n\n${receipt}`, buildTaskResume(state));
+}
+
 function appendAndReport(
 	pi: ExtensionAPI,
 	store: TaskRuntimeStore,
@@ -1188,6 +1214,7 @@ function appendAndReport(
 	onPersisted?: () => void,
 ): ToolResult {
 	try {
+		const previous = store.getState();
 		const state = store.append(event, (customType, data) => {
 			pi.appendEntry(customType, data);
 		});
@@ -1196,10 +1223,16 @@ function appendAndReport(
 		const warning =
 			event.type === "task.completed" && event.forceWithReason
 				? `\nWarning: forced completion: ${event.forceWithReason}`
-				: "";
-		return textResult(
-			`${success}${warning}\n\n${formatTaskResume(state)}`,
-			buildTaskResume(state),
+				: event.type === "task.evidence_added" &&
+						event.evidence.passed === false
+					? `\nFailed check: ${event.evidence.id}: ${event.evidence.summary}`
+					: "";
+		return successResult(
+			store,
+			state,
+			`${success}${warning}`,
+			event.type === "task.created" ? undefined : previous,
+			event.taskId,
 		);
 	} catch (error) {
 		const resume = formatTaskResume(store.getState());

@@ -305,6 +305,15 @@ or erase linked failures; those still require ordinary verification.
 
 ## Token Efficiency
 
+Routine successful mutations return a compact receipt: affected task/step identity,
+status, permitted next actions, prohibited tools, and newly relevant constraints.
+Changed execution contracts are included; unchanged lineage and recovery templates
+are not repeated. First use, replay/automatic compaction recovery, and errors retain
+full guidance. Explicit `task_resume` and `task_focus` remain authoritative, and
+structured resume details are preserved. Blocking a task still reports its blocker
+without changing which task is active. See the [sanitized receipt benchmark](docs/receipt-benchmark.md)
+for a reproducible local payload comparison; model-time impact is unknown.
+
 Routine resume/next/focus results and their resume details summarize at most five
 verification gaps, three blockers, and three warnings, with explicit omitted
 counts and a full-history recovery instruction. Actionable scope/replay warnings

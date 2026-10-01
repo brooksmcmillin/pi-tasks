@@ -373,6 +373,120 @@ export function formatTaskResume(state: TaskState): string {
 	return lines.join("\n");
 }
 
+export function formatTaskReceipt(
+	state: TaskState,
+	previous?: TaskState,
+	affectedTaskId?: string,
+): string {
+	const resume = buildTaskResume(state);
+	const before = previous ? buildTaskResume(previous) : undefined;
+	const affected =
+		affectedTaskId && affectedTaskId !== resume.taskId
+			? state.tasks[affectedTaskId]
+			: undefined;
+	const affectedLines = affected
+		? [
+				`Affected task: ${affected.id} [${affected.status}] ${affected.progress}% (not active)`,
+				...(affected.status === "done" || affected.status === "cancelled"
+					? []
+					: taskChanges(affected, previous?.tasks[affected.id])),
+				"Retained history: task_list({ include_history: true })",
+			]
+		: [];
+	if (
+		!previous ||
+		!resume.taskId ||
+		!before?.taskId ||
+		before.taskId !== resume.taskId
+	)
+		return [...affectedLines, formatTaskResume(state)].join("\n");
+	const task = state.tasks[resume.taskId];
+	const priorTask = previous.tasks[before.taskId];
+	if (!task || !priorTask)
+		return [...affectedLines, formatTaskResume(state)].join("\n");
+	const lines = [
+		...affectedLines,
+		`Task: ${resume.taskId} [${resume.status}] ${resume.progress}%`,
+		`Current step: ${resume.currentStepId ?? "none open"}`,
+		`Mode: ${resume.mode} | Do now: ${resume.recommendedTool}`,
+	];
+	if (resume.blockedTools?.length)
+		lines.push(`Do not call: ${resume.blockedTools.join(", ")}`);
+	lines.push(`Next allowed actions: ${resume.nextAllowedActions.join(", ")}`);
+	if (
+		resume.currentStepId !== before.currentStepId ||
+		resume.currentStepText !== before.currentStepText ||
+		resume.expectedOutput !== before.expectedOutput ||
+		JSON.stringify(resume.allowedActions) !==
+			JSON.stringify(before.allowedActions) ||
+		JSON.stringify(resume.criterionIds) !== JSON.stringify(before.criterionIds)
+	) {
+		if (resume.currentStepText) lines.push(`Step: ${resume.currentStepText}`);
+		if (resume.expectedOutput)
+			lines.push(`Expected output: ${resume.expectedOutput}`);
+		if (resume.criterionIds.length)
+			lines.push(`Linked criteria: ${resume.criterionIds.join(",")}`);
+	}
+	if (
+		JSON.stringify(resume.minimumParams) !==
+		JSON.stringify(before.minimumParams)
+	) {
+		lines.push(
+			`Minimum params: ${formatMinimumParams(resume.minimumParams ?? {})}`,
+		);
+	}
+	if (resume.resumeInstruction !== before.resumeInstruction)
+		lines.push(`Instruction: ${resume.resumeInstruction}`);
+	lines.push(...taskChanges(task, priorTask));
+	const newWarnings = addedItems(
+		"New replay warnings",
+		state.warnings,
+		previous.warnings,
+	);
+	if (newWarnings) lines.push(newWarnings);
+	lines.push(
+		"Full contract: task_resume / task_focus; retained history: task_list({ include_history: true })",
+	);
+	return lines.join("\n");
+}
+
+// Diff full lists before bounding display so a new constraint beyond the old cap is visible.
+function addedItems(
+	label: string,
+	current: string[],
+	old: string[] = [],
+): string | undefined {
+	const known = new Set(old);
+	const added = current.filter((item) => !known.has(item));
+	return added.length
+		? `${label}: ${compactItems(added).join("; ")}`
+		: undefined;
+}
+
+function taskChanges(task: Task, previous?: Task): string[] {
+	const blockers = (value?: Task) =>
+		(value?.blockers ?? [])
+			.filter((item) => !item.resolvedAt)
+			.map(
+				(item) =>
+					`${item.id}: ${item.reason}; unblock: ${item.neededToUnblock}`,
+			);
+	const failures = (value?: Task) =>
+		(value?.evidence ?? [])
+			.filter((item) => item.passed === false)
+			.map((item) => `${item.id}: ${item.summary}`);
+	return [
+		addedItems(
+			"New gaps",
+			getVerificationGaps(task),
+			previous ? getVerificationGaps(previous) : [],
+		),
+		addedItems("New blockers", blockers(task), blockers(previous)),
+		addedItems("New warnings", task.warnings, previous?.warnings),
+		addedItems("New failed checks", failures(task), failures(previous)),
+	].filter((line): line is string => line !== undefined);
+}
+
 export function formatTaskNext(state: TaskState): string {
 	const resume = buildTaskResume(state);
 	const lines = ["pi-tasks next"];
