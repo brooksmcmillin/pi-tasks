@@ -71,6 +71,39 @@ function applyEvent(state, event) {
             return addEvidence(state, event);
         case "task.step_verified":
             return verifyStep(state, event);
+        case "task.evidence_batch": {
+            if (!Array.isArray(event.entries) ||
+                event.entries.length < 1 ||
+                event.entries.length > 16 ||
+                JSON.stringify(event.entries).length > 32_000) {
+                throw new TaskTransitionError("Evidence batch requires 1–16 entries within 32000 serialized characters; no entries persisted");
+            }
+            for (const [index, entry] of event.entries.entries()) {
+                try {
+                    if (!entry ||
+                        !["task.evidence_added", "task.step_verified"].includes(entry.type)) {
+                        throw new TaskTransitionError("Invalid evidence operation");
+                    }
+                    // Only the outer event is persisted; existing transitions validate each entry.
+                    const child = {
+                        ...entry,
+                        version: event.version,
+                        id: event.id,
+                        taskId: event.taskId,
+                        createdAt: event.createdAt,
+                        source: event.source,
+                    };
+                    state =
+                        child.type === "task.evidence_added"
+                            ? addEvidence(state, child)
+                            : verifyStep(state, child);
+                }
+                catch (error) {
+                    throw new TaskTransitionError(`Evidence batch entry ${index + 1} rejected; no entries persisted: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            }
+            return state;
+        }
         case "task.decision_recorded":
             return recordDecision(state, event);
         case "task.completed":
@@ -403,7 +436,7 @@ function classifyCurrentStep(state, task, event) {
         ].some((value) => value !== true)) {
         throw new TaskTransitionError("Atomic classification requires a reason and all atomicity flags true; decompose genuine compound work");
     }
-    validateAtomicWording(step);
+    validateAtomicWording({ ...step, granularityCheck: check });
     const mechanic = classifyMechanicStep(step.text, true);
     if (mechanic)
         throw new TaskTransitionError(mechanicStepMessage(mechanic, step.text));
@@ -464,8 +497,8 @@ function verifyStep(state, event) {
     const step = requireStep(task, event.stepId);
     const evidence = materializeEvidence(task, event.evidence, event.createdAt);
     validateEvidence(evidence);
-    if (evidence.passed !== true) {
-        throw new TaskTransitionError("task.step_verified requires passing evidence");
+    if (evidence.passed !== true || getEvidenceRole(evidence) !== "acceptance") {
+        throw new TaskTransitionError("task.step_verified requires passing acceptance evidence");
     }
     const criterionIds = event.criterionIds ?? step.criterionIds;
     const invalidCriterionIds = criterionIds.filter((criterionId) => !step.criterionIds.includes(criterionId));
@@ -707,28 +740,31 @@ function createPlanSteps(taskId, planSteps, initialSteps, criterionIds, createdA
 }
 function assessPlanQuality(step) {
     const issues = [];
+    const deliverable = isBoundedDeliverable(step.granularityCheck);
     if (step.text.length < 8)
         issues.push("step text is too short");
     if (step.expectedOutput.length < 12)
         issues.push("expected output is too short");
-    if (containsVaguePattern(step.text))
+    if (!deliverable && containsVaguePattern(step.text))
         issues.push("step text uses vague or broad wording");
-    if (containsVaguePattern(step.expectedOutput))
+    if (!deliverable && containsVaguePattern(step.expectedOutput))
         issues.push("expected output uses vague or broad wording");
     if (step.allowedActions.length === 0)
         issues.push("allowedActions are required");
     if (step.allowedActions.length > 3)
         issues.push("allowedActions are too broad; use at most three");
-    if (step.allowedActions.some((action) => containsVaguePattern(action))) {
+    if (!deliverable &&
+        step.allowedActions.some((action) => containsVaguePattern(action))) {
         issues.push("allowedActions contain vague actions");
     }
-    if (containsCompoundStepPattern(step.text)) {
+    if (!deliverable && containsCompoundStepPattern(step.text)) {
         issues.push("step text appears to contain multiple actions");
     }
-    if (containsCompoundStepPattern(step.expectedOutput)) {
+    if (!deliverable && containsCompoundStepPattern(step.expectedOutput)) {
         issues.push("expected output appears to contain multiple outputs");
     }
-    if (step.allowedActions.some((action) => containsCompoundStepPattern(action))) {
+    if (!deliverable &&
+        step.allowedActions.some((action) => containsCompoundStepPattern(action))) {
         issues.push("allowedActions must each be a single action");
     }
     if (step.criterionIds.length === 0)
@@ -751,7 +787,15 @@ function assessPlanQuality(step) {
 function containsVaguePattern(value) {
     return VAGUE_PLAN_PATTERNS.some((pattern) => pattern.test(value.trim()));
 }
+function isBoundedDeliverable(check) {
+    return (check?.unit === "deliverable" &&
+        [check.boundedScope, check.verificationPlan].every((value) => typeof value === "string" &&
+            value.trim().length >= 12 &&
+            value.length <= 500));
+}
 export function validateAtomicWording(step) {
+    if (isBoundedDeliverable(step.granularityCheck))
+        return;
     if ([step.text, step.expectedOutput, ...(step.allowedActions ?? [])].some(containsCompoundStepPattern)) {
         throw new TaskTransitionError("Atomic step rejects compound wording; use task_decompose for compound work");
     }
@@ -762,6 +806,15 @@ function containsCompoundStepPattern(value) {
 function normalizeGranularityCheck(step) {
     if (step.granularityCheck) {
         return {
+            ...(step.granularityCheck.unit
+                ? { unit: step.granularityCheck.unit }
+                : {}),
+            ...(step.granularityCheck.boundedScope !== undefined
+                ? { boundedScope: step.granularityCheck.boundedScope.trim() }
+                : {}),
+            ...(step.granularityCheck.verificationPlan !== undefined
+                ? { verificationPlan: step.granularityCheck.verificationPlan.trim() }
+                : {}),
             isAtomic: step.granularityCheck.isAtomic,
             reason: step.granularityCheck.reason.trim(),
             canBeDoneInOneAgentAction: step.granularityCheck.canBeDoneInOneAgentAction,
@@ -780,6 +833,14 @@ function normalizeGranularityCheck(step) {
     };
 }
 function validateGranularityContract(step, index) {
+    if (step.granularityCheck.unit !== undefined &&
+        !["action", "deliverable"].includes(step.granularityCheck.unit)) {
+        throw new TaskTransitionError("Granularity unit must be action or deliverable");
+    }
+    if (step.granularityCheck.unit === "deliverable" &&
+        !isBoundedDeliverable(step.granularityCheck)) {
+        throw new TaskTransitionError("Deliverable granularity requires boundedScope and verificationPlan (12–500 characters each)");
+    }
     if (!step.granularityCheck.reason.trim()) {
         throw new TaskTransitionError(`Plan step ${index + 1} granularityCheck.reason is required`);
     }

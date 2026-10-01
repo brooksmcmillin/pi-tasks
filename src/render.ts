@@ -512,13 +512,21 @@ function getNextAllowedActions(step: TaskStep, hasBlockers: boolean): string[] {
 	}
 	if (step.evidenceRequired && step.evidenceIds.length === 0) {
 		return withSupportActions(
-			[...step.allowedActions, "task_verify_step", "task_evidence"].filter(
-				Boolean,
-			),
+			[
+				...step.allowedActions,
+				"task_verify_step",
+				"task_evidence",
+				"task_evidence_batch",
+			].filter(Boolean),
 		);
 	}
 	return withSupportActions(
-		["task_update", "task_evidence", ...step.allowedActions].filter(Boolean),
+		[
+			"task_update",
+			"task_evidence",
+			"task_evidence_batch",
+			...step.allowedActions,
+		].filter(Boolean),
 	);
 }
 
@@ -725,7 +733,9 @@ function buildResumeInstruction(
 		return `For compound work, decompose ${step.id}. If already simple, use task_update with step_id and step_granularity_check (reason and all flags true) to classify it without inventing children. Do not execute or mark it done until atomic.`;
 	}
 	if (step.evidenceRequired && step.evidenceIds.length === 0) {
-		return `Resume ${step.id} by performing one allowed action, then use task_verify_step to record passing evidence and advance atomically.`;
+		return step.granularityCheck.unit === "deliverable"
+			? `Resume ${step.id} within bounded scope: ${step.granularityCheck.boundedScope}. Verification: ${step.granularityCheck.verificationPlan}. Use task_evidence_batch for the required checks and final verify_step entry, or task_verify_step for a single proof.`
+			: `Resume ${step.id} by performing one allowed action, then use task_verify_step to record passing evidence and advance atomically.`;
 	}
 	return `Resume ${step.id} with ${nextAllowedActions.join(" or ")}; keep ordered step progression.`;
 }

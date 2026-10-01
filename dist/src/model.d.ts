@@ -94,6 +94,9 @@ export interface PlanQuality {
     issues: string[];
 }
 export interface TaskGranularityCheck {
+    unit?: "action" | "deliverable";
+    boundedScope?: string;
+    verificationPlan?: string;
     isAtomic: boolean;
     reason: string;
     canBeDoneInOneAgentAction: boolean;
@@ -241,6 +244,15 @@ export interface TaskStepVerifiedEvent extends TaskEventBase {
     };
     criterionIds?: string[];
 }
+export type TaskEvidenceBatchEntry = (Omit<TaskEvidenceAddedEvent, keyof TaskEventBase> & {
+    type: "task.evidence_added";
+}) | (Omit<TaskStepVerifiedEvent, keyof TaskEventBase> & {
+    type: "task.step_verified";
+});
+export interface TaskEvidenceBatchEvent extends TaskEventBase {
+    type: "task.evidence_batch";
+    entries: TaskEvidenceBatchEntry[];
+}
 export interface TaskDecisionRecordedEvent extends TaskEventBase {
     type: "task.decision_recorded";
     decision: Omit<TaskDecision, "taskId" | "createdAt">;
@@ -267,7 +279,7 @@ export interface TaskSnapshotEvent extends TaskEventBase {
     resume: TaskResumeContext;
     reason: "compaction" | "resume_repair" | "manual";
 }
-export type TaskEvent = TaskCreatedEvent | TaskUpdatedEvent | TaskStepsDecomposedEvent | TaskReworkedEvent | TaskReplannedEvent | TaskEvidenceAddedEvent | TaskStepVerifiedEvent | TaskDecisionRecordedEvent | TaskCompletedEvent | TaskCancelledEvent | TaskSnapshotEvent;
+export type TaskEvent = TaskCreatedEvent | TaskUpdatedEvent | TaskStepsDecomposedEvent | TaskReworkedEvent | TaskReplannedEvent | TaskEvidenceAddedEvent | TaskStepVerifiedEvent | TaskEvidenceBatchEvent | TaskDecisionRecordedEvent | TaskCompletedEvent | TaskCancelledEvent | TaskSnapshotEvent;
 export interface ReplayResult {
     state: TaskState;
     malformedEvents: string[];
