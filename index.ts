@@ -29,6 +29,44 @@ export {
 export default function (pi: ExtensionAPI) {
 	const store = createTaskRuntimeStore();
 	const continuation = createContinuationAdvisory();
+	const asyncRuns = new Set<string>();
+	let unsubscribeAsync: Array<() => void> = [];
+	const clearAsync = () => {
+		for (const unsubscribe of unsubscribeAsync) unsubscribe();
+		unsubscribeAsync = [];
+		asyncRuns.clear();
+	};
+	const watchAsync = (ctx: ExtensionContext) => {
+		clearAsync();
+		const sessionId = ctx.sessionManager.getSessionId?.();
+		if (!sessionId || !pi.events.on) return;
+		for (const [event, started] of [
+			["subagent:async-started", true],
+			["subagent:async-complete", false],
+		] as const) {
+			unsubscribeAsync.push(
+				pi.events.on(event, (data) => {
+					if (
+						!data ||
+						typeof data !== "object" ||
+						!("sessionId" in data) ||
+						data.sessionId !== sessionId
+					)
+						return;
+					const id = started
+						? "id" in data
+							? data.id
+							: undefined
+						: "runId" in data
+							? data.runId
+							: undefined;
+					if (typeof id !== "string" || !id) return;
+					if (started) asyncRuns.add(id);
+					else asyncRuns.delete(id);
+				}),
+			);
+		}
+	};
 
 	const replay = (
 		ctx: ExtensionContext,
@@ -46,10 +84,16 @@ export default function (pi: ExtensionAPI) {
 		}
 	};
 
-	pi.on("session_start", async (_event, ctx) => replay(ctx, "session_start"));
+	pi.on("session_start", async (_event, ctx) => {
+		watchAsync(ctx);
+		replay(ctx, "session_start");
+	});
 	pi.on("session_tree", async (_event, ctx) => replay(ctx, "session_tree"));
 	pi.on("input", () => continuation.reset());
-	pi.on("session_shutdown", () => continuation.reset());
+	pi.on("session_shutdown", () => {
+		continuation.reset();
+		clearAsync();
+	});
 	pi.on("tool_result", (event) => {
 		continuation.observeToolResult(
 			event.toolName,
@@ -58,23 +102,30 @@ export default function (pi: ExtensionAPI) {
 			event.details,
 		);
 	});
-	pi.on("turn_end", (event, ctx) => {
+	pi.on("agent_before_settle", (event, ctx) => {
 		if (
-			event.message.role !== "assistant" ||
-			event.message.stopReason !== "stop" ||
+			event.outcome !== "completed" ||
+			event.continue ||
+			!event.context?.canContinue ||
+			event.context.pendingMessages.length > 0 ||
 			ctx.signal?.aborted ||
-			!ctx.hasPendingMessages ||
-			ctx.hasPendingMessages() ||
-			!pi.sendMessage
+			ctx.hasPendingMessages?.() ||
+			asyncRuns.size > 0
 		)
 			return;
 		const content = continuation.take(store.getState());
-		if (content) {
-			pi.sendMessage(
-				{ customType: "pi-tasks:yield-check", content, display: true },
-				{ deliverAs: "followUp" },
-			);
-		}
+		if (!content) return;
+		return {
+			entries: [
+				{
+					type: "custom_message",
+					customType: "pi-tasks:yield-check",
+					content,
+					display: true,
+				},
+			],
+			continue: true,
+		};
 	});
 	pi.on("session_before_compact", async (_event, ctx) => {
 		const state = store.getState();

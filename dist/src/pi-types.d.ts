@@ -27,6 +27,23 @@ export interface TurnEndEvent {
         stopReason?: string;
     };
 }
+export interface SettlementEvent {
+    outcome: "completed" | "aborted" | "error";
+    continue: boolean;
+    context: {
+        canContinue: boolean;
+        pendingMessages: unknown[];
+    };
+}
+export interface SettlementResult {
+    entries: Array<{
+        type: "custom_message";
+        customType: string;
+        content: string;
+        display: boolean;
+    }>;
+    continue: true;
+}
 export interface TaskToolResultEvent {
     toolName: string;
     isError: boolean;
@@ -36,10 +53,12 @@ export interface TaskToolResultEvent {
 export interface ExtensionAPI {
     events: {
         emit<T = unknown>(event: string, data: T): void;
+        on?(event: string, handler: (data: unknown) => void): () => void;
     };
     on(event: "session_start" | "session_tree" | "input" | "session_shutdown", handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void): void;
     on(event: "session_before_compact", handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void): void;
     on(event: "turn_end", handler: (event: TurnEndEvent, ctx: ExtensionContext) => Promise<void> | void): void;
+    on(event: "agent_before_settle", handler: (event: SettlementEvent, ctx: ExtensionContext) => SettlementResult | undefined): void;
     on(event: "tool_result", handler: (event: TaskToolResultEvent, ctx: ExtensionContext) => Promise<void> | void): void;
     sendMessage?(message: {
         customType: string;
@@ -62,6 +81,7 @@ export interface ExtensionContext {
     hasPendingMessages?(): boolean;
     sessionManager: {
         getBranch(): BranchEntry[];
+        getSessionId?(): string;
     };
     ui: {
         notify(message: string, type?: "info" | "warning" | "error"): void;

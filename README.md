@@ -294,10 +294,12 @@ displace another active task. No prior session entries are rewritten.
 ## Advisory yield check
 
 After successful task execution calls (`task_plan`, `task_decompose`,
-`task_rework`, `task_replan`, `task_update`, `task_evidence`, `task_evidence_batch`, or `task_verify_step`), a normal
-final response can receive **one advisory follow-up per input** if the same task
-is still active with an open step and no unresolved blocker. It reuses the compact
-resume recommendation: an unrun review or validation is a next action, not itself
+`task_rework`, `task_replan`, `task_update`, `task_evidence`, `task_evidence_batch`,
+or `task_verify_step`), a normal settlement boundary can request **one advisory
+continuation per input** if the same task is still active with an open step and no
+unresolved blocker. The check reads current state after queued work, rather than
+leaving a follow-up in the queue at `turn_end`. It reuses the compact resume
+recommendation: an unrun review or validation is a next action, not itself
 an external blocker. The agent must still respect the user's current request and
 all review, permission, and verification requirements.
 
@@ -305,8 +307,8 @@ This is not a completion gate or a guarantee of autonomous completion. It never
 requires a PR, marks a task complete, blocks tools, or repeatedly restarts the
 agent. Read-only task queries, checkpoint/decision calls alone, unrelated answers,
 blocked/review/terminal tasks, exhausted plans, abnormal stops, cancellation, and
-queued messages do not trigger it. New input and session replay clear prior task
-engagement; a stale active task alone cannot restart work. Execution calls are
+queued messages or already-requested continuations do not trigger it. New input
+and session replay clear prior task engagement; a stale active task alone cannot restart work. Execution calls are
 bound to their explicit target, or the result of an activating `task_plan`;
 creating an inactive task never engages a different active task. Consequently, work that
 does not call an execution tool in that input is deliberately outside its scope.
@@ -315,7 +317,12 @@ Record a genuine decision wait or external obstacle with `task_update`'s blocker
 fields (reason, `blockedBy`, and `neededToUnblock`); `task_decision` records a choice,
 not an unresolved wait. The advisory explicitly permits human decisions, user
 redirection, explanation-only requests, and waiting for asynchronous results.
-Hosts without `sendMessage` or `hasPendingMessages` retain existing behavior.
+Live pi-subagents runs announced through `subagent:async-started` suppress the
+advisory until their matching `subagent:async-complete` events arrive. Events from
+other sessions are ignored. This requires event subscriptions and session identity;
+it does not recover runs started before subscription or detect other asynchronous
+providers. Record those waits explicitly. Hosts without `agent_before_settle`
+retain task functionality without automatic advisories.
 
 ## Completion Gates
 
