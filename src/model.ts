@@ -283,6 +283,7 @@ export interface TaskReworkedEvent extends TaskEventBase {
 	type: "task.reworked";
 	reason: string;
 	planSteps: TaskStepInput[];
+	beforeStepId?: string;
 }
 
 export interface TaskEvidenceAddedEvent extends TaskEventBase {

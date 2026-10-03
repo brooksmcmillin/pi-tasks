@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added optional `task_rework.before_step_id` to insert findings-driven repairs before an existing open gate in one mutation, preserving gate obligations, stable IDs, evidence history, and legacy append behavior.
 - Added backward-compatible acceptance and diagnostic evidence roles. Diagnostic evidence may support diagnostic steps and remains visible without changing criterion status or satisfying task completion; evidence without a role defaults to acceptance.
 - Added explicit acceptance-evidence supersession through `task_evidence.supersedes_evidence_ids` plus a required reason. Passing acceptance replacements retain failed records, expose both directions of the relationship, and prevent only explicitly superseded failures from blocking completion.
 - Added `task_verify_step`, which records passing evidence and completes the current atomic step through one persisted `task.step_verified` event with idempotent exact retries.

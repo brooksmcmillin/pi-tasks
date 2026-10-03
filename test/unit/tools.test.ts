@@ -479,6 +479,61 @@ describe("registered task tools", () => {
 		);
 	});
 
+	it("persists before_step_id once and publishes no state for invalid insertion", async () => {
+		const { tools, entries, ctx, store, publications } = createHarness();
+		const step = {
+			text: "Review cursor guard",
+			expectedOutput: "Cursor guard review accepts runtime behavior",
+			allowedActions: ["review"],
+			decompositionStatus: "needs_breakdown",
+		};
+		await execute(
+			requireTool(tools, "task_plan"),
+			{
+				title: "Cursor contract",
+				objective: "Verify cursor contract",
+				acceptance_criteria: ["Cursor contract is verified"],
+				plan_steps: [step],
+			},
+			ctx,
+		);
+		const rework = requireTool(tools, "task_rework");
+		expect(rework.parameters.properties.before_step_id).toMatchObject({
+			type: "string",
+		});
+		expect(rework.description).toContain("before_step_id");
+		const params = {
+			task_id: "T1",
+			reason: "Review found generated contract mismatch",
+			before_step_id: "T1-S1",
+			plan_steps: [{ ...step, text: "Repair cursor contract" }],
+		};
+		const count = entries.length;
+		const result = await execute(rework, params, ctx);
+		expect(result.isError).not.toBe(true);
+		expect(entries).toHaveLength(count + 1);
+		expect(entries.at(-1)).toMatchObject({
+			type: "task.reworked",
+			beforeStepId: "T1-S1",
+		});
+		expect(result.content[0]?.text).toContain("T1-S2");
+		expect(store.getState().tasks.T1?.planSteps.map((item) => item.id)).toEqual(
+			["T1-S2", "T1-S1"],
+		);
+		const restored = createTaskRuntimeStore();
+		restored.replay(ctx.sessionManager.getBranch());
+		expect(restored.getState()).toEqual(store.getState());
+		const before = structuredClone(store.getState());
+		const published = publications.length;
+		for (const fields of [{ before_step_id: "missing" }, { plan_steps: [] }]) {
+			const rejected = await execute(rework, { ...params, ...fields }, ctx);
+			expect(rejected.isError).toBe(true);
+		}
+		expect(entries).toHaveLength(count + 1);
+		expect(publications).toHaveLength(published);
+		expect(store.getState()).toEqual(before);
+	});
+
 	it("projects prompt guidelines into tool descriptions for hosts that ignore custom fields", () => {
 		const { tools } = createHarness();
 		const plan = requireTool(tools, "task_plan");
@@ -1396,7 +1451,8 @@ describe("registered task tools", () => {
 				tool.description,
 				tool.promptGuidelines?.join(" ") ?? "",
 			]) {
-				expect(guidance).toContain("task_rework is append-only");
+				expect(guidance).toContain("task_rework adds review remediation");
+				expect(guidance).toContain("before_step_id");
 				expect(guidance).toContain("before implementation");
 				expect(guidance).toContain("task_replan when available");
 				expect(guidance).toContain("do not bypass the contract");

@@ -565,11 +565,20 @@ Behavior:
 
 ### 8.7.1 `task_rework`
 
-Append review remediation to the existing task with required `task_id`, non-empty
+Add review remediation to the existing task with required `task_id`, non-empty
 `reason` containing findings, and non-empty `plan_steps` in the `task_plan` shape.
-The `task.reworked` event preserves history and all evidence links. New root IDs
-follow the highest existing root, including roots represented by descendants.
-Existing open steps remain ahead of appended steps.
+Optional `before_step_id` persists as `beforeStepId` on `task.reworked` and inserts
+repairs before that named open step (including decomposed children). Reject
+non-string/blank, nonexistent, done, or skipped targets and invalid steps before
+persistence. Without the field, legacy events and new calls retain append order.
+
+The event preserves history and all evidence links. New root IDs follow the
+highest existing root, including roots represented by descendants, independent
+of insertion position. The original gate retains its identity and obligations;
+earlier open steps stay ahead of the repairs. When insertion changes the current
+step, the previously active step becomes pending without losing its evidence or
+start timestamp. Resume, continuation, event replay and snapshot restoration use
+the resulting plan order; no snapshot migration or schema-version bump is needed.
 
 Affected criteria are the union of remediation step criterion links (omitting
 links selects all criteria). Their status resets to pending and their optional
