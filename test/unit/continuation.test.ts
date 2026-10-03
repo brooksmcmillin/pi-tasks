@@ -9,7 +9,9 @@ import {
 import type {
 	ExtensionAPI,
 	ExtensionContext,
-	TurnEndEvent,
+	SettlementEvent,
+	SettlementResult,
+	ToolDefinition,
 } from "../../src/pi-types.ts";
 import { replayBranchEntries } from "../../src/store.ts";
 
@@ -59,30 +61,73 @@ function harness() {
 		string,
 		(event: unknown, ctx: ExtensionContext) => unknown
 	>();
-	const messages: Array<{ content: string; options: unknown }> = [];
+	const messages: SettlementResult["entries"] = [];
+	const tools = new Map<string, ToolDefinition<Record<string, unknown>>>();
+	const observers = new Map<string, Set<(data: unknown) => void>>();
+	const entries = structuredClone(branch);
 	const pi: ExtensionAPI = {
-		events: { emit: () => {} },
+		events: {
+			emit: (name, data) => {
+				for (const handler of observers.get(name) ?? []) handler(data);
+			},
+			on: (name, handler) => {
+				const listeners = observers.get(name) ?? new Set();
+				listeners.add(handler);
+				observers.set(name, listeners);
+				return () => {
+					listeners.delete(handler);
+				};
+			},
+		},
 		on: (name, handler) => {
 			handlers.set(
 				name,
 				handler as (event: unknown, ctx: ExtensionContext) => unknown,
 			);
 		},
-		registerTool: () => {},
+		registerTool: (tool) => {
+			tools.set(tool.name, tool);
+		},
 		registerCommand: () => {},
 		appendEntry: () => {},
-		sendMessage: (message, options) => {
-			messages.push({ content: message.content, options });
+		sendMessage: () => {
+			throw new Error("Yield checks must not enqueue messages");
 		},
 	};
 	const ctx: ExtensionContext = {
-		sessionManager: { getBranch: () => branch },
+		sessionManager: {
+			getBranch: () => entries,
+			getSessionId: () => "session-1",
+		},
 		hasPendingMessages: () => false,
 		ui: { notify: () => {}, setWidget: () => {}, setStatus: () => {} },
 	};
 	taskExtension(pi);
 	const emit = async (name: string, event: unknown = {}) => {
-		await handlers.get(name)?.(event, ctx);
+		return await handlers.get(name)?.(event, ctx);
+	};
+	const settle = async (overrides: Partial<SettlementEvent> = {}) => {
+		const result = (await emit("agent_before_settle", {
+			outcome: "completed",
+			continue: false,
+			context: { canContinue: false, pendingMessages: [] },
+			...overrides,
+		} satisfies SettlementEvent)) as SettlementResult | undefined;
+		if (result) messages.push(...result.entries);
+		return result;
+	};
+	const execute = async (name: string, input: Record<string, unknown>) => {
+		const tool = tools.get(name);
+		if (!tool) throw new Error(`Missing tool ${name}`);
+		const result = await tool.execute("call", input, undefined, undefined, ctx);
+		expect(result.isError).not.toBe(true);
+		await emit("tool_result", {
+			toolName: name,
+			isError: false,
+			input,
+			details: result.details,
+		});
+		return result;
 	};
 	const turn = async (
 		stopReason = "stop",
@@ -97,9 +142,9 @@ function harness() {
 			});
 		await emit("turn_end", {
 			message: { role: "assistant", stopReason },
-		} satisfies TurnEndEvent);
+		});
 	};
-	return { pi, ctx, messages, emit, turn };
+	return { pi, ctx, messages, emit, turn, settle, execute, observers };
 }
 
 describe("bounded continuation policy", () => {
@@ -280,20 +325,23 @@ describe("extension lifecycle integration", () => {
 			input: { activate: false },
 			details: { taskId: "T1" },
 		});
-		await h.turn();
+		await h.settle();
 		expect(h.messages).toHaveLength(0);
 	});
 
-	it("sends one follow-up only at a normal final response after task work", async () => {
+	it("returns one atomic continuation at settlement, never at turn end", async () => {
 		const h = harness();
 		await h.emit("session_start");
 		await h.turn("toolUse", "task_update");
 		expect(h.messages).toHaveLength(0);
 		await h.turn();
+		expect(h.messages).toHaveLength(0);
+		const result = await h.settle();
+		expect(result?.continue).toBe(true);
 		expect(h.messages).toHaveLength(1);
-		expect(h.messages[0].options).toEqual({ deliverAs: "followUp" });
+		expect(h.messages[0].customType).toBe("pi-tasks:yield-check");
 		await h.turn("toolUse", "task_update");
-		await h.turn();
+		await h.settle();
 		expect(h.messages).toHaveLength(1);
 	});
 
@@ -304,7 +352,7 @@ describe("extension lifecycle integration", () => {
 			await h.emit("session_start");
 			await h.turn("toolUse", "task_update");
 			await h.emit(name);
-			await h.turn();
+			await h.settle();
 			expect(h.messages).toHaveLength(0);
 		},
 	);
@@ -313,17 +361,17 @@ describe("extension lifecycle integration", () => {
 		const h = harness();
 		await h.emit("session_start");
 		await h.turn("toolUse", "task_resume");
-		await h.turn();
+		await h.settle();
 		expect(h.messages).toHaveLength(0);
 	});
 
-	it.each(["aborted", "error", "length", "toolUse"])(
-		"does not restart a %s ending",
+	it.each(["aborted", "error"] as const)(
+		"does not restart a %s settlement",
 		async (reason) => {
 			const h = harness();
 			await h.emit("session_start");
 			await h.turn("toolUse", "task_update");
-			await h.turn(reason);
+			await h.settle({ outcome: reason });
 			expect(h.messages).toHaveLength(0);
 		},
 	);
@@ -333,21 +381,125 @@ describe("extension lifecycle integration", () => {
 		await h.emit("session_start");
 		await h.turn("toolUse", "task_update");
 		h.ctx.signal = AbortSignal.abort();
-		await h.turn();
+		await h.settle();
 		expect(h.messages).toHaveLength(0);
 		h.ctx.signal = undefined;
 		h.ctx.hasPendingMessages = () => true;
-		await h.turn();
+		await h.settle();
 		expect(h.messages).toHaveLength(0);
 	});
 
-	it("does not require optional continuation APIs from compatible hosts", async () => {
+	it("uses the boundary without optional message-delivery APIs", async () => {
 		const h = harness();
 		await h.emit("session_start");
 		await h.turn("toolUse", "task_update");
 		h.pi.sendMessage = undefined;
 		h.ctx.hasPendingMessages = undefined;
-		await h.turn();
+		await h.settle();
+		expect(h.messages).toHaveLength(1);
+	});
+
+	it.each([
+		{ continue: true },
+		{ context: { canContinue: true, pendingMessages: [{}] } },
+	])("defers to existing boundary work: %j", async (boundary) => {
+		const h = harness();
+		await h.emit("session_start");
+		await h.turn("stop", "task_update");
+		await h.settle(boundary);
 		expect(h.messages).toHaveLength(0);
+		await h.settle();
+		expect(h.messages).toHaveLength(1);
+	});
+
+	const reviewEvidence = {
+		task_id: "T1",
+		step_id: "T1-S1",
+		type: "review",
+		level: "static_read",
+		summary: "Independent review passed",
+		references: ["review.json"],
+		quality: {
+			source: "reviewer",
+			reproducible: true,
+			verifier: "tool",
+			command: "review staged tree",
+			artifactRefs: ["review.json"],
+			observedOutput: "No findings",
+		},
+	};
+
+	it.each([false, true])(
+		"reads fresh state after review notification (completed=%s)",
+		async (complete) => {
+			const h = harness();
+			await h.emit("session_start");
+			await h.turn("stop", "task_update");
+			await h.settle({ continue: true });
+			await h.execute("task_verify_step", reviewEvidence);
+			if (complete)
+				await h.execute("task_complete", {
+					task_id: "T1",
+					summary: "Reviewed implementation",
+					evidence_ids: ["E1"],
+				});
+			await h.settle();
+			expect(h.messages).toHaveLength(0);
+		},
+	);
+
+	it("waits for all live subagents without duplicate work, across input and branch replay", async () => {
+		const h = harness();
+		await h.emit("session_start");
+		for (const id of ["review-1", "review-2"])
+			h.pi.events.emit("subagent:async-started", {
+				id,
+				sessionId: "session-1",
+			});
+		await h.emit("input");
+		await h.emit("session_tree");
+		await h.turn("stop", "task_update");
+		await h.settle();
+		expect(h.messages).toHaveLength(0);
+		h.pi.events.emit("subagent:async-complete", {
+			runId: "review-1",
+			sessionId: "session-1",
+		});
+		await h.settle();
+		expect(h.messages).toHaveLength(0);
+		h.pi.events.emit("subagent:async-complete", {
+			runId: "review-2",
+			sessionId: "foreign-session",
+		});
+		await h.settle();
+		expect(h.messages).toHaveLength(0);
+		h.pi.events.emit("subagent:async-complete", {
+			runId: "review-2",
+			sessionId: "session-1",
+		});
+		await h.settle({ continue: true });
+		expect(h.messages).toHaveLength(0);
+		await h.settle();
+		expect(h.messages).toHaveLength(1);
+	});
+
+	it("ignores foreign or malformed async events and cleans up subscriptions", async () => {
+		const h = harness();
+		await h.emit("session_start");
+		for (const data of [
+			null,
+			{},
+			{ id: 42, sessionId: "session-1" },
+			{ id: "foreign", sessionId: "other" },
+		])
+			h.pi.events.emit("subagent:async-started", data);
+		await h.turn("stop", "task_update");
+		await h.settle();
+		expect(h.messages).toHaveLength(1);
+		await h.emit("session_start");
+		expect(h.observers.get("subagent:async-started")?.size).toBe(1);
+		await h.emit("session_shutdown");
+		expect(h.observers.get("subagent:async-started")?.size).toBe(0);
+		expect(h.observers.get("subagent:async-complete")?.size).toBe(0);
 	});
 });

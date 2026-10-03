@@ -72,10 +72,11 @@ This project must align with the commercial-quality bar established by `pi-knowl
 
 ## Advisory Yield Contract
 
-- At a normal final `turn_end`, offer at most one follow-up per input after a successful task execution call, using the existing resume contract for the same active task with an open step and no unresolved blocker.
+- At `agent_before_settle`, offer at most one atomic continuation per input after a successful task execution call, using fresh state and the existing resume contract for the same active task with an open step and no unresolved blocker. Return a custom message entry with `continue: true`; never queue a `sendMessage` follow-up from `turn_end`.
 - Missing prerequisites are next actions, not automatic blockers; never bypass them. Guidance must preserve user stops/redirection, explanation-only requests, human decisions, authority boundaries, and asynchronous waits.
 - Do not infer authorization from a stale active task, parse final-response prose, require a PR, force completion, or implement a retry loop. Read-only task queries and checkpoint/decision calls alone must not arm continuation.
-- Suppress blocked/review/terminal tasks, exhausted plans, abnormal stops, cancellation, and pending messages. Reset engagement on input/session replay/shutdown. Capability-check message delivery and pending-message inspection for compatible hosts.
+- Suppress blocked/review/terminal tasks, exhausted plans, abnormal outcomes, cancellation, pending messages, and already-requested boundary continuations. Reset engagement on input/session replay/shutdown. Hosts without the settlement boundary do not receive advisories.
+- Track live `subagent:async-started`/`subagent:async-complete` events only for the current session when event subscriptions and session identity are available. Suppress advisories until all tracked runs finish; preserve waits across input/branch replay and clear subscriptions on shutdown/session start. Runs started before subscription and other asynchronous providers require explicitly recorded waits.
 - Keep blocker semantics unchanged: pending decisions use unresolved blockers; decision records alone are not waits. The advisory cannot guarantee detection of unrecorded waits or progress without task execution calls.
 
 ## Agent Planning Discipline
