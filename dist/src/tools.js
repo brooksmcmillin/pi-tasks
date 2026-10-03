@@ -46,8 +46,8 @@ const GRANULARITY_STATUSES = [
     "atomic",
     "deferred",
 ];
-const PLAN_REPAIR_GUIDANCE = "task_rework is append-only review remediation, not plan replacement. Reconcile a malformed or duplicate plan before implementation: use task_replan when available to explicitly replace mistaken open steps, then resume the corrected contract. If repair is unavailable, report the tracking blocker; do not bypass the contract or cancel completed work merely to clear tracking warnings.";
-const REWORK_GUIDANCE = "Use task_rework when review discovers missing or defective work within the original objective, even if no open step remains or task_complete is recommended. Record findings and append remediation steps without asking permission for in-scope repairs; record genuine scope or architecture decisions with task_decision before proceeding.";
+const PLAN_REPAIR_GUIDANCE = "task_rework adds review remediation without replacing prior steps; optionally use before_step_id to insert repairs before an open gate. Reconcile a malformed or duplicate plan before implementation: use task_replan when available to explicitly replace mistaken open steps, then resume the corrected contract. If repair is unavailable, report the tracking blocker; do not bypass the contract or cancel completed work merely to clear tracking warnings.";
+const REWORK_GUIDANCE = "Use task_rework when review discovers missing or defective work within the original objective, even if no open step remains or task_complete is recommended. Record findings and add remediation steps without asking permission for in-scope repairs; use before_step_id to insert them before a named open review/publication gate, or omit it to append. Record genuine scope or architecture decisions with task_decision before proceeding.";
 const TASK_ENTRYPOINT_NAMES = ["task_plan", "task_resume"];
 const registeredTaskToolNames = new WeakMap();
 function hasToolActivationApi(pi) {
@@ -359,7 +359,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
     registerGuidedTool(pi, {
         name: "task_rework",
         label: "Task Rework",
-        description: "Append-only review remediation: record findings and add steps after existing work without discarding evidence or history. This does not replace a malformed plan; use task_replan when available for that.",
+        description: "Review remediation: record findings and add steps without discarding evidence or history. Optionally name an open before_step_id to insert repairs before that gate; otherwise append after existing work. This does not replace a malformed plan; use task_replan when available for that.",
         promptSnippet: "Extend or reopen a pi-tasks task for review-discovered remediation",
         promptGuidelines: [
             REWORK_GUIDANCE,
@@ -372,11 +372,15 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             task_id: Type.String(),
             reason: Type.String({ minLength: 1 }),
             plan_steps: Type.Array(planStepSchema(), { minItems: 1 }),
+            before_step_id: Type.Optional(Type.String({ minLength: 1 })),
         }),
         execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
             const event = baseEvent("task.reworked", params.task_id, ctx, {
                 reason: params.reason,
                 planSteps: params.plan_steps,
+                ...(params.before_step_id !== undefined
+                    ? { beforeStepId: params.before_step_id }
+                    : {}),
             });
             return appendAndReport(pi, store, ctx, event, `Added remediation steps to task ${params.task_id}`);
         },

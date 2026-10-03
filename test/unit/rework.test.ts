@@ -381,6 +381,326 @@ describe("task.reworked", () => {
 	});
 });
 
+describe("remediation insertion before open gates", () => {
+	function task(state: TaskState) {
+		const found = state.tasks.T1;
+		if (!found) throw new Error("Missing insertion fixture task");
+		return found;
+	}
+	function gated(): TaskState {
+		return replayTaskEvents([
+			{
+				...create,
+				planSteps: [
+					step,
+					{ ...step, text: "Review cursor guard" },
+					{ ...step, text: "Publish cursor guard" },
+				],
+			},
+			verify,
+		]);
+	}
+	const insertion = { ...rework, beforeStepId: "T1-S2" };
+
+	it("retains completed history and gate obligations while moving the execution lock to repairs", () => {
+		const before = gated();
+		const repair = { ...step, criterionIds: ["T1-AC1"] };
+		const after = reduceTaskState(before, {
+			...insertion,
+			planSteps: [repair, repair],
+		});
+		const currentTask = task(after);
+		expect(currentTask.planSteps.map((item) => item.id)).toEqual([
+			"T1-S1",
+			"T1-S4",
+			"T1-S5",
+			"T1-S2",
+			"T1-S3",
+		]);
+		expect(currentTask.planSteps[0]).toEqual(task(before).planSteps[0]);
+		expect(currentTask.planSteps[3]).toEqual({
+			...task(before).planSteps[1],
+			status: "pending",
+		});
+		expect(currentTask.planSteps[4]).toEqual(task(before).planSteps[2]);
+		expect(
+			currentTask.planSteps
+				.filter((item) => item.status === "active")
+				.map((item) => item.id),
+		).toEqual(["T1-S4"]);
+		expect(currentTask.evidence).toEqual(task(before).evidence);
+		expect(currentTask.acceptanceCriteria[0]).toMatchObject({
+			status: "pending",
+			evidenceIds: ["E1"],
+			evidenceBaseline: 1,
+		});
+		expect(currentTask.acceptanceCriteria[1]).toEqual(
+			task(before).acceptanceCriteria[1],
+		);
+		expect(buildTaskResume(after).currentStepId).toBe("T1-S4");
+		expect(buildTaskResume(after).minimumParams).toMatchObject({
+			step_id: "T1-S4",
+		});
+		expect(() => reduceTaskState(after, complete)).toThrow(/not complete/);
+		expect(after.events.slice(0, -1)).toEqual(before.events);
+		expect(before).toEqual(gated());
+	});
+
+	it("keeps earlier open work ahead of a later insertion target", () => {
+		const after = reduceTaskState(gated(), {
+			...insertion,
+			beforeStepId: "T1-S3",
+		});
+		expect(task(after).planSteps.map((item) => item.id)).toEqual([
+			"T1-S1",
+			"T1-S2",
+			"T1-S4",
+			"T1-S3",
+		]);
+		expect(buildTaskResume(after).currentStepId).toBe("T1-S2");
+		expect(
+			task(after).planSteps.filter((item) => item.status === "active"),
+		).toHaveLength(1);
+	});
+
+	it("inserts before a decomposed open child without reusing root IDs", () => {
+		const before = reduceTaskState(replayTaskEvents([create]), {
+			...base,
+			type: "task.steps_decomposed",
+			parentStepId: "T1-S1",
+			reason: "Split cursor handling",
+			childSteps: [step, step],
+		});
+		const after = reduceTaskState(before, {
+			...insertion,
+			beforeStepId: "T1-S1.1",
+		});
+		expect(task(after).planSteps.map((item) => item.id)).toEqual([
+			"T1-S2",
+			"T1-S1.1",
+			"T1-S1.2",
+		]);
+		expect(buildTaskResume(after).currentStepId).toBe("T1-S2");
+	});
+
+	it.each(["unknown", "T2-S2", "T1-S1", "", " ", null, 1])(
+		"rejects invalid target %j atomically",
+		(beforeStepId) => {
+			const before = gated();
+			expect(() =>
+				reduceTaskState(before, { ...insertion, beforeStepId } as TaskEvent),
+			).toThrow(/open plan step/);
+			expect(before).toEqual(gated());
+		},
+	);
+
+	it("rejects skipped targets and malformed repairs without changing state", () => {
+		const before = reduceTaskState(gated(), {
+			...base,
+			type: "task.replanned",
+			reason: "Replace duplicate review gate",
+			stepIds: ["T1-S2"],
+			planSteps: [step],
+		});
+		const snapshot = structuredClone(before);
+		expect(() => reduceTaskState(before, insertion)).toThrow(/open plan step/);
+		for (const planSteps of [
+			[],
+			[{ ...step, criterionIds: ["unknown"] }],
+			[{ ...step, evidenceRequired: false }],
+		]) {
+			expect(() =>
+				reduceTaskState(before, {
+					...insertion,
+					beforeStepId: "T1-S4",
+					planSteps,
+				} as TaskEvent),
+			).toThrow();
+		}
+		expect(before).toEqual(snapshot);
+	});
+
+	it("retains failures until explicitly superseded after repairs and every original gate is verified", () => {
+		let state = reduceTaskState(gated(), {
+			...base,
+			type: "task.evidence_added",
+			evidence: { ...proof("FAIL"), passed: false },
+			criterionIds: ["T1-AC1"],
+			stepIds: ["T1-S1"],
+			overrideReason:
+				"Final review discovered a regression in completed implementation",
+		});
+		state = reduceTaskState(state, insertion);
+		for (const [stepId, id] of [
+			["T1-S4", "E2"],
+			["T1-S2", "E3"],
+			["T1-S3", "E4"],
+		] as const) {
+			state = reduceTaskState(state, {
+				...verify,
+				stepId,
+				evidence: proof(id),
+				criterionIds: ["T1-AC1"],
+			});
+		}
+		expect(() => reduceTaskState(state, complete)).toThrow(
+			/failing evidence FAIL/,
+		);
+		state = reduceTaskState(state, {
+			...base,
+			type: "task.evidence_added",
+			evidence: {
+				...proof("E5"),
+				supersedesEvidenceIds: ["FAIL"],
+				supersessionReason: "Cursor regression rerun after inserted repair",
+			},
+			criterionIds: ["T1-AC1"],
+		});
+		expect(task(reduceTaskState(state, complete)).status).toBe("done");
+		expect(task(state).evidence.map((item) => item.id)).toEqual([
+			"E1",
+			"FAIL",
+			"E2",
+			"E3",
+			"E4",
+			"E5",
+		]);
+	});
+
+	it("preserves blocked authority and decisions when inserting repairs", () => {
+		const before = replayTaskEvents([
+			...gated().events,
+			{
+				...base,
+				type: "task.decision_recorded",
+				decision: {
+					id: "D1",
+					question: "Publish now?",
+					decision: "Wait for approval",
+					decidedBy: "user",
+				},
+			},
+			{
+				...base,
+				type: "task.updated",
+				status: "blocked",
+				blocker: {
+					reason: "Publication approval pending",
+					blockedBy: "user",
+					neededToUnblock: "Owner approves publication",
+				},
+			},
+		]);
+		const after = reduceTaskState(before, insertion);
+		expect(task(after).status).toBe("blocked");
+		expect(task(after).blockers).toEqual(task(before).blockers);
+		expect(task(after).decisions).toEqual(task(before).decisions);
+		expect(buildTaskResume(after).recommendedTool).toBe("task_update");
+		expect(() => reduceTaskState(after, complete)).toThrow();
+	});
+
+	it("replays insertion events, snapshots and pre-insertion branches with identical guidance", () => {
+		const before = gated();
+		const after = reduceTaskState(before, insertion);
+		const entries = after.events.map((data) => ({
+			type: "custom",
+			customType: TASK_EVENT_CUSTOM_TYPE,
+			data: JSON.parse(JSON.stringify(data)),
+		}));
+		const replayed = replayBranchEntries(entries);
+		expect(replayed.malformedEvents).toEqual([]);
+		expect(replayed.state).toEqual(after);
+		const restored = replayTaskEvents([
+			{
+				...base,
+				type: "task.snapshot",
+				state: snapshotState(after),
+				resume: buildTaskResume(after),
+				reason: "compaction",
+			},
+		]);
+		expect(buildTaskResume(restored)).toEqual(buildTaskResume(after));
+		expect(restored.tasks).toEqual(after.tasks);
+		expect(replayBranchEntries(entries.slice(0, -1)).state).toEqual(before);
+	});
+
+	it.each([
+		[
+			"generated-contract",
+			"Repair generated cursor contract",
+			"Generated cursor contract matches runtime",
+		],
+		[
+			"failed-hook",
+			"Repair cursor commit-hook fixture",
+			"Cursor commit hook accepts verified fixture",
+		],
+	])(
+		"sanitized %s sequence uses one planning mutation with equivalent final obligations",
+		(_scenario, text, expectedOutput) => {
+			const before = gated();
+			const repair = {
+				...step,
+				text,
+				expectedOutput,
+				criterionIds: ["T1-AC1"],
+			};
+			const oneCall = reduceTaskState(before, {
+				...insertion,
+				planSteps: [repair],
+			});
+			const appended = reduceTaskState(before, {
+				...rework,
+				planSteps: [repair],
+			});
+			const twoCalls = reduceTaskState(appended, {
+				...base,
+				type: "task.replanned",
+				reason: "Move appended repair ahead of review gate",
+				stepIds: ["T1-S2", "T1-S4"],
+				planSteps: [repair, { ...step, text: "Review cursor guard" }],
+			});
+			expect(oneCall.events.length - before.events.length).toBe(1);
+			expect(twoCalls.events.length - before.events.length).toBe(2);
+			expect(task(oneCall).acceptanceCriteria).toEqual(
+				task(twoCalls).acceptanceCriteria,
+			);
+			expect(task(oneCall).evidence).toEqual(task(twoCalls).evidence);
+			const obligations = (state: TaskState) =>
+				task(state)
+					.planSteps.filter(
+						(item) => item.status !== "done" && item.status !== "skipped",
+					)
+					.map(
+						({
+							text,
+							expectedOutput,
+							criterionIds,
+							evidenceRequired,
+							allowedActions,
+							decompositionStatus,
+							granularityCheck,
+						}) => ({
+							text,
+							expectedOutput,
+							criterionIds,
+							evidenceRequired,
+							allowedActions,
+							decompositionStatus,
+							granularityCheck,
+						}),
+					);
+			expect(obligations(oneCall)).toEqual(obligations(twoCalls));
+			expect(
+				task(oneCall).planSteps.filter((item) => item.status === "skipped"),
+			).toHaveLength(0);
+			expect(
+				task(twoCalls).planSteps.filter((item) => item.status === "skipped"),
+			).toHaveLength(2);
+		},
+	);
+});
+
 describe("exhausted-plan rework guidance", () => {
 	it("permits completion or explicit review remediation when verification is satisfied", () => {
 		assertGuidance(exhausted(), "task_complete");

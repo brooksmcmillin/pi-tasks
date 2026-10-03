@@ -82,21 +82,21 @@ This project must align with the commercial-quality bar established by `pi-knowl
 ## Agent Planning Discipline
 
 - Plan deliverables, not support reads or inspection. Provide structured `plan_steps` with expected output, bounded actions, and truthful atomicity declarations.
-- Reconcile malformed or duplicate steps before implementation. `task_rework` only appends review remediation; it never replaces the current plan. Use `task_replan` when available for explicit replacement, then follow the corrected resume contract.
+- Reconcile malformed or duplicate steps before implementation. `task_rework` adds review remediation without replacing prior steps; optional `before_step_id` inserts repairs before a named open gate, otherwise it appends. Use `task_replan` when available for explicit replacement, then follow the corrected resume contract.
 - If plan repair is unavailable, report the tracking blocker rather than ignoring the execution contract. Cancellation means the objective was withdrawn, not that completed work is inconvenient to reconcile; retain evidence and repair the tracking instead.
 - Correct missing arguments on the rejected tool call before retrying. A missing scope `activity` or cancellation `reason` is not solved by unrelated decomposition.
 
 ## Review Rework Contract
 
 - Review findings within the original objective may use `task_rework` without user permission solely to extend the plan; genuine scope or architecture decisions still require explicit `task_decision` records.
-- Persist `task.reworked` with a non-empty findings reason and validated, evidence-required remediation steps. Append steps with collision-free root IDs; never discard or rewrite prior steps, evidence, decisions, blockers, warnings, or events.
-- Rework may reopen done tasks, but not cancelled tasks, and must not displace another active task. Existing open work remains ordered before appended steps. Unresolved blockers stay blocked.
+- Persist `task.reworked` with a non-empty findings reason and validated, evidence-required remediation steps. Use collision-free root IDs independent of insertion position; never discard prior steps, evidence, decisions, blockers, warnings, or events.
+- Rework may reopen done tasks, but not cancelled tasks, and must not displace another active task. Without `before_step_id`, existing open work remains ahead of appended repairs. With it, insert repairs before that existing open step; reject nonexistent, done, or skipped targets atomically. Preserve the target's ID, evidence, criteria, and verification obligations, and retain earlier open work in order. If repairs become current, return the displaced active gate to pending. Unresolved blockers stay blocked.
 - Reset affected criteria to pending, require fresh passing acceptance evidence after their rework evidence baseline, clear completion metadata/confidence, and recalculate progress. Retain old evidence links; neither relinking old proof nor rework itself supersedes failing acceptance evidence.
 - `task_next`, `task_resume`, and `task_focus` must expose the explicit rework path for review findings, including exhausted plans with verification gaps. The recommended tool must be in nextAllowedActions and must not be blocked. Completion recommendations are conditional on verified implementation, not an instruction to ignore new findings.
 
 ## Planning Repair Contract
 
-- `task_replan` records `task.replanned` to replace explicitly named open steps with non-empty, validated replacements covering all retired criterion links. It is not review remediation; `task_rework` remains append-only.
+- `task_replan` records `task.replanned` to replace explicitly named open steps with non-empty, validated replacements covering all retired criterion links. It is not review remediation; `task_rework` adds findings-driven repairs, optionally before an open gate, without retiring existing steps.
 - Retain retired steps, IDs, evidence links, decisions, blockers, warnings, and events. Mark retired entries skipped with `supersededBy`; do not count them as completed deliverables or demand execution evidence for the retired planning entry.
 - Replacement steps require ordinary verification. Preserve criterion status, evidence baselines, and failed-evidence gates; repair does not complete work or resolve blockers. Reject terminal tasks and displacement of another active task.
 - Apply tightened inspection-mechanic authoring validation before persistence across creation, decomposition, rework, and replan. Legacy inspection events must remain replayable so they can be repaired.

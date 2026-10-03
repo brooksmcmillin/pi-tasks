@@ -638,6 +638,45 @@ describe("native Pi dynamic task tools", () => {
 			);
 			expect(repaired.isError).not.toBe(true);
 			expect(repaired.content[0]?.text).toContain("T1-S2");
+			const beforeRework = first.sessionManager.getEntries().at(-1);
+			assert.ok(beforeRework);
+			const reworked = await requireTool(first.session, "task_rework").execute(
+				"native-rework",
+				{
+					task_id: "T1",
+					reason: "Review found a generated contract mismatch",
+					before_step_id: "T1-S2",
+					plan_steps: validPlan().plan_steps,
+				},
+				undefined,
+				undefined,
+			);
+			expect(reworked.isError).not.toBe(true);
+			expect(reworked.content[0]?.text).toContain("T1-S3");
+			const afterRework = first.sessionManager.getEntries().at(-1);
+			assert.ok(afterRework);
+			await first.session.navigateTree(beforeRework.id, { summarize: false });
+			expect(
+				(
+					await requireTool(first.session, "task_resume").execute(
+						"before-rework",
+						{},
+						undefined,
+						undefined,
+					)
+				).content[0]?.text,
+			).toContain("T1-S2");
+			await first.session.navigateTree(afterRework.id, { summarize: false });
+			expect(
+				(
+					await requireTool(first.session, "task_resume").execute(
+						"after-rework",
+						{},
+						undefined,
+						undefined,
+					)
+				).content[0]?.text,
+			).toContain("T1-S3");
 
 			const sessionFile = first.sessionManager.getSessionFile();
 			assert.ok(sessionFile);
@@ -653,7 +692,7 @@ describe("native Pi dynamic task tools", () => {
 					restored.session,
 					"task_resume",
 				).execute("resume", {}, undefined, undefined);
-				expect(resumed.content[0]?.text).toContain("T1-S2");
+				expect(resumed.content[0]?.text).toContain("T1-S3");
 				expect(restored.events).toContainEqual(
 					expect.objectContaining({
 						reason: "session_start",

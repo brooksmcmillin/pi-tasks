@@ -295,9 +295,21 @@ function reworkTask(state, event) {
         Object.values(state.tasks).some((other) => other.id !== task.id && other.status === "active")) {
         throw new TaskTransitionError("Rework cannot displace another active task; select the intended task with task_update first");
     }
+    let insertionIndex = task.planSteps.length;
+    if (event.beforeStepId !== undefined) {
+        if (typeof event.beforeStepId !== "string" || !event.beforeStepId.trim()) {
+            throw new TaskTransitionError("Rework beforeStepId must name an open plan step");
+        }
+        insertionIndex = task.planSteps.findIndex((step) => step.id === event.beforeStepId);
+        const target = task.planSteps[insertionIndex];
+        if (!target || target.status === "done" || target.status === "skipped") {
+            throw new TaskTransitionError(`Rework target ${event.beforeStepId} must be an open plan step`);
+        }
+    }
+    const previousCurrent = getCurrentOpenStep(task);
     validateReworkSteps(event.planSteps);
     const nextStepNumber = nextRootStepNumber(task);
-    const steps = createPlanSteps(task.id, event.planSteps, undefined, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, !getCurrentOpenStep(task), { startIndex: nextStepNumber });
+    const steps = createPlanSteps(task.id, event.planSteps, undefined, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, !previousCurrent, { startIndex: nextStepNumber });
     const affectedIds = new Set(steps.flatMap((step) => step.criterionIds));
     for (const criterion of task.acceptanceCriteria) {
         if (!affectedIds.has(criterion.id))
@@ -305,7 +317,7 @@ function reworkTask(state, event) {
         criterion.status = "pending";
         criterion.evidenceBaseline = task.evidence.length;
     }
-    task.planSteps.push(...steps);
+    task.planSteps.splice(insertionIndex, 0, ...steps);
     task.status =
         task.status === "blocked" ||
             task.blockers.some((blocker) => !blocker.resolvedAt)
@@ -316,6 +328,11 @@ function reworkTask(state, event) {
     delete task.completedAt;
     delete task.completionSummary;
     const current = getCurrentOpenStep(task);
+    if (previousCurrent &&
+        previousCurrent !== current &&
+        previousCurrent.status === "active") {
+        previousCurrent.status = "pending";
+    }
     if (current) {
         current.status = "active";
         current.startedAt ??= event.createdAt;

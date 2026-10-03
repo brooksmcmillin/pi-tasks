@@ -101,13 +101,14 @@ interface TaskReworkParams extends Record<string, unknown> {
 	task_id: string;
 	reason: string;
 	plan_steps: TaskStepInput[];
+	before_step_id?: string;
 }
 
 const PLAN_REPAIR_GUIDANCE =
-	"task_rework is append-only review remediation, not plan replacement. Reconcile a malformed or duplicate plan before implementation: use task_replan when available to explicitly replace mistaken open steps, then resume the corrected contract. If repair is unavailable, report the tracking blocker; do not bypass the contract or cancel completed work merely to clear tracking warnings.";
+	"task_rework adds review remediation without replacing prior steps; optionally use before_step_id to insert repairs before an open gate. Reconcile a malformed or duplicate plan before implementation: use task_replan when available to explicitly replace mistaken open steps, then resume the corrected contract. If repair is unavailable, report the tracking blocker; do not bypass the contract or cancel completed work merely to clear tracking warnings.";
 
 const REWORK_GUIDANCE =
-	"Use task_rework when review discovers missing or defective work within the original objective, even if no open step remains or task_complete is recommended. Record findings and append remediation steps without asking permission for in-scope repairs; record genuine scope or architecture decisions with task_decision before proceeding.";
+	"Use task_rework when review discovers missing or defective work within the original objective, even if no open step remains or task_complete is recommended. Record findings and add remediation steps without asking permission for in-scope repairs; use before_step_id to insert them before a named open review/publication gate, or omit it to append. Record genuine scope or architecture decisions with task_decision before proceeding.";
 
 interface TaskListParams extends Record<string, unknown> {
 	status?: TaskStatus;
@@ -654,7 +655,7 @@ export function registerTaskTools(
 		name: "task_rework",
 		label: "Task Rework",
 		description:
-			"Append-only review remediation: record findings and add steps after existing work without discarding evidence or history. This does not replace a malformed plan; use task_replan when available for that.",
+			"Review remediation: record findings and add steps without discarding evidence or history. Optionally name an open before_step_id to insert repairs before that gate; otherwise append after existing work. This does not replace a malformed plan; use task_replan when available for that.",
 		promptSnippet:
 			"Extend or reopen a pi-tasks task for review-discovered remediation",
 		promptGuidelines: [
@@ -668,11 +669,15 @@ export function registerTaskTools(
 			task_id: Type.String(),
 			reason: Type.String({ minLength: 1 }),
 			plan_steps: Type.Array(planStepSchema(), { minItems: 1 }),
+			before_step_id: Type.Optional(Type.String({ minLength: 1 })),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
 			const event = baseEvent("task.reworked", params.task_id, ctx, {
 				reason: params.reason,
 				planSteps: params.plan_steps,
+				...(params.before_step_id !== undefined
+					? { beforeStepId: params.before_step_id }
+					: {}),
 			});
 			return appendAndReport(
 				pi,

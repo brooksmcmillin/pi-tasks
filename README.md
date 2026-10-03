@@ -113,7 +113,7 @@ metadata.
 | `task_checkpoint` | Save a durable snapshot for compaction resilience |
 | `task_granularity_check` | Verify a step is truly atomic |
 | `task_decompose` | Break non-atomic steps into child steps |
-| `task_rework` | Record review findings and append remediation steps, including reopening done tasks |
+| `task_rework` | Record findings and add remediation, optionally before an open gate, including reopening done tasks |
 | `task_replan` | Replace explicitly named mistaken open steps without discarding history |
 | `task_list` | List tasks with optional filtering |
 | `task_update` | Advance steps, record activity, flag scope drift |
@@ -123,10 +123,43 @@ metadata.
 | `task_decision` | Record explicit user decisions |
 | `task_complete` | Close a task (only if all gates pass) |
 
+## Insert review remediation before a gate
+
+Use `task_rework` for findings within the existing objective. Set optional
+`before_step_id` to insert ordered repairs before a named open review/publication
+step in one operation. Omit it to retain ordinary append behavior.
+
+```json
+{
+  "task_id": "T1",
+  "reason": "Review found a generated contract mismatch",
+  "before_step_id": "T1-S2",
+  "plan_steps": [{
+    "text": "Repair generated cursor contract",
+    "expectedOutput": "Generated cursor contract matches runtime",
+    "allowedActions": ["edit"],
+    "decompositionStatus": "needs_breakdown"
+  }]
+}
+```
+
+The original gate keeps its ID and verification obligations. Earlier open work
+stays earlier; when repairs become current, the old active gate becomes pending.
+New IDs follow the highest root ID, not their position. Nonexistent, completed,
+skipped targets and invalid repairs are rejected without persisting any change.
+History, evidence, decisions and blockers remain. Affected criteria need fresh
+passing acceptance evidence; failures still require explicit supersession.
+
+The sanitized generated-contract and failed-hook fixtures in
+`test/unit/rework.test.ts` compare one insertion mutation with the previous
+append-plus-replan sequence (two mutations), asserting equivalent remaining
+obligations without retaining private transcripts. This is a local operation-count
+benchmark, not a runtime latency or production measurement.
+
 ## Repairing a mistaken plan
 
-Use `task_replan` for a planning mistake, not `task_rework` (which only appends
-review remediation). For example, replace an inspection-only step or duplicate
+Use `task_replan` for a planning mistake, not `task_rework` (which adds
+findings-driven remediation without replacing existing steps). For example, replace an inspection-only step or duplicate
 open steps with the actual deliverable:
 
 ```json
