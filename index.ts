@@ -106,7 +106,6 @@ export default function (pi: ExtensionAPI) {
 		if (
 			event.outcome !== "completed" ||
 			event.continue ||
-			!event.context?.canContinue ||
 			event.context.pendingMessages.length > 0 ||
 			ctx.signal?.aborted ||
 			ctx.hasPendingMessages?.() ||

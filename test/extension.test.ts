@@ -188,6 +188,7 @@ async function createNativeSession(
 		tools?: string[];
 		excludeTools?: string[];
 		foreignTaskNotes?: boolean;
+		queuedSettlement?: boolean;
 		noTools?: "all" | "builtin";
 	} = {},
 ) {
@@ -203,6 +204,21 @@ async function createNativeSession(
 	]);
 	const events: TaskStateEvent[] = [];
 	const extensionPaths = [join(taskRoot, "index.ts")];
+	if (options.queuedSettlement) {
+		const extensionPath = join(base, "queued-settlement.js");
+		await writeFile(
+			extensionPath,
+			`export default function(pi) {
+			let sent = false;
+			pi.on("agent_before_settle", () => {
+				if (sent) return;
+				sent = true;
+				return { entries: [{ type: "custom_message", customType: "native-review-result", content: "Independent review is ready", display: false }], continue: true };
+			});
+		}`,
+		);
+		extensionPaths.unshift(extensionPath);
+	}
 	if (options.foreignTaskNotes) {
 		const extensionPath = join(base, "foreign-task-notes.js");
 		await writeFile(
@@ -246,8 +262,173 @@ async function createNativeSession(
 		...(options.noTools ? { noTools: options.noTools } : {}),
 	});
 	await result.session.bindExtensions(result.extensionsResult);
-	return { ...result, base, cwd, sessionDir, events, sessionManager };
+	return { ...result, base, cwd, sessionDir, events, sessionManager, eventBus };
 }
+
+describe("native Pi settlement advisories", () => {
+	it.each(["actionable", "async", "queued", "completed"])(
+		"handles %s work through the native settlement boundary",
+		async (scenario) => {
+			const h = await createNativeSession({
+				queuedSettlement: scenario === "queued",
+			});
+			try {
+				const provider = "openai";
+				await h.session.modelRuntime.setRuntimeApiKey(provider, "test-only");
+				await h.session.setModel({
+					id: "scripted",
+					name: "Scripted settlement",
+					api: "openai-responses",
+					provider,
+					baseUrl: "http://unused.invalid",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 100000,
+					maxTokens: 1000,
+				});
+				type Call = { name: string; arguments: Record<string, unknown> };
+				const verify: Call = {
+					name: "task_verify_step",
+					arguments: {
+						task_id: "T1",
+						step_id: "T1-S1",
+						type: "review",
+						level: "static_read",
+						summary: "Independent review passed",
+						references: ["native-review.json"],
+						quality: {
+							source: "scripted reviewer",
+							reproducible: true,
+							verifier: "tool",
+							command: "inspect native task",
+							artifactRefs: ["native-review.json"],
+							observedOutput: "No findings",
+						},
+					},
+				};
+				const complete: Call = {
+					name: "task_complete",
+					arguments: {
+						task_id: "T1",
+						summary: "Native task verified",
+						evidence_ids: ["E1"],
+					},
+				};
+				const replies: Call[][] = [
+					[{ name: "task_plan", arguments: validPlan() }],
+				];
+				if (scenario === "completed") replies.push([verify], [complete], []);
+				else if (scenario === "queued")
+					replies.push([], [verify], [complete], []);
+				else replies.push([]);
+				if (scenario === "actionable") replies.push([]);
+				let requests = 0;
+				h.session.agent.streamFunction = () => {
+					const calls = replies.shift();
+					if (!calls) throw new Error("Unexpected extra model request");
+					requests += 1;
+					const message = {
+						role: "assistant",
+						content: calls.length
+							? calls.map((call, index) => ({
+									type: "toolCall",
+									id: `native-${requests}-${index}`,
+									...call,
+								}))
+							: [{ type: "text", text: "Work settled" }],
+						api: "openai-responses",
+						provider,
+						model: "scripted",
+						stopReason: calls.length ? "toolUse" : "stop",
+						timestamp: Date.now(),
+						usage: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							totalTokens: 0,
+							cost: {
+								input: 0,
+								output: 0,
+								cacheRead: 0,
+								cacheWrite: 0,
+								total: 0,
+							},
+						},
+					};
+					return {
+						async *[Symbol.asyncIterator]() {
+							yield { type: "start", partial: message };
+							yield { type: "done", reason: message.stopReason, message };
+						},
+						result: async () => message,
+					};
+				};
+				const sessionId = h.sessionManager.getSessionId();
+				if (scenario === "async")
+					h.eventBus.emit("subagent:async-started", {
+						id: "native-review",
+						sessionId,
+					});
+				await h.session.prompt("Run scripted task execution");
+				const advisories = () =>
+					h.sessionManager
+						.getBranch()
+						.filter(
+							(entry: { type: string; customType?: string }) =>
+								entry.type === "custom_message" &&
+								entry.customType === "pi-tasks:yield-check",
+						);
+				expect(advisories()).toHaveLength(scenario === "actionable" ? 1 : 0);
+				expect(requests).toBe(
+					scenario === "actionable"
+						? 3
+						: scenario === "completed"
+							? 4
+							: scenario === "queued"
+								? 5
+								: 2,
+				);
+				expect(replies).toHaveLength(0);
+				expect(
+					h.session.messages.filter(
+						(message: { role: string; isError?: boolean }) =>
+							message.role === "toolResult" && message.isError,
+					),
+				).toHaveLength(0);
+				if (scenario === "async") {
+					const update: Call = {
+						name: "task_update",
+						arguments: {
+							task_id: "T1",
+							progress: 40,
+							next_action: "Inspect independent review",
+						},
+					};
+					h.eventBus.emit("subagent:async-complete", {
+						runId: "native-review",
+						sessionId: "foreign",
+					});
+					replies.push([update], []);
+					await h.session.prompt("Continue while review is still running");
+					expect(advisories()).toHaveLength(0);
+					h.eventBus.emit("subagent:async-complete", {
+						runId: "native-review",
+						sessionId,
+					});
+					replies.push([update], [], []);
+					await h.session.prompt("Continue after review completion");
+					expect(advisories()).toHaveLength(1);
+					expect(requests).toBe(7);
+					expect(replies).toHaveLength(0);
+				}
+			} finally {
+				h.session.dispose();
+			}
+		},
+	);
+});
 
 describe("native Pi dynamic task tools", () => {
 	it("dogfoods cohesive batch persistence, task command, resume and branch isolation", async () => {

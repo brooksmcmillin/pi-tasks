@@ -110,7 +110,7 @@ function harness() {
 		const result = (await emit("agent_before_settle", {
 			outcome: "completed",
 			continue: false,
-			context: { canContinue: true, pendingMessages: [] },
+			context: { canContinue: false, pendingMessages: [] },
 			...overrides,
 		} satisfies SettlementEvent)) as SettlementResult | undefined;
 		if (result) messages.push(...result.entries);
@@ -402,7 +402,6 @@ describe("extension lifecycle integration", () => {
 	it.each([
 		{ continue: true },
 		{ context: { canContinue: true, pendingMessages: [{}] } },
-		{ context: { canContinue: false, pendingMessages: [] } },
 	])("defers to existing boundary work: %j", async (boundary) => {
 		const h = harness();
 		await h.emit("session_start");

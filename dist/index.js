@@ -73,7 +73,6 @@ export default function (pi) {
     pi.on("agent_before_settle", (event, ctx) => {
         if (event.outcome !== "completed" ||
             event.continue ||
-            !event.context?.canContinue ||
             event.context.pendingMessages.length > 0 ||
             ctx.signal?.aborted ||
             ctx.hasPendingMessages?.() ||
