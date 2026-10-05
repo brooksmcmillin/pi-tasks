@@ -243,11 +243,91 @@ describe("registered task tools", () => {
 			});
 		},
 	);
+	it("links initial plan steps to selected acceptance criteria by 1-based position", async () => {
+		const { tools, ctx, store, entries } = createHarness();
+		const result = await execute(
+			requireTool(tools, "task_plan"),
+			{
+				title: "Selective criterion links",
+				objective: "Create one plan with narrow criterion coverage",
+				acceptance_criteria: ["Implementation passes", "Docs are updated"],
+				plan_steps: [
+					{
+						text: "Verify implementation",
+						expectedOutput: "Implementation verification passes",
+						allowedActions: ["bash"],
+						criterionRefs: [1],
+					},
+					{
+						text: "Verify documentation",
+						expectedOutput: "Documentation check passes",
+						allowedActions: ["bash"],
+						criterionRefs: [2],
+					},
+					{
+						text: "Verify the combined plan",
+						expectedOutput: "Both criteria are covered",
+						allowedActions: ["bash"],
+					},
+				],
+			},
+			ctx,
+		);
+		expect(result.isError).not.toBe(true);
+		expect(
+			store.getState().tasks.T1?.planSteps.map((step) => step.criterionIds),
+		).toEqual([["T1-AC1"], ["T1-AC2"], ["T1-AC1", "T1-AC2"]]);
+		expect(entries[0]).toMatchObject({
+			type: "task.created",
+			planSteps: [{ criterionRefs: [1] }, { criterionRefs: [2] }, {}],
+		});
+		const replayed = createTaskRuntimeStore();
+		replayed.replay(
+			entries.map((data, index) => ({
+				type: "custom",
+				customType: TASK_EVENT_CUSTOM_TYPE,
+				id: `entry-${index}`,
+				data,
+			})),
+		);
+		expect(
+			replayed.getState().tasks.T1?.planSteps.map((step) => step.criterionIds),
+		).toEqual([["T1-AC1"], ["T1-AC2"], ["T1-AC1", "T1-AC2"]]);
+	});
+
+	it("rejects invalid creation criterion references without persisting", async () => {
+		const { tools, ctx, store, entries } = createHarness();
+		const result = await execute(
+			requireTool(tools, "task_plan"),
+			{
+				title: "Invalid criterion reference",
+				objective: "Reject an unknown criterion position",
+				acceptance_criteria: ["One criterion"],
+				plan_steps: [
+					{
+						text: "Check criterion mapping",
+						expectedOutput: "Invalid reference is rejected",
+						allowedActions: ["bash"],
+						criterionRefs: [2],
+					},
+				],
+			},
+			ctx,
+		);
+		expect(result.isError).toBe(true);
+		expect(result.content[0]?.text).toContain("1-based positions from 1 to 1");
+		expect(entries).toHaveLength(0);
+		expect(store.getState().tasks).toEqual({});
+	});
+
 	it("requires structured plans with shared bounded step schemas", () => {
 		const { tools } = createHarness();
 		const plan = requireTool(tools, "task_plan").parameters;
 		expect(plan.required).toContain("plan_steps");
 		expect(plan.properties).not.toHaveProperty("initial_steps");
+		expect(
+			plan.properties.plan_steps.items.properties.criterionRefs,
+		).toMatchObject({ items: { minimum: 1 }, minItems: 1 });
 		for (const [name, field, count] of [
 			["task_plan", "plan_steps", 1],
 			["task_decompose", "child_steps", 2],

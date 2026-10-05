@@ -121,6 +121,7 @@ export interface TaskStepInput {
 	text: string;
 	expectedOutput: string;
 	criterionIds?: string[];
+	criterionRefs?: number[];
 	evidenceRequired?: boolean;
 	allowedActions?: string[];
 	decompositionStatus?: TaskStepGranularityStatus;

@@ -974,7 +974,27 @@ function createPlanSteps(
 		if (mechanicKind) {
 			throw new TaskTransitionError(mechanicStepMessage(mechanicKind, text));
 		}
-		const linkedCriteria = unique(step.criterionIds ?? criterionIds);
+		if (step.criterionRefs !== undefined && step.criterionIds !== undefined) {
+			throw new TaskTransitionError(
+				`Plan step ${index + 1} must use criterionRefs or criterionIds, not both`,
+			);
+		}
+		const linkedCriteria = unique(
+			step.criterionRefs === undefined
+				? (step.criterionIds ?? criterionIds)
+				: step.criterionRefs.map((reference) => {
+						if (
+							!Number.isInteger(reference) ||
+							reference < 1 ||
+							reference > criterionIds.length
+						) {
+							throw new TaskTransitionError(
+								`Plan step ${index + 1} criterionRefs must be 1-based positions from 1 to ${criterionIds.length}; received ${reference}`,
+							);
+						}
+						return criterionIds[reference - 1] as string;
+					}),
+		);
 		for (const criterionId of linkedCriteria) {
 			if (!criterionIds.includes(criterionId)) {
 				throw new TaskTransitionError(

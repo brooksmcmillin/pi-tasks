@@ -364,7 +364,7 @@ export function registerTaskTools(
 		name: "task_plan",
 		label: "Task Plan",
 		description:
-			"Create a structured pi-tasks task with objective and acceptance criteria.",
+			"Create a structured pi-tasks task with objective and acceptance criteria. For selective initial step links, use criterionRefs with 1-based acceptance_criteria positions; omitting it links all criteria for backward compatibility.",
 		promptSnippet:
 			"Create a pi-tasks execution contract before non-trivial implementation work",
 		promptGuidelines: [
@@ -373,7 +373,7 @@ export function registerTaskTools(
 			REWORK_GUIDANCE,
 			PLAN_REPAIR_GUIDANCE,
 			"Constrain the plan to the user's stated objective; do not add speculative scope, gates, or abstractions.",
-			"Use concrete acceptance criteria and omit unknown generated criterion IDs during new task creation.",
+			"Use concrete acceptance criteria. During initial task_plan creation, use criterionRefs with 1-based acceptance_criteria positions to selectively link a step without guessing generated IDs; omit it to retain the legacy all-criteria default.",
 			"Mark atomic only for one observable outcome with bounded work and verification, not unrelated deliverables. For cohesive edit-plus-test work, set granularityCheck.unit=deliverable, boundedScope and verificationPlan, with all flags true; legacy one-action/one-method flags then describe one bounded implementation cycle and verification procedure.",
 			"Activate only one task unless the user explicitly asks for parallel work.",
 		],
@@ -385,7 +385,7 @@ export function registerTaskTools(
 			acceptance_criteria: Type.Array(
 				Type.String({ description: "Concrete acceptance criterion" }),
 			),
-			plan_steps: Type.Array(planStepSchema(), { minItems: 1 }),
+			plan_steps: Type.Array(planStepSchema(true), { minItems: 1 }),
 			priority: Type.Optional(Type.Enum(PRIORITIES)),
 			tags: Type.Optional(Type.Array(Type.String())),
 			activate: Type.Optional(
@@ -1339,15 +1339,26 @@ function evidenceQualitySchema() {
 	});
 }
 
-function planStepSchema() {
+function planStepSchema(allowCreationReferences = false) {
 	return Type.Object({
 		text: Type.String({ minLength: 1 }),
 		expectedOutput: Type.String({ minLength: 1 }),
+		...(allowCreationReferences
+			? {
+					criterionRefs: Type.Optional(
+						Type.Array(Type.Number({ integer: true, minimum: 1 }), {
+							minItems: 1,
+							description:
+								"1-based positions in acceptance_criteria for selective links during initial task_plan creation.",
+						}),
+					),
+				}
+			: {}),
 		criterionIds: Type.Optional(
 			Type.Array(
 				Type.String({
 					description:
-						"Known criterion IDs from task_resume. Omit during creation to auto-link all criteria.",
+						"Known persisted criterion IDs for later planning operations. For selective initial task_plan links, use criterionRefs; omitting both fields links all criteria.",
 				}),
 				{ minItems: 1 },
 			),
