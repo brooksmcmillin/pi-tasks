@@ -19,7 +19,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Install native Pi SDK
-        run: npm install --prefix "$RUNNER_TEMP/pi-sdk" @earendil-works/pi-coding-agent@0.85.1
+        run: npm install --prefix "$RUNNER_TEMP/pi-sdk" @earendil-works/pi-coding-agent@1.0.4
       - run: npm run release:check
         env:
           PI_SDK_ROOT: ${{ runner.temp }}/pi-sdk/node_modules/@earendil-works/pi-coding-agent
