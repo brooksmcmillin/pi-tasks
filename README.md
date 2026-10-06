@@ -76,6 +76,15 @@ task_verify_step → atomically attach passing proof and advance
 task_complete → only succeeds when all gates pass
 ```
 
+`task_plan` creates criterion IDs only after receiving the call. To link initial
+steps selectively, use `criterionRefs` as 1-based positions in
+`acceptance_criteria`; omitted references preserve the default of linking all
+criteria. For example, with two criteria, a step using `criterionRefs: [2]`
+links to the second criterion without predicting its generated ID. This
+creation-only reference is resolved to persisted criterion IDs atomically. The
+sanitized operation-count example can be replayed with
+`node --experimental-strip-types scripts/criterion-link-replay.ts`.
+
 Fresh sessions expose only `task_plan` and `task_resume`; after a persisted task is created or restored, pi-tasks activates the available task controls. Explicit Pi tool allowlists, exclusions, and `noTools` remain ceilings, and unrelated active tools are preserved. The user gets `/tasks`. Everything persists in Pi's session tree.
 
 ### Oh My Pi support

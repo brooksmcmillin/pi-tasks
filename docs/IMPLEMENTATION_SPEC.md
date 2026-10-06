@@ -281,7 +281,7 @@ Rules:
 
 - `initial_steps` become ordered task steps with IDs such as `T1-S1`.
 - Structured `plan_steps` should provide expected output, linked criteria, evidence requirement, and allowed actions.
-- During new task creation, agents should omit `plan_steps.criterionIds` unless generated criterion IDs are already known. Omitted criterion IDs link the step to all task criteria after IDs such as `T1-AC1` are generated.
+- During initial `task_plan` creation, use `criterionRefs` with 1-based positions in `acceptance_criteria` for selective links without predicting generated IDs. Omit both reference fields to preserve the legacy behavior of linking all criteria; `criterionIds` remains for known persisted IDs in later planning operations.
 - Structured `plan_steps` should also include a granularity check. A step is executable only when it is `atomic`.
 - Atomic steps must not bundle obvious sequential work. The quality gate rejects compound wording such as `and`, `then`, `also`, `並且`, `然後`, `接著`, `以及`, or `同時` in atomic step text, expected output, or allowed actions.
 - The first step is active when the task is activated.
