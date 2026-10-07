@@ -288,9 +288,17 @@ name the rejected entry. Fix that entry and resubmit the entire batch.
 Every quality field is required, including a nonempty `artifactRefs` array for
 every evidence type. Exact command or verification-action references are
 accepted. A missing artifact does not
-require rerunning successful verification: recovery prints corrected evidence
-parameters using the existing references. Save long commands and output in an
-artifact, link it, and use a short reference in `command` (maximum 300 characters).
+require rerunning successful verification: recovery fills artifact references
+from the existing references. Evidence recovery examples are **unvalidated retry
+templates**, marked `retry_example_status: "requires_edit"` with `required_edits`
+naming the unresolved rejection. Fix those fields and any placeholders before
+retrying; copied values are not a claim of validity. For an overlong summary,
+write a concise observed result using the existing artifacts. For diagnostic
+supersession, explicitly remove the diagnostic target (and remove `reason` if
+no supersession targets remain); retain any failing acceptance targets and their
+reason. Do not invent observations or change diagnostic records into acceptance.
+Save long commands and output in an artifact, link it, and use a short reference
+in `command` (maximum 300 characters).
 Failed or diagnostic records remain visible; neither can verify a step.
 
 ## Review remediation

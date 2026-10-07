@@ -965,7 +965,9 @@ function appendAndReport(pi, store, ctx, event, success, onPersisted) {
                 ...(recovery.retry_example
                     ? [
                         "",
-                        "Corrected evidence params (fill artifact placeholders before retrying; do not rerun successful verification):",
+                        "Unvalidated evidence retry template — requires edit before retrying:",
+                        `Resolve: ${recovery.reason}`,
+                        "Fix the rejected fields and fill placeholders using existing observations/artifacts; do not rerun successful verification or invent evidence.",
                         "```json",
                         JSON.stringify(recovery.retry_example, null, 2),
                         "```",
@@ -1043,7 +1045,13 @@ function buildRejectionRecovery(error, state, event) {
                     }
                     : (resume.minimumParams ?? {})),
         do_not_retry_same_call: true,
-        ...(retryExample ? { retry_example: retryExample } : {}),
+        ...(retryExample
+            ? {
+                retry_example: retryExample,
+                retry_example_status: "requires_edit",
+                required_edits: [errorText(error)],
+            }
+            : {}),
         resume,
     };
 }
