@@ -125,7 +125,147 @@ function assertSchema(schema: Record<string, unknown>, value: unknown): void {
 	}
 }
 
+function required<T>(value: T | undefined): T {
+	if (value === undefined) throw new Error("Missing test fixture value");
+	return value;
+}
+
 describe("bounded atomic evidence batch", () => {
+	it.each(["task_evidence", "task_verify_step", "task_evidence_batch"])(
+		"requires an explicit summary edit in %s recovery",
+		async (name) => {
+			const h = await harness();
+			const long = entry("Measured parser result. ".repeat(24));
+			const params =
+				name === "task_evidence_batch"
+					? {
+							task_id: "T1",
+							entries: [entry(), { ...verification(), summary: long.summary }],
+						}
+					: name === "task_verify_step"
+						? { task_id: "T1", ...verification(), summary: long.summary }
+						: { task_id: "T1", ...long };
+			const before = structuredClone(h.store.getState());
+			const publications = h.publications.length;
+			const rejected = await h.call(name, params);
+			expect(rejected.isError).toBe(true);
+			expect(h.store.getState()).toEqual(before);
+			expect(h.events).toHaveLength(1);
+			expect(h.publications).toHaveLength(publications);
+			const recovery = rejected.details as {
+				retry_example: Record<string, unknown>;
+				retry_example_status: string;
+				required_edits: string[];
+			};
+			expect(recovery.retry_example_status).toBe("requires_edit");
+			expect(recovery.required_edits.join(" ")).toContain(
+				"summary exceeds 500 characters",
+			);
+			expect(rejected.content[0]?.text).toContain(
+				"Unvalidated evidence retry template",
+			);
+			expect(rejected.content[0]?.text).not.toContain(
+				"Corrected evidence params",
+			);
+			const retry = structuredClone(recovery.retry_example);
+			if (name === "task_evidence_batch") {
+				const entries = retry.entries as Record<string, unknown>[];
+				expect(entries[1]?.summary).toBe(long.summary);
+				required(entries[1]).summary =
+					"Parser regression suite measured four passing tests";
+			} else {
+				expect(retry.summary).toBe(long.summary);
+				retry.summary = "Parser regression suite measured four passing tests";
+			}
+			const tool = required(h.tools.get(name));
+			assertSchema(tool.parameters, retry);
+			expect((await h.call(name, retry)).isError).not.toBe(true);
+			const task = required(h.store.getState().tasks.T1);
+			expect(task.evidence).toHaveLength(
+				name === "task_evidence_batch" ? 2 : 1,
+			);
+			expect(task.evidence.at(-1)?.quality).toEqual(long.quality);
+			expect(task.evidence.at(-1)?.references).toEqual(long.references);
+			expect(task.planSteps[0]?.evidenceIds).toContain(
+				task.evidence.at(-1)?.id,
+			);
+			if (name !== "task_evidence")
+				expect(task.planSteps[0]?.status).toBe("done");
+		},
+	);
+
+	it.each(["task_evidence", "task_evidence_batch"])(
+		"requires an explicit diagnostic supersession edit in %s recovery",
+		async (name) => {
+			const h = await harness();
+			for (const role of ["diagnostic", "acceptance"]) {
+				expect(
+					(
+						await h.call("task_evidence", {
+							task_id: "T1",
+							...entry("Parser regression suite failed"),
+							role,
+							passed: "false",
+						})
+					).isError,
+				).not.toBe(true);
+			}
+			const failed = required(h.store.getState().tasks.T1).evidence;
+			const diagnosticId = required(failed[0]).id;
+			const acceptanceId = required(failed[1]).id;
+			const replacement = {
+				...entry(),
+				supersedes_evidence_ids: [diagnosticId, acceptanceId],
+				reason: "Parser defect fixed and regression tests passed",
+			};
+			const before = structuredClone(h.store.getState());
+			const eventCount = h.events.length;
+			const publications = h.publications.length;
+			const rejected = await h.call(
+				name,
+				name === "task_evidence_batch"
+					? { task_id: "T1", entries: [replacement, verification()] }
+					: { task_id: "T1", ...replacement },
+			);
+			expect(rejected.isError).toBe(true);
+			expect(h.store.getState()).toEqual(before);
+			expect(h.events).toHaveLength(eventCount);
+			expect(h.publications).toHaveLength(publications);
+			const recovery = rejected.details as {
+				retry_example: Record<string, unknown>;
+				retry_example_status: string;
+				required_edits: string[];
+			};
+			expect(recovery.retry_example_status).toBe("requires_edit");
+			expect(recovery.required_edits.join(" ")).toContain(
+				`Evidence ${diagnosticId} is diagnostic and cannot be superseded`,
+			);
+			expect(rejected.content[0]?.text).not.toContain(
+				"Corrected evidence params",
+			);
+			const retry = structuredClone(recovery.retry_example);
+			const revised =
+				name === "task_evidence_batch"
+					? required((retry.entries as Record<string, unknown>[])[0])
+					: retry;
+			expect(revised.supersedes_evidence_ids).toEqual([
+				diagnosticId,
+				acceptanceId,
+			]);
+			// The caller explicitly removes only the diagnostic target, not the failing acceptance record.
+			revised.supersedes_evidence_ids = [acceptanceId];
+			assertSchema(required(h.tools.get(name)).parameters, retry);
+			expect((await h.call(name, retry)).isError).not.toBe(true);
+			const task = required(h.store.getState().tasks.T1);
+			expect(task.evidence.slice(0, 2)).toEqual(before.tasks.T1?.evidence);
+			expect(task.evidence[2]?.supersedesEvidenceIds).toEqual([acceptanceId]);
+			expect(task.evidence[2]?.quality).toEqual(replacement.quality);
+			expect(task.acceptanceCriteria[0]?.status).toBe("satisfied");
+			if (name === "task_evidence_batch")
+				expect(task.planSteps[0]?.status).toBe("done");
+		},
+	);
+
 	it("persists one event, links separate checks, advances once and replays", async () => {
 		const h = await harness();
 		const result = await h.call("task_evidence_batch", {

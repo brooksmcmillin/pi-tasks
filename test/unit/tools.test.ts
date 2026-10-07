@@ -885,7 +885,9 @@ describe("registered task tools", () => {
 		);
 
 		expect(rejected.isError).toBe(true);
-		expect(rejected.content[0]?.text).toContain("Corrected evidence params");
+		expect(rejected.content[0]?.text).toContain(
+			"Unvalidated evidence retry template",
+		);
 		expect(rejected.content[0]?.text).toContain('"command": "npm test"');
 		expect(rejected.content[0]?.text).toContain(
 			'"observedOutput": "<concise observed output',
