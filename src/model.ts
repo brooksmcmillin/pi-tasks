@@ -1,3 +1,5 @@
+import type { handoffRecovery, OrchestrationHandoff } from "./handoff.ts";
+
 export const TASK_EVENT_CUSTOM_TYPE = "pi-tasks:event";
 export const TASK_SNAPSHOT_CUSTOM_TYPE = "pi-tasks:snapshot";
 
@@ -147,6 +149,7 @@ export interface TaskGranularityCheck {
 }
 
 export interface Task {
+	handoff?: OrchestrationHandoff[];
 	id: string;
 	title: string;
 	objective: string;
@@ -182,6 +185,7 @@ export interface TaskResumeStep {
 }
 
 export interface TaskResumeContext {
+	handoff?: ReturnType<typeof handoffRecovery>;
 	activeTaskId?: string;
 	taskId?: string;
 	title?: string;

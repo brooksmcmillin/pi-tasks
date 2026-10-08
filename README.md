@@ -119,7 +119,7 @@ metadata.
 | `task_next` | One-step guidance for weak/small-context models |
 | `task_focus` | What work is in scope right now |
 | `task_resume` | Recover state after compaction or session switch |
-| `task_checkpoint` | Save a durable snapshot for compaction resilience |
+| `task_checkpoint` | Save a durable snapshot and optional orchestration handoff for compaction resilience |
 | `task_granularity_check` | Verify a step is truly atomic |
 | `task_decompose` | Break non-atomic steps into child steps |
 | `task_rework` | Record findings and add remediation, optionally before an open gate, including reopening done tasks |
@@ -131,6 +131,38 @@ metadata.
 | `task_verify_step` | Atomically attach passing evidence and complete the current atomic step |
 | `task_decision` | Record explicit user decisions |
 | `task_complete` | Close a task (only if all gates pass) |
+
+## Orchestration handoff across compaction
+
+`task_checkpoint({ handoff: [...] })` replaces the active task's compact handoff
+lanes in its existing branch-local session snapshot. Omit `handoff` to preserve
+it; use `[]` to clear it. Automatic compaction snapshots retain it. No additional
+state store, child launcher, or ownership registry is created.
+
+Each lane records `taskId` (the external task ID, not a mapping to a Pi task),
+`cwd`, `branch`, `base`, `head`, `ownershipBoundary`, `publicationBoundary`, and
+`nextAction`. Optional fields are `worker: { runId, sessionId, missionId? }`,
+`lastVerifiedGate: { name, head, reference }`, `pendingDecision`, and
+`pr: { url, head, reference }`. Keep actual identities and references to existing
+mission/output/receipt artifacts, not copied reports. For non-Git work, explicitly
+record `not-applicable` in ref fields. Limit: eight lanes, 1024 characters per
+string, 16 KiB total; oversized checkpoints fail without persisting.
+
+`task_resume` returns these records in `handoff.lanes`, with `authority: "none"`,
+`revalidationRequired: true`, and a recovery action before the recorded next
+action. It never treats a matching stored SHA or a successful receipt as fresh
+proof. The parent must check current task/worktree registration, cwd, refs,
+writer ownership, exact run/mission status, publication permission, and PR/head
+and gate evidence using their owning tools. Unknown child status blocks a
+replacement; do not assume an unobserved run has stopped. A recorded pending
+decision does not itself create a wait: use `task_update`'s existing blocker
+contract for an unresolved decision or asynchronous wait.
+
+This is a bounded recovery contract, not a Git/PR verifier or an execution
+interceptor. It cannot prevent another tool from bypassing its instructions.
+Replay can recover historical context after a process restart or branch/fork,
+but does not restore live ownership, reattach children, or grant unattended
+restart/automatic reclaim. Receipts never grant execution or publication authority.
 
 ## Insert review remediation before a gate
 
