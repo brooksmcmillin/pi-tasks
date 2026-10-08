@@ -282,6 +282,10 @@ describe("native Pi settlement advisories", () => {
 		"completed",
 		"pickup-first",
 		"pickup-last",
+		"pickup-async-first",
+		"pickup-async-last",
+		"pickup-interleaved-first",
+		"pickup-interleaved-last",
 	])(
 		"handles %s work through the native settlement boundary",
 		async (scenario) => {
@@ -289,10 +293,9 @@ describe("native Pi settlement advisories", () => {
 				queuedSettlement: scenario === "queued",
 				...(scenario.startsWith("pickup-")
 					? {
-							pickupOrder:
-								scenario === "pickup-first"
-									? ("first" as const)
-									: ("last" as const),
+							pickupOrder: scenario.endsWith("first")
+								? ("first" as const)
+								: ("last" as const),
 						}
 					: {}),
 			});
@@ -342,7 +345,7 @@ describe("native Pi settlement advisories", () => {
 				const replies: Call[][] = [
 					[{ name: "task_plan", arguments: validPlan() }],
 				];
-				if (scenario.startsWith("pickup-")) {
+				if (scenario === "pickup-first" || scenario === "pickup-last") {
 					replies.unshift(
 						[
 							{
@@ -368,6 +371,11 @@ describe("native Pi settlement advisories", () => {
 					const calls = replies.shift();
 					if (!calls) throw new Error("Unexpected extra model request");
 					requests += 1;
+					if (scenario.startsWith("pickup-async-") && requests === 1)
+						h.eventBus.emit("subagent:async-complete", {
+							runId: "native-review",
+							sessionId: h.sessionManager.getSessionId(),
+						});
 					const message = {
 						role: "assistant",
 						content: calls.length
@@ -406,12 +414,32 @@ describe("native Pi settlement advisories", () => {
 					};
 				};
 				const sessionId = h.sessionManager.getSessionId();
-				if (scenario === "async")
+				if (
+					scenario === "async" ||
+					scenario.startsWith("pickup-async-") ||
+					scenario.startsWith("pickup-interleaved-")
+				)
 					h.eventBus.emit("subagent:async-started", {
 						id: "native-review",
 						sessionId,
 					});
+				let completionScheduled = false;
+				const stopCompletion = scenario.startsWith("pickup-interleaved-")
+					? h.eventBus.on("task-continuation:ownership", () => {
+							if (completionScheduled) return;
+							completionScheduled = true;
+							queueMicrotask(() =>
+								h.eventBus.emit("subagent:async-complete", {
+									runId: "native-review",
+									sessionId,
+								}),
+							);
+						})
+					: undefined;
 				await h.session.prompt("Run scripted task execution");
+				stopCompletion?.();
+				if (scenario.startsWith("pickup-interleaved-"))
+					expect(completionScheduled).toBe(true);
 				const advisories = () =>
 					h.sessionManager
 						.getBranch()
@@ -421,7 +449,7 @@ describe("native Pi settlement advisories", () => {
 								entry.customType === "pi-tasks:yield-check",
 						);
 				expect(advisories()).toHaveLength(scenario === "actionable" ? 1 : 0);
-				if (scenario.startsWith("pickup-")) {
+				if (scenario === "pickup-first" || scenario === "pickup-last") {
 					const entries = h.sessionManager.getBranch();
 					for (const type of [
 						"task-continuation:nudge",
@@ -435,7 +463,7 @@ describe("native Pi settlement advisories", () => {
 					}
 				}
 				expect(requests).toBe(
-					scenario.startsWith("pickup-")
+					scenario === "pickup-first" || scenario === "pickup-last"
 						? 4
 						: scenario === "actionable"
 							? 3
@@ -452,6 +480,25 @@ describe("native Pi settlement advisories", () => {
 							message.role === "toolResult" && message.isError,
 					),
 				).toHaveLength(0);
+				if (
+					scenario.startsWith("pickup-async-") ||
+					scenario.startsWith("pickup-interleaved-")
+				) {
+					replies.push(
+						[
+							{
+								name: "task_update",
+								arguments: { task_id: "T1", note: "Fresh input" },
+							},
+						],
+						[],
+						[],
+					);
+					await h.session.prompt("Continue with fresh standalone work");
+					expect(advisories()).toHaveLength(1);
+					expect(requests).toBe(5);
+					expect(replies).toHaveLength(0);
+				}
 				if (scenario === "async") {
 					const update: Call = {
 						name: "task_update",

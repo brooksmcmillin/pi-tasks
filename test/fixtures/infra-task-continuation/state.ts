@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -26,6 +27,22 @@ export interface PickupState {
 	progress: number;
 	nudgeProgress: number;
 	pendingAsync: string[];
+	recovery?: { inputId: string; owned: boolean };
+}
+
+function withRecovery(state: PickupState): PickupState {
+	const recovery = state.recovery ?? { inputId: randomUUID(), owned: false };
+	return {
+		...state,
+		recovery: {
+			...recovery,
+			owned:
+				recovery.owned ||
+				!!state.taskId ||
+				state.nudged ||
+				state.pendingAsync.length > 0,
+		},
+	};
 }
 export const emptyState = (): PickupState => ({
 	version: 1,
@@ -54,7 +71,7 @@ export function restore(
 			state = { ...data, pendingAsync: [...data.pendingAsync] };
 		}
 	}
-	return state;
+	return withRecovery(state);
 }
 
 export function signal(
@@ -125,8 +142,10 @@ export default function register(pi: ExtensionAPI, parameters: TSchema): void {
 			remaining: state.nudged ? 0 : 1,
 			handled: !!state.taskId,
 			pendingAsync: state.pendingAsync.length > 0,
+			recovery: state.recovery,
 		});
 	const save = () => {
+		state = withRecovery(state);
 		pi.appendEntry(STATE_TYPE, state);
 		publish();
 	};
@@ -215,7 +234,7 @@ export default function register(pi: ExtensionAPI, parameters: TSchema): void {
 		);
 		if (!result.content) return;
 		// Persist the spent budget in the same boundary transaction as the advisory.
-		state = result.state;
+		state = withRecovery(result.state);
 		publish();
 		return {
 			entries: [

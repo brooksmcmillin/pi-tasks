@@ -34,12 +34,17 @@ export default function (pi: ExtensionAPI) {
 	const store = createTaskRuntimeStore();
 	const continuation = createContinuationAdvisory();
 	let pickupOwnsContinuation = false;
-	// Subscribe before lifecycle replay, in either extension load order. Only the
-	// owner's publications reset this state; our input/replay handlers must not.
+	let pickupHasRecoveryState = false;
+	// Upgraded producers persist the per-input latch; do not copy it into our
+	// sent budget, which could outlive a producer reset in the opposite order.
 	const unsubscribePickup = pi.events.on?.(PICKUP_OWNERSHIP_EVENT, (data) => {
 		const owns = pickupOwnsRecovery(data);
-		if (owns !== undefined) pickupOwnsContinuation = owns;
-		if (owns) continuation.relinquish();
+		if (owns !== undefined) {
+			pickupOwnsContinuation = owns;
+			pickupHasRecoveryState =
+				data !== null && typeof data === "object" && "recovery" in data;
+		}
+		if (owns && !pickupHasRecoveryState) continuation.relinquish();
 	});
 	const asyncRuns = new Set<string>();
 	let unsubscribeAsync: Array<() => void> = [];
@@ -109,7 +114,8 @@ export default function (pi: ExtensionAPI) {
 		pickupOwnsContinuation = false;
 	});
 	pi.on("tool_result", (event) => {
-		if (pickupOwnsContinuation) continuation.relinquish();
+		if (pickupOwnsContinuation && !pickupHasRecoveryState)
+			continuation.relinquish();
 		continuation.observeToolResult(
 			event.toolName,
 			event.isError,

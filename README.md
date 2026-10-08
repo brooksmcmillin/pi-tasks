@@ -382,8 +382,13 @@ or exhausted pickup budget suppresses the pi-tasks advisory. Once pickup takes
 ownership, pi-tasks relinquishes its advisory for that input, even if pickup later
 reports `stop` or `complete`. Pickup owns the one recovery nudge and its bounded
 stall diagnostic; pi-tasks does not start another loop after `task_plan`.
-Registration order does not matter: the listener is installed before session
-replay and only producer publications update ownership.
+Order-independent coordination requires the producer's additive
+`recovery: { inputId, owned }` metadata. The producer persists ownership for that
+input even after async completion, including completion between extension
+handlers. pi-tasks reads it directly; only a new producer input/checkpoint can
+replace it. Older v1 producers remain best-effort and cannot guarantee safety
+across reset/inter-handler races. Update both extensions for the full contract;
+merging source does not activate an already running runtime.
 
 The workflow must register `task_pickup` **before** readiness or Pi plan work and
 update its explicit blocker/decision/wait/complete/stop disposition. Pi task IDs
@@ -395,7 +400,8 @@ cannot retroactively share that spent budget under this one-way v1 contract.
 No infra runtime dependency is required. Without a producer, ordinary pi-tasks
 advisories remain available. Malformed, other-owner and unsupported-version
 publications are ignored (and cannot erase a previously valid ownership state);
-coordination is guaranteed only for v1. Reload/tree replay restores the producer's
+present malformed recovery metadata is never downgraded to legacy v1. Reload/tree
+replay restores the producer's
 branch-local budget, including exhaustion; status reads and repeated pickup
 signals do not refill it. See the [pinned offline replay evidence](https://github.com/brooksmcmillin/pi-tasks/tree/main/test/fixtures/infra-task-continuation).
 

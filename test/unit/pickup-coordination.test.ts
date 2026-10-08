@@ -18,7 +18,7 @@ import pickupExtension from "../fixtures/infra-task-continuation/state.ts";
 it("keeps the pinned producer fixtures unchanged", () => {
 	for (const [file, digest] of Object.entries({
 		"state.ts":
-			"be2ab668b34b45f2c6e0a1b1c1f6506b63497d51afdaa2264b16594ff135758b",
+			"5f443b79398d286aa7d70e5470a49be61e1d70aeb42430214f5b3b80e08dd7bb",
 		"index.ts":
 			"dbfccb7921d4f881ee9621aa54566fb0f54fd5e5e767b8559b6e1ac6ea2b3630",
 	})) {
@@ -178,6 +178,161 @@ function harness(
 
 for (const pickupFirst of [true, false]) {
 	describe(`pickup coordination: pickup registered ${pickupFirst ? "first" : "last"}`, () => {
+		it.each(["interactive", "rpc", "tree", "restart", "session_start"])(
+			"retains ownership released between %s handlers and after checkpoint replay",
+			async (boundary) => {
+				let h = harness(pickupFirst);
+				await h.emit("session_start");
+				await h.execute("task_plan", plan);
+				h.pi.events.emit("subagent:async-started", {
+					sessionId: "session",
+					id: "review",
+				});
+				if (boundary === "restart") {
+					await h.emit("session_shutdown");
+					h = harness(pickupFirst, h.branch());
+				}
+				let completed = false;
+				h.pi.events.on?.(PICKUP_OWNERSHIP_EVENT, () => {
+					if (completed) return;
+					completed = true;
+					queueMicrotask(() =>
+						h.pi.events.emit("subagent:async-complete", {
+							sessionId: "session",
+							runId: "review",
+						}),
+					);
+				});
+				if (boundary === "tree") await h.switchBranch(h.branch());
+				else if (boundary === "restart" || boundary === "session_start")
+					await h.emit("session_start");
+				else await h.emit("input", { source: boundary });
+				expect(completed).toBe(true);
+				await h.execute("task_update", {
+					task_id: "T1",
+					note: "Fresh execution after inter-handler release",
+				});
+				expect((await h.settle()).entries).toEqual([]);
+				const released = h.branch();
+				await h.switchBranch(released);
+				await h.execute("task_update", {
+					task_id: "T1",
+					note: "Replay released checkpoint",
+				});
+				expect((await h.settle()).entries).toEqual([]);
+				await h.emit("session_shutdown");
+				const resumed = harness(pickupFirst, released);
+				await resumed.emit("session_start");
+				await resumed.execute("task_update", {
+					task_id: "T1",
+					note: "Restart released checkpoint",
+				});
+				expect((await resumed.settle()).entries).toEqual([]);
+				await resumed.emit("input", { source: "extension" });
+				await resumed.execute("task_update", {
+					task_id: "T1",
+					note: "Extension input retains epoch",
+				});
+				expect((await resumed.settle()).entries).toEqual([]);
+				await resumed.emit("input", { source: "interactive" });
+				await resumed.execute("task_update", {
+					task_id: "T1",
+					note: "Fresh input after completed work",
+				});
+				expect((await resumed.settle()).entries.at(-1)?.customType).toBe(
+					"pi-tasks:yield-check",
+				);
+			},
+		);
+
+		it.each([
+			"interactive",
+			"rpc",
+			"extension",
+			"tree",
+			"restart",
+			"session_start",
+		])(
+			"retains relinquishment when async completion follows %s before execution",
+			async (boundary) => {
+				let h = harness(pickupFirst);
+				await h.emit("session_start");
+				await h.execute("task_plan", plan);
+				h.pi.events.emit("subagent:async-started", {
+					sessionId: "session",
+					id: "review",
+				});
+				if (boundary === "restart") {
+					await h.emit("session_shutdown");
+					h = harness(pickupFirst, h.branch());
+					await h.emit("session_start");
+				} else if (boundary === "tree") {
+					await h.switchBranch(h.branch());
+				} else if (boundary === "session_start") {
+					await h.emit("session_start");
+				} else {
+					await h.emit("input", { source: boundary });
+				}
+				h.pi.events.emit("subagent:async-complete", {
+					sessionId: "other",
+					runId: "review",
+				});
+				expect((await h.settle()).entries).toEqual([]);
+				h.pi.events.emit("subagent:async-complete", {
+					sessionId: "session",
+					runId: "review",
+				});
+				await h.execute("task_update", {
+					task_id: "T1",
+					note: "Fresh execution after wait",
+				});
+				expect((await h.settle()).entries).toEqual([]);
+			},
+		);
+
+		it.each(["interactive", "rpc", "tree", "restart", "session_start"])(
+			"does not carry stale ownership into fresh %s work",
+			async (boundary) => {
+				for (const ownership of ["handled", "spent", "async"]) {
+					let h = harness(pickupFirst);
+					await h.emit("session_start");
+					await h.execute("task_plan", plan);
+					const standalone = h.branch();
+					if (ownership === "async") {
+						h.pi.events.emit("subagent:async-started", {
+							sessionId: "session",
+							id: "review",
+						});
+						h.pi.events.emit("subagent:async-complete", {
+							sessionId: "session",
+							runId: "review",
+						});
+					} else {
+						await h.pickup();
+						if (ownership === "spent") await h.settle();
+					}
+					if (boundary === "restart") {
+						await h.emit("session_shutdown");
+						h = harness(pickupFirst, standalone);
+						await h.emit("session_start");
+					} else if (boundary === "tree" || boundary === "session_start") {
+						await h.switchBranch(standalone);
+						if (boundary === "session_start") await h.emit("session_start");
+					} else {
+						await h.emit("input", { source: boundary });
+					}
+					await h.execute("task_update", {
+						task_id: "T1",
+						note: "Fresh standalone work",
+					});
+					expect(
+						(await h.settle()).entries.map((entry) => entry.customType),
+					).toEqual(["pi-tasks:yield-check"]);
+					expect((await h.settle()).entries).toEqual([]);
+				}
+			},
+		);
+
 		it("replays historical pre-claim stops then hands off to a plan without a second recovery", async () => {
 			const h = harness(pickupFirst);
 			await h.emit("session_start");
@@ -395,6 +550,44 @@ it("retains standalone recovery without a producer and ignores incompatible publ
 	expect(result.entries[0]).toEqual(prior);
 	expect(result.entries.at(-1)?.customType).toBe("pi-tasks:yield-check");
 	expect((await h.settle()).entries).toEqual([]);
+});
+
+it("rejects malformed recovery metadata without downgrading known ownership", async () => {
+	const h = harness(false, [], false);
+	await h.emit("session_start");
+	await h.execute("task_plan", plan);
+	const signal = {
+		version: 1,
+		owner: "named-task-pickup",
+		handled: false,
+		pendingAsync: false,
+		remaining: 1,
+		disposition: "stop",
+	};
+	h.pi.events.emit(PICKUP_OWNERSHIP_EVENT, {
+		...signal,
+		recovery: { inputId: "input-1", owned: true },
+	});
+	for (const recovery of [
+		undefined,
+		null,
+		{},
+		{ inputId: "", owned: false },
+		{ inputId: "input-2", owned: "false" },
+	]) {
+		expect(pickupOwnsRecovery({ ...signal, recovery })).toBeUndefined();
+		h.pi.events.emit(PICKUP_OWNERSHIP_EVENT, { ...signal, recovery });
+		expect((await h.settle()).entries).toEqual([]);
+	}
+	await h.emit("input", { source: "interactive" });
+	h.pi.events.emit(PICKUP_OWNERSHIP_EVENT, {
+		...signal,
+		recovery: { inputId: "input-2", owned: false },
+	});
+	await h.execute("task_update", { task_id: "T1", note: "Fresh input" });
+	expect((await h.settle()).entries.at(-1)?.customType).toBe(
+		"pi-tasks:yield-check",
+	);
 });
 
 it("validates v1 ownership and retains exhausted ownership when intent clears", () => {

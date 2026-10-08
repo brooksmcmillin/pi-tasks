@@ -13,5 +13,17 @@ export function pickupOwnsRecovery(value) {
         !["proceed", "blocker", "decision", "wait", "complete", "stop"].includes(data.disposition) ||
         (data.taskId !== undefined && typeof data.taskId !== "string"))
         return;
-    return data.handled || data.remaining === 0 || data.pendingAsync;
+    const owns = data.handled || data.remaining === 0 || data.pendingAsync;
+    if (!("recovery" in data))
+        return owns;
+    const recovery = data.recovery;
+    if (!recovery ||
+        typeof recovery !== "object" ||
+        !("inputId" in recovery) ||
+        typeof recovery.inputId !== "string" ||
+        !recovery.inputId.trim() ||
+        !("owned" in recovery) ||
+        typeof recovery.owned !== "boolean")
+        return;
+    return recovery.owned || owns;
 }
