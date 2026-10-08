@@ -189,6 +189,7 @@ async function createNativeSession(
 		excludeTools?: string[];
 		foreignTaskNotes?: boolean;
 		queuedSettlement?: boolean;
+		pickupOrder?: "first" | "last";
 		noTools?: "all" | "builtin";
 	} = {},
 ) {
@@ -204,6 +205,14 @@ async function createNativeSession(
 	]);
 	const events: TaskStateEvent[] = [];
 	const extensionPaths = [join(taskRoot, "index.ts")];
+	if (options.pickupOrder) {
+		const pickupPath = join(
+			taskRoot,
+			"test/fixtures/infra-task-continuation/index.ts",
+		);
+		if (options.pickupOrder === "first") extensionPaths.unshift(pickupPath);
+		else extensionPaths.push(pickupPath);
+	}
 	if (options.queuedSettlement) {
 		const extensionPath = join(base, "queued-settlement.js");
 		await writeFile(
@@ -266,11 +275,26 @@ async function createNativeSession(
 }
 
 describe("native Pi settlement advisories", () => {
-	it.each(["actionable", "async", "queued", "completed"])(
+	it.each([
+		"actionable",
+		"async",
+		"queued",
+		"completed",
+		"pickup-first",
+		"pickup-last",
+	])(
 		"handles %s work through the native settlement boundary",
 		async (scenario) => {
 			const h = await createNativeSession({
 				queuedSettlement: scenario === "queued",
+				...(scenario.startsWith("pickup-")
+					? {
+							pickupOrder:
+								scenario === "pickup-first"
+									? ("first" as const)
+									: ("last" as const),
+						}
+					: {}),
 			});
 			try {
 				const provider = "openai";
@@ -318,7 +342,23 @@ describe("native Pi settlement advisories", () => {
 				const replies: Call[][] = [
 					[{ name: "task_plan", arguments: validPlan() }],
 				];
-				if (scenario === "completed") replies.push([verify], [complete], []);
+				if (scenario.startsWith("pickup-")) {
+					replies.unshift(
+						[
+							{
+								name: "task_pickup",
+								arguments: {
+									task_id: "5168",
+									disposition: "proceed",
+									next_action: "Complete authorized readiness and plan work",
+								},
+							},
+						],
+						[],
+					);
+					replies.push([]);
+				} else if (scenario === "completed")
+					replies.push([verify], [complete], []);
 				else if (scenario === "queued")
 					replies.push([], [verify], [complete], []);
 				else replies.push([]);
@@ -381,14 +421,29 @@ describe("native Pi settlement advisories", () => {
 								entry.customType === "pi-tasks:yield-check",
 						);
 				expect(advisories()).toHaveLength(scenario === "actionable" ? 1 : 0);
+				if (scenario.startsWith("pickup-")) {
+					const entries = h.sessionManager.getBranch();
+					for (const type of [
+						"task-continuation:nudge",
+						"task-continuation:stall",
+					]) {
+						expect(
+							entries.filter(
+								(entry: { customType?: string }) => entry.customType === type,
+							),
+						).toHaveLength(1);
+					}
+				}
 				expect(requests).toBe(
-					scenario === "actionable"
-						? 3
-						: scenario === "completed"
-							? 4
-							: scenario === "queued"
-								? 5
-								: 2,
+					scenario.startsWith("pickup-")
+						? 4
+						: scenario === "actionable"
+							? 3
+							: scenario === "completed"
+								? 4
+								: scenario === "queued"
+									? 5
+									: 2,
 				);
 				expect(replies).toHaveLength(0);
 				expect(

@@ -17,6 +17,9 @@ export function createContinuationAdvisory() {
 	let taskId: string | undefined;
 	let sent = false;
 	return {
+		relinquish() {
+			sent = true;
+		},
 		reset() {
 			taskId = undefined;
 			sent = false;
