@@ -114,6 +114,7 @@ export interface ExtensionContext {
 	sessionManager: {
 		getBranch(): BranchEntry[];
 		getSessionId?(): string;
+		getSessionFile?(): string | undefined;
 	};
 	ui: {
 		notify(message: string, type?: "info" | "warning" | "error"): void;

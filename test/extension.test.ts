@@ -278,6 +278,7 @@ describe("native Pi settlement advisories", () => {
 	it.each([
 		"actionable",
 		"async",
+		"async-file",
 		"queued",
 		"completed",
 		"pickup-first",
@@ -413,9 +414,16 @@ describe("native Pi settlement advisories", () => {
 						result: async () => message,
 					};
 				};
-				const sessionId = h.sessionManager.getSessionId();
+				const sessionId =
+					scenario === "async-file"
+						? h.sessionManager.getSessionFile()
+						: h.sessionManager.getSessionId();
+				if (scenario === "async-file") {
+					expect(sessionId).toBeTruthy();
+					expect(sessionId).not.toBe(h.sessionManager.getSessionId());
+				}
 				if (
-					scenario === "async" ||
+					scenario.startsWith("async") ||
 					scenario.startsWith("pickup-async-") ||
 					scenario.startsWith("pickup-interleaved-")
 				)
@@ -499,7 +507,7 @@ describe("native Pi settlement advisories", () => {
 					expect(requests).toBe(5);
 					expect(replies).toHaveLength(0);
 				}
-				if (scenario === "async") {
+				if (scenario.startsWith("async")) {
 					const update: Call = {
 						name: "task_update",
 						arguments: {
