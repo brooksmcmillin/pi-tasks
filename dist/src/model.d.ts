@@ -1,3 +1,4 @@
+import type { handoffRecovery, OrchestrationHandoff } from "./handoff.ts";
 export declare const TASK_EVENT_CUSTOM_TYPE = "pi-tasks:event";
 export declare const TASK_SNAPSHOT_CUSTOM_TYPE = "pi-tasks:snapshot";
 export type TaskStatus = "pending" | "active" | "blocked" | "review" | "done" | "cancelled";
@@ -106,6 +107,7 @@ export interface TaskGranularityCheck {
     hasNoHiddenSubtasks: boolean;
 }
 export interface Task {
+    handoff?: OrchestrationHandoff[];
     id: string;
     title: string;
     objective: string;
@@ -139,6 +141,7 @@ export interface TaskResumeStep {
     decompositionStatus: TaskStepGranularityStatus;
 }
 export interface TaskResumeContext {
+    handoff?: ReturnType<typeof handoffRecovery>;
     activeTaskId?: string;
     taskId?: string;
     title?: string;

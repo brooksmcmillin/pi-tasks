@@ -1,4 +1,9 @@
 import {
+	handoffSchema,
+	type OrchestrationHandoff,
+	validateHandoff,
+} from "./handoff.ts";
+import {
 	createEventId,
 	type IdGenerator,
 	SequentialIdGenerator,
@@ -120,6 +125,7 @@ interface TaskListParams extends Record<string, unknown> {
 
 interface TaskCheckpointParams extends Record<string, unknown> {
 	reason?: string;
+	handoff?: OrchestrationHandoff[];
 }
 
 interface TaskUpdateParams extends Record<string, unknown> {
@@ -469,7 +475,7 @@ export function registerTaskTools(
 			"Resume pi-tasks work from the current compact execution contract before acting",
 		promptGuidelines: [
 			"Call task_resume after context compaction, session resume, or when unsure what to do next.",
-			"Smart models: trust the persisted resume contract after compaction; do not reconstruct stale plan state from memory.",
+			"Smart models: recover the persisted plan after compaction rather than reconstructing it from memory. Handoff ownership, run status, revisions and receipts are historical: revalidate before acting; never relaunch an unobserved child.",
 			"Read recommendedTool, blockedTools, and minimumParams; use the recommendation unless review findings require task_rework.",
 			REWORK_GUIDANCE,
 			PLAN_REPAIR_GUIDANCE,
@@ -496,16 +502,32 @@ export function registerTaskTools(
 		promptSnippet:
 			"Create a pi-tasks checkpoint before risky context transitions or long pauses",
 		promptGuidelines: [
-			"Use task_checkpoint before long-running work, major decomposition changes, or when the user asks for a restartable handoff.",
+			"Use task_checkpoint at handoff or compaction boundaries. Optional handoff replaces the active task's compact orchestration lanes; omit to preserve, [] to clear. Retain exact existing worker/mission IDs and evidence references, not full reports. This is not unattended process-restart support.",
 			"Smart models: checkpoint only at real handoff or risk boundaries; do not use snapshots as proof of work.",
-			"Weak models: provide at most a short reason, then continue with task_next or task_focus.",
+			"A handoff or receipt never grants ownership, execution or publication authority; recover with task_resume and revalidate live identities before continuing.",
 			"Checkpoint is not evidence and does not satisfy acceptance criteria.",
 		],
 		parameters: Type.Object({
 			reason: Type.Optional(Type.String()),
+			handoff: Type.Optional(handoffSchema),
 		}),
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-			const state = store.getState();
+			let state = store.getState();
+			if (params.handoff !== undefined) {
+				validateHandoff(params.handoff);
+				const task = state.activeTaskId
+					? state.tasks[state.activeTaskId]
+					: undefined;
+				if (!task)
+					throw new Error("An active task is required to checkpoint a handoff");
+				state = {
+					...state,
+					tasks: {
+						...state.tasks,
+						[task.id]: { ...task, handoff: structuredClone(params.handoff) },
+					},
+				};
+			}
 			if (Object.keys(state.tasks).length === 0) {
 				return textResult(
 					"No pi-tasks state to checkpoint.",

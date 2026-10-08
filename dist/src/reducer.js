@@ -1,3 +1,4 @@
+import { validateHandoff } from "./handoff.js";
 import { createEmptyState, } from "./model.js";
 import { classifyMechanicStep, mechanicStepMessage, } from "./support-actions.js";
 const TERMINAL_STATUSES = ["done", "cancelled"];
@@ -670,6 +671,10 @@ function cancelTask(state, event) {
     return state;
 }
 function applySnapshot(event) {
+    for (const task of Object.values(event.state.tasks)) {
+        if (task.handoff !== undefined)
+            validateHandoff(task.handoff);
+    }
     const state = cloneState({ ...event.state, events: [] });
     state.lastUpdatedAt = event.createdAt;
     return state;

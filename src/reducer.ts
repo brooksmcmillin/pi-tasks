@@ -1,3 +1,4 @@
+import { validateHandoff } from "./handoff.ts";
 import {
 	type AcceptanceCriterion,
 	createEmptyState,
@@ -928,6 +929,9 @@ function cancelTask(
 function applySnapshot(
 	event: Extract<TaskEvent, { type: "task.snapshot" }>,
 ): TaskState {
+	for (const task of Object.values(event.state.tasks)) {
+		if (task.handoff !== undefined) validateHandoff(task.handoff);
+	}
 	const state = cloneState({ ...event.state, events: [] });
 	state.lastUpdatedAt = event.createdAt;
 	return state;

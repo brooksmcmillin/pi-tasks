@@ -81,6 +81,12 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Consume optional `task-continuation:ownership` v1 publications from `named-task-pickup`. The additive `recovery: { inputId, owned }` contract persists the producer's per-input ownership latch. Suppress directly from that authoritative state; never copy it into our sent budget or infer handler ordering. Install the listener before lifecycle replay; only producer publications update ownership. Legacy v1 envelopes retain best-effort relinquishment but cannot guarantee reset/inter-handler safety. Present malformed recovery metadata must not downgrade to legacy parsing or erase valid ownership. Unsubscribe on shutdown. Ignore unsupported/malformed publications without erasing valid ownership.
 - The pickup workflow must establish ownership before plan work and explicitly report boundary/completion dispositions. Do not map external task IDs to Pi IDs, infer producer lifecycle from our state, or claim reverse budget transfer after a standalone advisory. Keep the exact pinned producer as a test-only fixture; test both registration orders offline and retain prior settlement entries.
 
+## Orchestration Handoff Contract
+
+- Keep optional handoff lanes on the active task in existing branch-local snapshots; omission preserves them and an explicit empty array clears them. Validate bounded shape on authoring and replay; never add a competing store.
+- Resume exposes exact stored identities as historical observations with no authority and mandatory live revalidation. Never launch/reclaim a worker or authorize publication from a checkpoint or receipt. Do not infer terminal child state from absence or promise unattended process restart.
+- Handoff metadata neither satisfies evidence gates nor creates/resolves blockers. Use existing task blocker semantics for waits and decisions. Task/branch changes must not leak another task's handoff into the active resume contract.
+
 ## Agent Planning Discipline
 
 - Plan deliverables, not support reads or inspection. Provide structured `plan_steps` with expected output, bounded actions, and truthful atomicity declarations.

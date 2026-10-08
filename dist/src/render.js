@@ -1,3 +1,4 @@
+import { handoffRecovery } from "./handoff.js";
 import { hasFreshCriterionEvidence } from "./reducer.js";
 import { isSupportAction, SUPPORT_ACTIONS } from "./support-actions.js";
 const STATUS_ORDER = [
@@ -193,6 +194,7 @@ export function buildTaskResume(state) {
     ]);
     return {
         ...(state.activeTaskId ? { activeTaskId: state.activeTaskId } : {}),
+        ...(task.handoff?.length ? { handoff: handoffRecovery(task.handoff) } : {}),
         taskId: task.id,
         title: compactDetail(task.title),
         status: task.status,
@@ -234,6 +236,11 @@ export function formatTaskResume(state) {
         return lines.join("\n");
     }
     lines.push(`Task: ${resume.taskId} [${resume.status}] ${resume.progress}% - ${resume.title}`);
+    if (resume.handoff) {
+        lines.push(`Before execution: ${resume.handoff.nextAction}`);
+        lines.push(`Handoff: ${JSON.stringify(resume.handoff.lanes)}`);
+        lines.push(resume.handoff.instruction);
+    }
     if (resume.mode)
         lines.push(`Mode: ${resume.mode}`);
     if (resume.recommendedTool) {

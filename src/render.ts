@@ -1,3 +1,4 @@
+import { handoffRecovery } from "./handoff.ts";
 import type {
 	Task,
 	TaskExecutionMode,
@@ -273,6 +274,7 @@ export function buildTaskResume(state: TaskState): TaskResumeContext {
 	]);
 	return {
 		...(state.activeTaskId ? { activeTaskId: state.activeTaskId } : {}),
+		...(task.handoff?.length ? { handoff: handoffRecovery(task.handoff) } : {}),
 		taskId: task.id,
 		title: compactDetail(task.title),
 		status: task.status,
@@ -322,6 +324,11 @@ export function formatTaskResume(state: TaskState): string {
 	lines.push(
 		`Task: ${resume.taskId} [${resume.status}] ${resume.progress}% - ${resume.title}`,
 	);
+	if (resume.handoff) {
+		lines.push(`Before execution: ${resume.handoff.nextAction}`);
+		lines.push(`Handoff: ${JSON.stringify(resume.handoff.lanes)}`);
+		lines.push(resume.handoff.instruction);
+	}
 	if (resume.mode) lines.push(`Mode: ${resume.mode}`);
 	if (resume.recommendedTool) {
 		lines.push(`Do now: ${resume.recommendedTool}`);
