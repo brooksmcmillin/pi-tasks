@@ -55,8 +55,14 @@ export default function (pi: ExtensionAPI) {
 	};
 	const watchAsync = (ctx: ExtensionContext) => {
 		clearAsync();
-		const sessionId = ctx.sessionManager.getSessionId?.();
-		if (!sessionId || !pi.events.on) return;
+		// pi-subagents uses the session file when persisted; other producers use the UUID.
+		const sessionIds = new Set(
+			[
+				ctx.sessionManager.getSessionId?.(),
+				ctx.sessionManager.getSessionFile?.(),
+			].filter((id) => typeof id === "string" && id.length > 0),
+		);
+		if (sessionIds.size === 0 || !pi.events.on) return;
 		for (const [event, started] of [
 			["subagent:async-started", true],
 			["subagent:async-complete", false],
@@ -67,7 +73,8 @@ export default function (pi: ExtensionAPI) {
 						!data ||
 						typeof data !== "object" ||
 						!("sessionId" in data) ||
-						data.sessionId !== sessionId
+						typeof data.sessionId !== "string" ||
+						!sessionIds.has(data.sessionId)
 					)
 						return;
 					const id = started

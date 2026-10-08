@@ -48,6 +48,7 @@
 		"release:check": "scripts/release-check.sh",
 		"test": "vitest --run test/unit/",
 		"test:native": "vitest --run test/extension.test.ts",
+		"test:async-workflow": "npm run build && vitest --run test/async-workflow.test.ts",
 		"typecheck": "tsc --noEmit"
 	},
 	"engines": {

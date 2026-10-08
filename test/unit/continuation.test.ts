@@ -483,6 +483,94 @@ describe("extension lifecycle integration", () => {
 		expect(h.messages).toHaveLength(1);
 	});
 
+	it.each(["session-1", "/sessions/session-1.jsonl"])(
+		"tracks the current session's exact identity %s and rejects foreign completions",
+		async (identity) => {
+			const h = harness();
+			h.ctx.sessionManager.getSessionFile = () => "/sessions/session-1.jsonl";
+			await h.emit("session_start");
+			h.pi.events.emit("subagent:async-started", {
+				id: "review",
+				sessionId: identity,
+			});
+			await h.turn("stop", "task_update");
+			expect(await h.settle()).toBeUndefined();
+			for (const sessionId of [
+				"foreign",
+				"/foreign/session-1.jsonl",
+				"/sessions/session-1.jsonl/other",
+				"",
+				undefined,
+			]) {
+				h.pi.events.emit("subagent:async-complete", {
+					runId: "review",
+					sessionId,
+				});
+				expect(await h.settle()).toBeUndefined();
+			}
+			h.pi.events.emit("subagent:async-complete", {
+				runId: "review",
+				sessionId: identity,
+			});
+			expect((await h.settle())?.continue).toBe(true);
+		},
+	);
+
+	it("supports file-only hosts and replaces exact identities on session start", async () => {
+		const h = harness();
+		delete h.ctx.sessionManager.getSessionId;
+		h.ctx.sessionManager.getSessionFile = () => "/sessions/first.jsonl";
+		await h.emit("session_start");
+		h.pi.events.emit("subagent:async-started", {
+			id: "first",
+			sessionId: "/sessions/first.jsonl",
+		});
+		await h.turn("stop", "task_update");
+		expect(await h.settle()).toBeUndefined();
+		h.ctx.sessionManager.getSessionFile = () => "/sessions/second.jsonl";
+		await h.emit("session_start");
+		for (const sessionId of [
+			"session-1",
+			"/sessions/first.jsonl",
+			"/foreign/second.jsonl",
+		]) {
+			h.pi.events.emit("subagent:async-started", { id: "foreign", sessionId });
+		}
+		await h.turn("stop", "task_update");
+		expect((await h.settle())?.continue).toBe(true);
+		await h.emit("input");
+		h.pi.events.emit("subagent:async-started", {
+			id: "second",
+			sessionId: "/sessions/second.jsonl",
+		});
+		await h.turn("stop", "task_update");
+		expect(await h.settle()).toBeUndefined();
+		h.pi.events.emit("subagent:async-complete", {
+			runId: "second",
+			sessionId: "/sessions/first.jsonl",
+		});
+		expect(await h.settle()).toBeUndefined();
+		h.pi.events.emit("subagent:async-complete", {
+			runId: "second",
+			sessionId: "/sessions/second.jsonl",
+		});
+		expect((await h.settle())?.continue).toBe(true);
+	});
+
+	it("does not subscribe without a nonempty session identity", async () => {
+		const h = harness();
+		h.ctx.sessionManager.getSessionId = () => "";
+		h.ctx.sessionManager.getSessionFile = () => undefined;
+		await h.emit("session_start");
+		expect(h.observers.get("subagent:async-started")?.size ?? 0).toBe(0);
+		h.pi.events.emit("subagent:async-started", {
+			id: "unknown",
+			sessionId: "",
+		});
+		await h.turn("stop", "task_update");
+		expect((await h.settle())?.continue).toBe(true);
+	});
+
 	it("ignores foreign or malformed async events and cleans up subscriptions", async () => {
 		const h = harness();
 		await h.emit("session_start");
