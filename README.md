@@ -374,6 +374,44 @@ it does not recover runs started before subscription or detect other asynchronou
 providers. Record those waits explicitly. Hosts without `agent_before_settle`
 retain task functionality without automatic advisories.
 
+### Optional named-task pickup coordination
+
+When the infra named-task pickup guard is loaded, pi-tasks consumes its
+`task-continuation:ownership` **v1** event. A handled pickup, pending async work,
+or exhausted pickup budget suppresses the pi-tasks advisory. Once pickup takes
+ownership, pi-tasks relinquishes its advisory for that input, even if pickup later
+reports `stop` or `complete`. Pickup owns the one recovery nudge and its bounded
+stall diagnostic; pi-tasks does not start another loop after `task_plan`.
+Order-independent coordination requires the producer's additive
+`recovery: { inputId, owned }` metadata. The producer persists ownership for that
+input even after async completion, including completion between extension
+handlers. pi-tasks reads it directly; only a new producer input/checkpoint can
+replace it. Older v1 producers remain best-effort and cannot guarantee safety
+across reset/inter-handler races. Update both extensions for the full contract;
+merging source does not activate an already running runtime.
+
+The workflow must register `task_pickup` **before** readiness or Pi plan work and
+update its explicit blocker/decision/wait/complete/stop disposition. Pi task IDs
+and external pickup IDs are separate; this consumer neither maps IDs nor changes
+TaskManager lifecycle. It does not infer pickup completion or obstacles from Pi
+task state or prose. A pickup registered only after a standalone pi-tasks nudge
+cannot retroactively share that spent budget under this one-way v1 contract.
+
+No infra runtime dependency is required. Without a producer, ordinary pi-tasks
+advisories remain available. Malformed, other-owner and unsupported-version
+publications are ignored (and cannot erase a previously valid ownership state);
+present malformed recovery metadata is never downgraded to legacy v1. Reload/tree
+replay restores the producer's
+branch-local budget, including exhaustion; status reads and repeated pickup
+signals do not refill it. See the [pinned offline replay evidence](https://github.com/brooksmcmillin/pi-tasks/tree/main/test/fixtures/infra-task-continuation).
+
+To disable pickup recovery, exclude `extensions/task-continuation/index.ts` in
+project `.pi/settings.json` with a leading `-`, then `/reload`. That leaves the
+standalone pi-tasks advisory enabled. To disable both, also disable pi-tasks via
+`pi config` resource selection (or remove its explicit extension/package entry)
+and `/reload`; task tools from pi-tasks will then be unavailable. No new recovery
+configuration or manual sign-off is required.
+
 ## Completion Gates
 
 `task_complete` rejects when:

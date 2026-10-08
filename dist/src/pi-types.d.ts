@@ -34,14 +34,20 @@ export interface SettlementEvent {
         canContinue: boolean;
         pendingMessages: unknown[];
     };
+    entries?: SettlementEntry[];
 }
+export type SettlementEntry = {
+    type: "custom";
+    customType: string;
+    data?: unknown;
+} | {
+    type: "custom_message";
+    customType: string;
+    content: string;
+    display: boolean;
+};
 export interface SettlementResult {
-    entries: Array<{
-        type: "custom_message";
-        customType: string;
-        content: string;
-        display: boolean;
-    }>;
+    entries: SettlementEntry[];
     continue: true;
 }
 export interface TaskToolResultEvent {

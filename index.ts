@@ -2,6 +2,10 @@ import { registerTaskCommands } from "./src/commands.ts";
 import { createContinuationAdvisory } from "./src/continuation.ts";
 import type { TaskEvent } from "./src/model.ts";
 import type { ExtensionAPI, ExtensionContext } from "./src/pi-types.ts";
+import {
+	PICKUP_OWNERSHIP_EVENT,
+	pickupOwnsRecovery,
+} from "./src/pickup-ownership.ts";
 import { buildTaskResume } from "./src/render.ts";
 import {
 	TASK_STATE_EVENT,
@@ -29,6 +33,19 @@ export {
 export default function (pi: ExtensionAPI) {
 	const store = createTaskRuntimeStore();
 	const continuation = createContinuationAdvisory();
+	let pickupOwnsContinuation = false;
+	let pickupHasRecoveryState = false;
+	// Upgraded producers persist the per-input latch; do not copy it into our
+	// sent budget, which could outlive a producer reset in the opposite order.
+	const unsubscribePickup = pi.events.on?.(PICKUP_OWNERSHIP_EVENT, (data) => {
+		const owns = pickupOwnsRecovery(data);
+		if (owns !== undefined) {
+			pickupOwnsContinuation = owns;
+			pickupHasRecoveryState =
+				data !== null && typeof data === "object" && "recovery" in data;
+		}
+		if (owns && !pickupHasRecoveryState) continuation.relinquish();
+	});
 	const asyncRuns = new Set<string>();
 	let unsubscribeAsync: Array<() => void> = [];
 	const clearAsync = () => {
@@ -93,8 +110,12 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", () => {
 		continuation.reset();
 		clearAsync();
+		unsubscribePickup?.();
+		pickupOwnsContinuation = false;
 	});
 	pi.on("tool_result", (event) => {
+		if (pickupOwnsContinuation && !pickupHasRecoveryState)
+			continuation.relinquish();
 		continuation.observeToolResult(
 			event.toolName,
 			event.isError,
@@ -109,13 +130,15 @@ export default function (pi: ExtensionAPI) {
 			event.context.pendingMessages.length > 0 ||
 			ctx.signal?.aborted ||
 			ctx.hasPendingMessages?.() ||
-			asyncRuns.size > 0
+			asyncRuns.size > 0 ||
+			pickupOwnsContinuation
 		)
 			return;
 		const content = continuation.take(store.getState());
 		if (!content) return;
 		return {
 			entries: [
+				...(event.entries ?? []),
 				{
 					type: "custom_message",
 					customType: "pi-tasks:yield-check",

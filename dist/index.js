@@ -1,5 +1,6 @@
 import { registerTaskCommands } from "./src/commands.js";
 import { createContinuationAdvisory } from "./src/continuation.js";
+import { PICKUP_OWNERSHIP_EVENT, pickupOwnsRecovery, } from "./src/pickup-ownership.js";
 import { buildTaskResume } from "./src/render.js";
 import { TASK_STATE_EVENT, TASK_TELEMETRY_EVENT, TASK_WIDGET_ID, } from "./src/state-events.js";
 import { createTaskRuntimeStore, snapshotState } from "./src/store.js";
@@ -9,6 +10,20 @@ export { TASK_STATE_EVENT, TASK_TELEMETRY_EVENT, TASK_WIDGET_ID, };
 export default function (pi) {
     const store = createTaskRuntimeStore();
     const continuation = createContinuationAdvisory();
+    let pickupOwnsContinuation = false;
+    let pickupHasRecoveryState = false;
+    // Upgraded producers persist the per-input latch; do not copy it into our
+    // sent budget, which could outlive a producer reset in the opposite order.
+    const unsubscribePickup = pi.events.on?.(PICKUP_OWNERSHIP_EVENT, (data) => {
+        const owns = pickupOwnsRecovery(data);
+        if (owns !== undefined) {
+            pickupOwnsContinuation = owns;
+            pickupHasRecoveryState =
+                data !== null && typeof data === "object" && "recovery" in data;
+        }
+        if (owns && !pickupHasRecoveryState)
+            continuation.relinquish();
+    });
     const asyncRuns = new Set();
     let unsubscribeAsync = [];
     const clearAsync = () => {
@@ -66,8 +81,12 @@ export default function (pi) {
     pi.on("session_shutdown", () => {
         continuation.reset();
         clearAsync();
+        unsubscribePickup?.();
+        pickupOwnsContinuation = false;
     });
     pi.on("tool_result", (event) => {
+        if (pickupOwnsContinuation && !pickupHasRecoveryState)
+            continuation.relinquish();
         continuation.observeToolResult(event.toolName, event.isError, event.input, event.details);
     });
     pi.on("agent_before_settle", (event, ctx) => {
@@ -76,13 +95,15 @@ export default function (pi) {
             event.context.pendingMessages.length > 0 ||
             ctx.signal?.aborted ||
             ctx.hasPendingMessages?.() ||
-            asyncRuns.size > 0)
+            asyncRuns.size > 0 ||
+            pickupOwnsContinuation)
             return;
         const content = continuation.take(store.getState());
         if (!content)
             return;
         return {
             entries: [
+                ...(event.entries ?? []),
                 {
                     type: "custom_message",
                     customType: "pi-tasks:yield-check",
