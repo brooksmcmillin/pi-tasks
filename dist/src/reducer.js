@@ -304,7 +304,10 @@ function reworkTask(state, event) {
         insertionIndex = task.planSteps.findIndex((step) => step.id === event.beforeStepId);
         const target = task.planSteps[insertionIndex];
         if (!target || target.status === "done" || target.status === "skipped") {
-            throw new TaskTransitionError(`Rework target ${event.beforeStepId} must be an open plan step`);
+            throw new TaskTransitionError(`Rework target ${event.beforeStepId} must be an open plan step. Choose an explicit open target from: ${task.planSteps
+                .filter((step) => step.status !== "done" && step.status !== "skipped")
+                .map((step) => step.id)
+                .join(", ") || "none"}; omit before_step_id only if appending is intended. No steps were added.`);
         }
     }
     const previousCurrent = getCurrentOpenStep(task);

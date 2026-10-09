@@ -4,6 +4,7 @@
 
 ### Added
 
+- Compact `task_rework.remediation` authoring with explicit finding, deliverable, scope and verification; derives ordinary step metadata from an optional atomicity attestation while preserving detailed inputs, evidence gates and replay. Invalid insertion targets return explicit correction choices without silently appending.
 - Optional bounded orchestration handoff lanes in `task_checkpoint`, retained by compaction snapshots and exposed by `task_resume` as historical identities requiring live ownership/head checks, never as execution or publication authority.
 
 - Added optional `task_rework.before_step_id` to insert findings-driven repairs before an existing open gate in one mutation, preserving gate obligations, stable IDs, evidence history, and legacy append behavior.

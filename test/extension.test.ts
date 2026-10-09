@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { normalizeReworkInput } from "../src/remediation.ts";
 import type { TaskStateEvent } from "../src/state-events.ts";
+import {
+	compactExample,
+	compactRemediation,
+	detailedRemediation,
+	fourActionsRemediation,
+} from "./fixtures/remediation.ts";
 
 const sdkRoot = process.env.PI_SDK_ROOT;
 if (!sdkRoot) {
@@ -538,6 +545,134 @@ describe("native Pi settlement advisories", () => {
 			}
 		},
 	);
+});
+
+describe("compact remediation native validation and local benchmark", () => {
+	it("replays observed action-limit/wording/closed-target fixtures with measured recovery calls", async () => {
+		const ai = await import(
+			pathToFileURL(join(sdkRoot, "..", "pi-ai", "dist/index.js")).href
+		);
+		const h = await createNativeSession();
+		try {
+			await requireTool(h.session, "task_plan").execute(
+				"plan",
+				validPlan(),
+				undefined,
+				undefined,
+			);
+			// Retire S1 with the ordinary replan operation, leaving the explicit S2 gate open.
+			await requireTool(h.session, "task_replan").execute(
+				"replan",
+				{
+					task_id: "T1",
+					step_ids: ["T1-S1"],
+					reason: "Replace synthetic gate",
+					plan_steps: validPlan().plan_steps,
+				},
+				undefined,
+				undefined,
+			);
+			const tool = requireTool(h.session, "task_rework");
+			const initialCount = h.sessionManager.getEntries().length;
+			let detailedCalls = 0;
+			const checked = async (input: unknown) => {
+				const args = ai.validateToolArguments(tool, {
+					type: "toolCall",
+					id: "fixture",
+					name: "task_rework",
+					arguments: input,
+				});
+				return tool.execute("fixture", args, undefined, undefined);
+			};
+			detailedCalls++;
+			await expect(checked(fourActionsRemediation)).rejects.toThrow(
+				/allowedActions/,
+			);
+			expect(h.sessionManager.getEntries()).toHaveLength(initialCount);
+			detailedCalls++;
+			const wording = await checked({
+				...detailedRemediation,
+				plan_steps: [
+					{
+						...detailedRemediation.plan_steps[0],
+						granularityCheck: {
+							...detailedRemediation.plan_steps[0].granularityCheck,
+							unit: "action",
+						},
+					},
+				],
+			});
+			expect(wording.isError).toBe(true);
+			expect(wording.content[0]?.text).toMatch(/rejects compound wording/);
+			expect(h.sessionManager.getEntries()).toHaveLength(initialCount);
+			detailedCalls++;
+			expect((await checked(detailedRemediation)).isError).not.toBe(true);
+			const compactCalls = 1;
+			expect((await checked(compactRemediation)).isError).not.toBe(true);
+			const readme = await readFile(join(taskRoot, "README.md"), "utf8");
+			const documented = [...readme.matchAll(/```json\n([\s\S]*?)\n```/g)]
+				.map((match) => JSON.parse(match[1] as string))
+				.find((example) => example.remediation);
+			expect(documented).toEqual(compactExample);
+			expect((await checked(documented)).isError).not.toBe(true);
+			const count = h.sessionManager.getEntries().length;
+			for (const before_step_id of ["T1-S1", "nonexistent"]) {
+				const rejected = await checked({
+					...compactRemediation,
+					before_step_id,
+				});
+				expect(rejected.isError).toBe(true);
+				expect(rejected.content[0]?.text).toContain(
+					"Choose an explicit open target from:",
+				);
+				expect(rejected.content[0]?.text).toContain("T1-S2");
+				expect(h.sessionManager.getEntries()).toHaveLength(count);
+			}
+			const detailed = normalizeReworkInput(detailedRemediation).planSteps[0];
+			const compact = normalizeReworkInput(compactRemediation).planSteps[0];
+			for (const field of [
+				"expectedOutput",
+				"criterionIds",
+				"evidenceRequired",
+				"decompositionStatus",
+			] as const)
+				expect(compact?.[field]).toEqual(detailed?.[field]);
+			for (const field of [
+				"unit",
+				"boundedScope",
+				"verificationPlan",
+				"isAtomic",
+				"canBeDoneInOneAgentAction",
+				"hasSingleObservableOutput",
+				"hasSingleVerificationMethod",
+				"hasNoHiddenSubtasks",
+			] as const)
+				expect(compact?.granularityCheck?.[field]).toEqual(
+					detailed?.granularityCheck?.[field],
+				);
+			const detailedBytes = Buffer.byteLength(
+				JSON.stringify(detailedRemediation),
+			);
+			const compactBytes = Buffer.byteLength(
+				JSON.stringify(compactRemediation),
+			);
+			expect(compactBytes).toBeLessThan(detailedBytes);
+			expect(compactCalls).toBeLessThan(detailedCalls);
+			console.info(
+				JSON.stringify({
+					benchmark: "sanitized-remediation-fixtures",
+					detailedBytes,
+					compactBytes,
+					detailedCalls,
+					compactCalls,
+					closedTargetCalls: 1,
+					note: "Controlled fixture calls, not elapsed time or autonomous model performance",
+				}),
+			);
+		} finally {
+			h.session.dispose();
+		}
+	});
 });
 
 describe("native Pi dynamic task tools", () => {

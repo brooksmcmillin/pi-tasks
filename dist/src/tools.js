@@ -1,6 +1,7 @@
 import { handoffSchema, validateHandoff, } from "./handoff.js";
 import { createEventId, SequentialIdGenerator, } from "./ids.js";
 import { evidenceQualityEqual, normalizeEvidenceQuality } from "./reducer.js";
+import { COMPACT_REMEDIATION_GUIDANCE, compactRemediationSchema, normalizeReworkInput, } from "./remediation.js";
 import { buildTaskResume, formatTaskFocus, formatTaskList, formatTaskNext, formatTaskReceipt, formatTaskResume, } from "./render.js";
 import { Type } from "./schema.js";
 import { TASK_TELEMETRY_EVENT } from "./state-events.js";
@@ -376,25 +377,35 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
     registerGuidedTool(pi, {
         name: "task_rework",
         label: "Task Rework",
-        description: "Review remediation: record findings and add steps without discarding evidence or history. Optionally name an open before_step_id to insert repairs before that gate; otherwise append after existing work. This does not replace a malformed plan; use task_replan when available for that.",
+        description: `Review remediation: record findings and add steps without discarding evidence or history. Optionally name an open before_step_id to insert repairs before that gate; otherwise append after existing work. This does not replace a malformed plan; use task_replan when available for that. ${COMPACT_REMEDIATION_GUIDANCE}`,
         promptSnippet: "Extend or reopen a pi-tasks task for review-discovered remediation",
         promptGuidelines: [
             REWORK_GUIDANCE,
-            "task_rework requires task_id, a non-empty reason describing findings, and non-empty plan_steps using the same contracts as task_plan. Omit criterionIds to re-verify all criteria, or name affected existing criteria.",
+            "task_rework requires task_id and either compact remediation or a non-empty reason with plan_steps using task_plan contracts. Omit criterionIds to re-verify all criteria, or name affected existing criteria.",
             "task_rework preserves prior steps, evidence, decisions, blockers, and warnings. It resets affected criteria and confidence; re-verify with new passing acceptance evidence. An identical old evidence record is deduplicated, not fresh proof; describe the observed rerun distinctly.",
             "task_rework never resolves blockers or supersedes failed evidence. Explicitly supersede linked acceptance failures with task_evidence after remediation. Never force-complete known gaps.",
             "task_rework can reopen done tasks, but not cancelled tasks, and cannot displace another active task. Use task_list to find the task ID when no task is active.",
         ],
         parameters: Type.Object({
             task_id: Type.String(),
-            reason: Type.String({ minLength: 1 }),
-            plan_steps: Type.Array(planStepSchema(), { minItems: 1 }),
+            reason: Type.Optional(Type.String({ minLength: 1 })),
+            plan_steps: Type.Optional(Type.Array(planStepSchema(), { minItems: 1 })),
+            remediation: Type.Optional(compactRemediationSchema()),
             before_step_id: Type.Optional(Type.String({ minLength: 1 })),
         }),
         execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+            let normalized;
+            try {
+                normalized = normalizeReworkInput(params);
+            }
+            catch (error) {
+                return rejectionResult(error, store, baseEvent("task.reworked", params.task_id, ctx, {
+                    reason: "",
+                    planSteps: [],
+                }));
+            }
             const event = baseEvent("task.reworked", params.task_id, ctx, {
-                reason: params.reason,
-                planSteps: params.plan_steps,
+                ...normalized,
                 ...(params.before_step_id !== undefined
                     ? { beforeStepId: params.before_step_id }
                     : {}),
@@ -968,35 +979,38 @@ function appendAndReport(pi, store, ctx, event, success, onPersisted) {
         return successResult(store, state, `${success}${warning}`, event.type === "task.created" ? undefined : previous, event.taskId);
     }
     catch (error) {
-        const resume = formatTaskResume(store.getState());
-        const recovery = buildRejectionRecovery(error, store.getState(), event);
-        return {
-            ...textResult([
-                `Error: ${errorText(error)}`,
-                "",
-                "Recovery:",
-                `- retry_with: ${recovery.retry_with}`,
-                `- do_not_retry_same_call: ${recovery.do_not_retry_same_call}`,
-                `- reason: ${recovery.reason}`,
-                `- minimum_params: ${JSON.stringify(recovery.minimum_params)}`,
-                ...(recovery.retry_example
-                    ? [
-                        "",
-                        "Unvalidated evidence retry template — requires edit before retrying:",
-                        `Resolve: ${recovery.reason}`,
-                        "Fix the rejected fields and fill placeholders using existing observations/artifacts; do not rerun successful verification or invent evidence.",
-                        "```json",
-                        JSON.stringify(recovery.retry_example, null, 2),
-                        "```",
-                    ]
-                    : []),
-                "",
-                "Recovery guidance:",
-                resume,
-            ].join("\n"), recovery),
-            isError: true,
-        };
+        return rejectionResult(error, store, event);
     }
+}
+function rejectionResult(error, store, event) {
+    const resume = formatTaskResume(store.getState());
+    const recovery = buildRejectionRecovery(error, store.getState(), event);
+    return {
+        ...textResult([
+            `Error: ${errorText(error)}`,
+            "",
+            "Recovery:",
+            `- retry_with: ${recovery.retry_with}`,
+            `- do_not_retry_same_call: ${recovery.do_not_retry_same_call}`,
+            `- reason: ${recovery.reason}`,
+            `- minimum_params: ${JSON.stringify(recovery.minimum_params)}`,
+            ...(recovery.retry_example
+                ? [
+                    "",
+                    "Unvalidated evidence retry template — requires edit before retrying:",
+                    `Resolve: ${recovery.reason}`,
+                    "Fix the rejected fields and fill placeholders using existing observations/artifacts; do not rerun successful verification or invent evidence.",
+                    "```json",
+                    JSON.stringify(recovery.retry_example, null, 2),
+                    "```",
+                ]
+                : []),
+            "",
+            "Recovery guidance:",
+            resume,
+        ].join("\n"), recovery),
+        isError: true,
+    };
 }
 function buildRejectionRecovery(error, state, event) {
     const resume = buildTaskResume(state);
