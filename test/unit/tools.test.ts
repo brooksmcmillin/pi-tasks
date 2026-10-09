@@ -447,11 +447,7 @@ describe("registered task tools", () => {
 			expect(tool.description).toContain("task_decision");
 			expect(tool.description).not.toContain("call only the recommended tool");
 		}
-		expect(rework.parameters.required).toEqual([
-			"task_id",
-			"reason",
-			"plan_steps",
-		]);
+		expect(rework.parameters.required).toEqual(["task_id"]);
 		const step = {
 			text: "Guard failed batch progress",
 			expectedOutput: "Failed batch retains previous cursor",
@@ -557,6 +553,183 @@ describe("registered task tools", () => {
 		expect(restored.getState().tasks.T1?.acceptanceCriteria[0]?.status).toBe(
 			"satisfied",
 		);
+	});
+
+	it("normalizes compact remediation through the existing persistence and replay contract", async () => {
+		const { tools, entries, ctx, store, publications } = createHarness({
+			dynamicTools: true,
+		});
+		const plan = requireTool(tools, "task_plan");
+		await execute(
+			plan,
+			{
+				title: "Trust reference",
+				objective: "Preserve trust obligations",
+				acceptance_criteria: [
+					"Trust reference is verified",
+					"Gate review is verified",
+				],
+				plan_steps: [
+					{
+						text: "Review trust reference",
+						expectedOutput: "Trust reference review report",
+						allowedActions: ["review"],
+						criterionRefs: [1],
+					},
+					{
+						text: "Publish reviewed trust reference",
+						expectedOutput: "Reviewed trust reference publication",
+						allowedActions: ["publish"],
+						criterionRefs: [2],
+					},
+				],
+			},
+			ctx,
+		);
+		const failure = await execute(
+			requireTool(tools, "task_evidence"),
+			{
+				task_id: "T1",
+				type: "test",
+				level: "unit_test",
+				passed: "false",
+				summary: "Trust reference assertion failed",
+				references: ["trust.test.ts"],
+				criterion_ids: ["T1-AC1"],
+				step_ids: ["T1-S1"],
+				quality: {
+					source: "test",
+					reproducible: true,
+					verifier: "tool",
+					command: "run trust.test.ts",
+					artifactRefs: ["trust.test.ts"],
+					observedOutput: "Trust reference assertion failed",
+				},
+			},
+			ctx,
+		);
+		expect(failure.isError).not.toBe(true);
+		const before = structuredClone(store.getState().tasks.T1);
+		const rework = requireTool(tools, "task_rework");
+		expect(rework.description).toContain(
+			"atomic=true is an explicit attestation",
+		);
+		const result = await execute(
+			rework,
+			{
+				task_id: "T1",
+				before_step_id: "T1-S2",
+				remediation: {
+					finding: "Review found incorrect trust reference",
+					deliverable: "Repair trust reference and test its exact name",
+					boundedScope:
+						"Only the trust reference and its regression assertion; exclude private keys",
+					verification: "Run the focused trust-reference regression assertion",
+					atomic: true,
+					criterionIds: ["T1-AC1"],
+				},
+			},
+			ctx,
+		);
+		expect(result.isError).not.toBe(true);
+		const task = store.getState().tasks.T1;
+		expect(task?.planSteps.map((step) => step.id)).toEqual([
+			"T1-S1",
+			"T1-S3",
+			"T1-S2",
+		]);
+		expect(task?.planSteps[0]).toEqual(before?.planSteps[0]);
+		expect(task?.planSteps[2]).toEqual(before?.planSteps[1]);
+		expect(task?.evidence).toEqual(before?.evidence);
+		expect(task?.acceptanceCriteria[0]).toMatchObject({
+			status: "pending",
+			evidenceBaseline: 1,
+		});
+		expect(task?.acceptanceCriteria[1]).toEqual(before?.acceptanceCriteria[1]);
+		expect(task?.planSteps[1]).toMatchObject({
+			evidenceRequired: true,
+			evidenceIds: [],
+			criterionIds: ["T1-AC1"],
+			decompositionStatus: "atomic",
+			granularityCheck: { unit: "deliverable", isAtomic: true },
+		});
+		expect(task?.planSteps[1]?.allowedActions).toHaveLength(2);
+		expect(entries.at(-1)).toMatchObject({
+			type: "task.reworked",
+			reason: "Review found incorrect trust reference",
+			beforeStepId: "T1-S2",
+		});
+		expect(entries.at(-1)).not.toHaveProperty("remediation");
+		const restored = createTaskRuntimeStore();
+		restored.replay(ctx.sessionManager.getBranch());
+		expect(restored.getState()).toEqual(store.getState());
+		expect(publications).toContain("pi-tasks:state");
+	});
+
+	it("rejects invalid compact contracts without persistence or publication and keeps compound work decomposable", async () => {
+		const { tools, entries, ctx, store, publications } = createHarness();
+		await execute(
+			requireTool(tools, "task_plan"),
+			{
+				title: "Review gate",
+				objective: "Preserve review gate",
+				acceptance_criteria: ["Review gate is verified"],
+				plan_steps: [
+					{
+						text: "Publish review report",
+						expectedOutput: "Review report publication record",
+						allowedActions: ["publish"],
+					},
+				],
+			},
+			ctx,
+		);
+		const remediation = {
+			finding: "Review found missing contracts",
+			deliverable: "Repair trust reference and replace the certificate parser",
+			boundedScope:
+				"Trust reference and certificate parser; exclude deployment",
+			verification: "Run trust-reference and certificate-parser fixture tests",
+		};
+		const rework = requireTool(tools, "task_rework");
+		const before = structuredClone(store.getState());
+		const count = entries.length;
+		const published = publications.length;
+		for (const params of [
+			{ remediation: null },
+			{ remediation: { ...remediation, finding: " " } },
+			{ remediation: { ...remediation, boundedScope: undefined } },
+			{ remediation: { ...remediation, verification: " " } },
+			{ remediation: { ...remediation, verification: "x".repeat(501) } },
+			{ remediation: { ...remediation, atomic: "true" } },
+			{ remediation: { ...remediation, criterionIds: [] } },
+			{ remediation: { ...remediation, criterionIds: ["unknown"] } },
+			{
+				remediation: {
+					...remediation,
+					allowedActions: ["one", "two", "three", "four"],
+				},
+			},
+			{ remediation, reason: "Detailed reason" },
+			{ remediation, plan_steps: [] },
+			{ remediation, before_step_id: "missing" },
+		]) {
+			const result = await execute(rework, { task_id: "T1", ...params }, ctx);
+			expect(result.isError).toBe(true);
+			expect(result.details).toMatchObject({
+				retry_with: "task_rework",
+				do_not_retry_same_call: true,
+			});
+			expect(store.getState()).toEqual(before);
+			expect(entries).toHaveLength(count);
+			expect(publications).toHaveLength(published);
+		}
+		const compound = await execute(rework, { task_id: "T1", remediation }, ctx);
+		expect(compound.isError).not.toBe(true);
+		expect(store.getState().tasks.T1?.planSteps[1]).toMatchObject({
+			decompositionStatus: "needs_breakdown",
+			granularityCheck: { isAtomic: false, hasNoHiddenSubtasks: false },
+		});
 	});
 
 	it("persists before_step_id once and publishes no state for invalid insertion", async () => {

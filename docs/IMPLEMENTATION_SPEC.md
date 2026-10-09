@@ -565,8 +565,23 @@ Behavior:
 
 ### 8.7.1 `task_rework`
 
-Add review remediation to the existing task with required `task_id`, non-empty
-`reason` containing findings, and non-empty `plan_steps` in the `task_plan` shape.
+Add review remediation to the existing task with required `task_id` and exactly
+one input form: non-empty `reason` containing findings plus non-empty `plan_steps`
+in the `task_plan` shape, or compact `remediation` containing `finding`,
+`deliverable`, `boundedScope`, `verification`, optional `atomic`, and optional
+`criterionIds`. Validate the compact shape before normalization/persistence.
+Finding must be nonblank, deliverable at least 12 characters, scope and verification
+12–500 characters each. Mixed forms and unknown compact fields are rejected.
+
+Compact input normalizes to one ordinary deliverable step: text/expectedOutput
+from deliverable, reason from finding, two actions bounded by scope/verification,
+evidenceRequired=true, and optional existing criterion links. `atomic=true`
+explicitly attests one bounded outcome, one cohesive implementation/verification
+cycle and no hidden subtasks; only this declaration derives the five true
+flags. Otherwise all flags remain false and the step needs decomposition.
+The normalization does not infer semantic atomicity from wording or invent
+acceptance evidence. The existing reducer validates links, quality, status and
+gates; only the normalized detailed event persists, so replay needs no migration.
 Optional `before_step_id` persists as `beforeStepId` on `task.reworked` and inserts
 repairs before that named open step (including decomposed children). Reject
 non-string/blank, nonexistent, done, or skipped targets and invalid steps before

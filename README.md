@@ -197,6 +197,57 @@ append-plus-replan sequence (two mutations), asserting equivalent remaining
 obligations without retaining private transcripts. This is a local operation-count
 benchmark, not a runtime latency or production measurement.
 
+## Compact remediation authoring
+
+For one bounded remediation, supply `remediation` instead of `reason` and
+`plan_steps` (never both). The four required fields record the finding, observable
+deliverable, owned scope/exclusions, and verification procedure:
+
+```json
+{
+  "task_id": "T1",
+  "before_step_id": "T1-S2",
+  "remediation": {
+    "finding": "Review found the trust root reference still shares private-key material",
+    "deliverable": "Reference a CA-only trust Secret and test its exact name",
+    "boundedScope": "Only the backend trust reference and its focused assertion; exclude private keys and cluster changes",
+    "verification": "Run the focused trust-reference regression test and confirm the CA-only Secret name",
+    "atomic": true,
+    "criterionIds": ["T1-AC1"]
+  }
+}
+```
+
+`atomic: true` explicitly attests one bounded observable outcome, one cohesive
+implementation/verification cycle, and no hidden subtasks. It is not an automatic
+semantic judgment: omit it (or use `false`) for compound or unchecked work, which
+remains `needs_breakdown` and requires `task_decompose` before execution. Separate
+unrelated outcomes into detailed steps rather than asserting atomicity.
+
+Normalization derives only the ordinary evidence-required deliverable step,
+two actions bounded by the supplied scope/verification, and flags from that
+explicit attestation. It does not invent evidence, finish work, resolve failures,
+or select a gate. `boundedScope` and `verification` require 12–500 characters;
+`deliverable` requires at least 12. Optional `criterionIds` names existing criteria;
+omitting it links all criteria. Closed/unknown insertion targets return available
+open IDs and require an explicit correction; they never silently append. Existing
+detailed inputs and persisted events remain compatible.
+
+The README example and sanitized historical fixtures are exercised through Pi's
+real argument validation and the same tool/reducer used in execution:
+
+```bash
+PI_SDK_ROOT=/path/to/pi-coding-agent npm run test:native -- -t 'compact remediation native'
+```
+
+The local fixture benchmark compares serialized UTF-8 input bytes and actual
+validation/tool attempts (four-action rejection, compound-wording rejection,
+then valid detailed input versus one valid compact call). Equivalent criteria,
+scope, verification and evidence/atomicity obligations are asserted. Closed-target
+rejection remains one call for either format. This is a controlled recovery
+comparison, not model performance, elapsed time, or a claim that all 19 historical
+rework calls were unnecessary.
+
 ## Repairing a mistaken plan
 
 Use `task_replan` for a planning mistake, not `task_rework` (which adds
