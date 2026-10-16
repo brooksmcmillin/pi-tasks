@@ -1086,6 +1086,8 @@ PI_SDK_ROOT=/tmp/pi-tasks-sdk-1.2.0/node_modules/@earendil-works/pi-coding-agent
 
 Observed result: passed strict typecheck, Biome, 89 unit tests, 7 native Pi SDK tests, build, source/dist import smoke, `npm pack --dry-run`, clean `pi-tasks-0.2.9.tgz` install/import, and `npm audit --audit-level=low`.
 
+The same gate also passed after a fresh `git clone --branch v0.2.9 --depth 1`, `npm ci`, and release check from `/private/tmp/pi-tasks-release-029-clean`.
+
 Deterministic large-history reproduction used 500 synthetic historical events. The transition clone received zero historical events, returned 501 events in order, preserved the existing historical references, and isolated mutable task state.
 
 Real Pi 0.87.1 source lifecycle used `openai-codex/gpt-5.6-sol` because `gpt-5.5` was unavailable for the authenticated ChatGPT account:
@@ -1100,6 +1102,19 @@ pi --provider openai-codex --model gpt-5.6-sol \
 
 Observed result: task `T1` was created, updated, blocked, unblocked, given decision `D1` and dogfood evidence `E1`, completed at 100%, and restored with the same resolved blocker, decision, and evidence in both same-session resume and fork replay. Repeating the same evidence returned existing `E1`. A second task rejected `T2-S2` before `T2-S1` and kept `T2-S1` current. Live TUI `/tasks detail` rendered both tasks and `/quit` exited cleanly.
 
+Fixed English and Traditional Chinese weak-model source prompts:
+
+```sh
+pi --provider openai-codex --model gpt-5.6-sol \
+  --no-extensions --extension ./index.ts --no-builtin-tools \
+  --tools task_resume,task_next,task_plan,task_evidence,task_update,task_complete,task_list \
+  --session-dir /private/tmp/pi-tasks-release-029-weak/sessions \
+  --session-id <release-029-weak-en|release-029-weak-zh> \
+  -p @docs/dogfood-prompts/<weak-model-en.md|weak-model-zh-TW.md>
+```
+
+Observed result: both prompts entered through `task_resume`, rejected compound atomic wording with structured `task_plan` recovery, created valid two-step tasks, rejected evidence linked to future step `T1-S2`, enforced the 500-character evidence summary limit at the host schema, and made `task_next` select only `task_evidence` for current step `T1-S1`. The Traditional Chinese run reported that its model-rendered oversized value was not the requested exact sequence of 501 `長` characters, but the host still observed an over-limit summary and rejected it at the same 500-character boundary.
+
 Installed package smoke loaded the clean release-check consumer path ending in `node_modules/pi-tasks/dist/index.js` with a separate session:
 
 ```sh
@@ -1111,6 +1126,8 @@ pi --provider openai-codex --model gpt-5.6-sol \
 ```
 
 Observed result: `task_resume` reported no active task, and the installed extension persisted task `T1` with current step `T1-S1`.
+
+The fixed installed-package English prompt also passed: `task_resume` recommended `task_plan`; `Run tests and update docs` was rejected for broad and compound wording; and recovery returned `retry_with: task_plan` plus `do_not_retry_same_call: true`.
 
 ## Package Gates
 
