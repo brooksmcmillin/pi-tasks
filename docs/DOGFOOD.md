@@ -1075,6 +1075,43 @@ pi --provider openai-codex --model gpt-5.5 \
 
 Observed result: `pi-tasks-0.2.8.tgz` installed and imported in a clean consumer with zero audit vulnerabilities. The installed extension exposed `task_resume`, recommended `task_plan`, rejected `Run tests and update docs`, and returned `retry_with: task_plan` plus `do_not_retry_same_call: true`.
 
+## 0.2.9 Release Dogfood (2026-10-16)
+
+Release candidate gate:
+
+```sh
+PI_SDK_ROOT=/tmp/pi-tasks-sdk-1.2.0/node_modules/@earendil-works/pi-coding-agent \
+  npm run release:check
+```
+
+Observed result: passed strict typecheck, Biome, 89 unit tests, 7 native Pi SDK tests, build, source/dist import smoke, `npm pack --dry-run`, clean `pi-tasks-0.2.9.tgz` install/import, and `npm audit --audit-level=low`.
+
+Deterministic large-history reproduction used 500 synthetic historical events. The transition clone received zero historical events, returned 501 events in order, preserved the existing historical references, and isolated mutable task state.
+
+Real Pi 0.87.1 source lifecycle used `openai-codex/gpt-5.6-sol` because `gpt-5.5` was unavailable for the authenticated ChatGPT account:
+
+```sh
+pi --provider openai-codex --model gpt-5.6-sol \
+  --no-extensions --extension ./index.ts --no-builtin-tools \
+  --tools task_resume,task_plan,task_update,task_evidence,task_decision,task_complete,task_list \
+  --session-dir /private/tmp/pi-tasks-release-029/sessions \
+  --session-id release-029-lifecycle-final
+```
+
+Observed result: task `T1` was created, updated, blocked, unblocked, given decision `D1` and dogfood evidence `E1`, completed at 100%, and restored with the same resolved blocker, decision, and evidence in both same-session resume and fork replay. Repeating the same evidence returned existing `E1`. A second task rejected `T2-S2` before `T2-S1` and kept `T2-S1` current. Live TUI `/tasks detail` rendered both tasks and `/quit` exited cleanly.
+
+Installed package smoke loaded the clean release-check consumer path ending in `node_modules/pi-tasks/dist/index.js` with a separate session:
+
+```sh
+pi --provider openai-codex --model gpt-5.6-sol \
+  --no-extensions --extension <release-check-consumer>/node_modules/pi-tasks/dist/index.js \
+  --no-builtin-tools --tools task_resume,task_plan \
+  --session-dir /private/tmp/pi-tasks-release-029-installed/sessions \
+  --session-id release-029-installed-final
+```
+
+Observed result: `task_resume` reported no active task, and the installed extension persisted task `T1` with current step `T1-S1`.
+
 ## Package Gates
 
 Also passed across release gates:

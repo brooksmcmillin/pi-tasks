@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-10-16
+
+### Fixed
+- Stopped reducer replay from repeatedly deep-cloning accumulated event history that is immediately replaced, removing the dominant cost behind reported large-session startup timeouts while preserving immutable task-state transitions and append-only history.
+
 ## [0.2.8] - 2026-10-14
 
 ### Fixed
