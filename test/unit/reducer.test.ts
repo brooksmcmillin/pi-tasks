@@ -958,6 +958,46 @@ describe("task reducer", () => {
 		expect(state.tasks.T1.cancelledAt).toBe(now);
 	});
 
+	it("does not deep-clone accumulated event history", () => {
+		const initial = reduceTaskState(createEmptyState(), created());
+		const state: TaskState = {
+			...initial,
+			events: Array.from({ length: 500 }, (_, index) => ({
+				...created(),
+				id: `historic-${index}`,
+			})),
+		};
+		const stateBeforeRejectedTransition = structuredClone(state);
+		const originalStructuredClone = globalThis.structuredClone;
+		const clonedEventCounts: number[] = [];
+		globalThis.structuredClone = <T>(value: T): T => {
+			const candidate = value as { events?: unknown };
+			if (Array.isArray(candidate.events)) {
+				clonedEventCounts.push(candidate.events.length);
+			}
+			return originalStructuredClone(value);
+		};
+
+		try {
+			const updateEvent = updated({ progress: 42 });
+			const next = reduceTaskState(state, updateEvent);
+
+			expect(clonedEventCounts).toEqual([0]);
+			expect(next.events).toHaveLength(501);
+			expect(next.events[0]).toBe(state.events[0]);
+			expect(next.events.at(-1)).toBe(updateEvent);
+			expect(next.tasks.T1).not.toBe(state.tasks.T1);
+
+			expect(() => reduceTaskState(state, updated({ status: "done" }))).toThrow(
+				"Use task_complete",
+			);
+			expect(clonedEventCounts).toEqual([0, 0]);
+			expect(state).toEqual(stateBeforeRejectedTransition);
+		} finally {
+			globalThis.structuredClone = originalStructuredClone;
+		}
+	});
+
 	it("replay reconstructs the same state", () => {
 		const events = [created(), ...evidenceThenStepDone(), complete()];
 		expect(replayTaskEvents(events)).toEqual(apply(events));

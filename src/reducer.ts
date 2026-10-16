@@ -1401,7 +1401,7 @@ function clampProgress(progress: number): number {
 }
 
 function cloneState(state: TaskState): TaskState {
-	return structuredClone(state);
+	return structuredClone({ ...state, events: [] });
 }
 
 function unique(values: string[]): string[] {
