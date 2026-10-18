@@ -8,6 +8,13 @@ AI coding agents say "done" without proof. Context compaction loses progress. Mu
 
 **pi-tasks** gives your Pi agent a binding execution contract: structured plans, evidence gates, ordered execution, and compaction-safe resume — all visible in your TUI.
 
+## Optional passive telemetry
+
+An opt-in companion records private phase/compaction metadata without changing
+compaction policy or collecting content. It is not loaded by default. See the
+[telemetry contract and local benchmark](docs/compaction-telemetry.md) for loading,
+producer markers, privacy, missingness and report integration.
+
 ## What makes it different
 
 Every other task tool for AI agents is just a todo list. pi-tasks enforces three hard contracts no competitor offers:

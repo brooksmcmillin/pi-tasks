@@ -117,6 +117,14 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Classify an already-simple current step through `task_update.step_granularity_check` without replacing its identity or creating artificial children. Require an explicit reason, all atomicity flags, and ordinary quality validation; preserve evidence, criteria, blockers, and completion gates.
 - Plan deliverables rather than support reads, staging, or receipt bookkeeping. Keep mechanics within the deliverable's allowed execution. Decompose genuinely compound work; classification is not verification or authority to bypass an evidence gate.
 
+## Passive Telemetry Contract
+
+- Keep the companion opt-in and separate from task authority and compaction policy.
+- Serialize only the versioned allowlist; hash identifiers and never collect prompt, response, tool, error or authorization content.
+- Preserve null/zero and context/operation-usage distinctions. Keep incomplete and invalid observations visible; telemetry failure must not block ordinary work.
+- Reject duplicate event delivery before changing correlation. Native message_end precedes persistence; a tree leaf is not assistant identity. Invalidate config fingerprints on model changes.
+- Phase/recovery markers are explicit producer observations, not inferred semantics or fresh authority. Document proof limits in `docs/compaction-telemetry.md`.
+
 ## Verification Rules
 
 Before claiming readiness:
