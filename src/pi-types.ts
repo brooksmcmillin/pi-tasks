@@ -71,7 +71,17 @@ export interface ExtensionAPI {
 	): void;
 	on(
 		event: "session_before_compact",
-		handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void,
+		handler: (
+			event: {
+				customInstructions?: string;
+				preparation: { settings: { keepRecentTokens: number } };
+			},
+			ctx: ExtensionContext,
+		) => Promise<undefined | { cancel: true }> | undefined | { cancel: true },
+	): void;
+	on(
+		event: "agent_settled",
+		handler: (event: { aborted: boolean }, ctx: ExtensionContext) => void,
 	): void;
 	on(
 		event: "turn_end",
@@ -96,7 +106,7 @@ export interface ExtensionAPI {
 	): void;
 	sendMessage?(
 		message: { customType: string; content: string; display: boolean },
-		options: { deliverAs: "followUp" },
+		options: { deliverAs: "followUp"; triggerTurn?: boolean },
 	): void;
 	registerTool<TParams extends Record<string, unknown>>(
 		tool: ToolDefinition<TParams>,
@@ -109,6 +119,16 @@ export interface ExtensionAPI {
 }
 
 export interface ExtensionContext {
+	cwd?: string;
+	isIdle?(): boolean;
+	getContextUsage?():
+		| { tokens: number | null; contextWindow: number }
+		| undefined;
+	compact?(options?: {
+		customInstructions?: string;
+		onComplete?: () => void;
+		onError?: (error: Error) => void;
+	}): void;
 	signal?: AbortSignal;
 	hasPendingMessages?(): boolean;
 	sessionManager: {

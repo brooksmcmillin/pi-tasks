@@ -33,6 +33,18 @@ export function usage(value) {
         },
     };
 }
+const POLICY_DECISIONS = [
+    "baseline",
+    "unknown-context",
+    "busy",
+    "below-eligibility",
+    "unknown-checkpoint",
+    "fallback",
+    "phase-target",
+    "before-target",
+    "await-phase-boundary",
+    "retention-mismatch",
+];
 const nullable = (check) => (value) => value === null || check(value);
 const numeric = (value) => number(value) !== null;
 const digest = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
@@ -110,7 +122,12 @@ const recordChecks = {
         children: member(["pass", "mismatch", "unknown"]),
     })),
 };
-const validRecord = (value) => shape(recordChecks)(value);
+const validRecord = (value) => {
+    const { policyDecision, ...record } = object(value);
+    return (shape(recordChecks)(record) &&
+        (policyDecision === undefined ||
+            POLICY_DECISIONS.includes(policyDecision)));
+};
 /** Immutable, exclusive event files give replay deduplication without a second index. */
 export class TelemetryStore {
     directory;
@@ -389,7 +406,9 @@ export function createCollector(store, warn, now = () => new Date().toISOString(
                 const checks = object(data.recovery);
                 const verdict = (key) => choice(checks[key], ["pass", "mismatch", "unknown"]) ??
                     "unknown";
+                const policyDecision = choice(data.policyDecision, POLICY_DECISIONS);
                 write(kind, data.id, {
+                    ...(policyDecision ? { policyDecision } : {}),
                     compactionId: data.compactionId === undefined
                         ? lastCompactionId
                         : identity(data.compactionId),

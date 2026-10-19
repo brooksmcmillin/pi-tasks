@@ -1,7 +1,7 @@
 import type { TaskState } from "./model.ts";
 import { buildTaskResume } from "./render.ts";
 
-const EXECUTION_TOOLS = new Set([
+export const EXECUTION_TOOLS = new Set([
 	"task_plan",
 	"task_decompose",
 	"task_rework",
@@ -11,6 +11,23 @@ const EXECUTION_TOOLS = new Set([
 	"task_evidence_batch",
 	"task_verify_step",
 ]);
+
+/** Inactive creation returns the old active task's resume contract. */
+export function executionTaskId(
+	name: string,
+	input: Record<string, unknown>,
+	details?: unknown,
+): string | undefined {
+	if (name !== "task_plan")
+		return typeof input.task_id === "string" ? input.task_id : undefined;
+	return input.activate !== false &&
+		details &&
+		typeof details === "object" &&
+		"taskId" in details &&
+		typeof details.taskId === "string"
+		? details.taskId
+		: undefined;
+}
 
 /** One advisory per input, not an automatic task-completion loop. */
 export function createContinuationAdvisory() {
@@ -31,19 +48,7 @@ export function createContinuationAdvisory() {
 			details?: unknown,
 		) {
 			if (isError || !EXECUTION_TOOLS.has(name)) return;
-			if (name === "task_plan") {
-				// Inactive creation returns the old active task's resume contract.
-				taskId =
-					input.activate !== false &&
-					details &&
-					typeof details === "object" &&
-					"taskId" in details &&
-					typeof details.taskId === "string"
-						? details.taskId
-						: undefined;
-			} else {
-				taskId = typeof input.task_id === "string" ? input.task_id : undefined;
-			}
+			taskId = executionTaskId(name, input, details);
 		},
 		take(state: TaskState): string | undefined {
 			if (sent || !taskId || state.activeTaskId !== taskId) return;

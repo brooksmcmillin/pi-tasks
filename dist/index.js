@@ -1,4 +1,5 @@
 import { registerTaskCommands } from "./src/commands.js";
+import { registerCompactionPilot } from "./src/compaction-pilot.js";
 import { createContinuationAdvisory } from "./src/continuation.js";
 import { PICKUP_OWNERSHIP_EVENT, pickupOwnsRecovery, } from "./src/pickup-ownership.js";
 import { buildTaskResume } from "./src/render.js";
@@ -70,6 +71,7 @@ export default function (pi) {
     };
     const replay = (ctx, reason) => {
         continuation.reset();
+        pilot.reset();
         const result = store.replay(ctx.sessionManager.getBranch());
         reconcileTaskTools(pi, result.state);
         updateTaskUi(pi, ctx, result.state, reason);
@@ -82,14 +84,19 @@ export default function (pi) {
         replay(ctx, "session_start");
     });
     pi.on("session_tree", async (_event, ctx) => replay(ctx, "session_tree"));
-    pi.on("input", () => continuation.reset());
+    pi.on("input", () => {
+        continuation.reset();
+        pilot.reset();
+    });
     pi.on("session_shutdown", () => {
+        pilot.shutdown();
         continuation.reset();
         clearAsync();
         unsubscribePickup?.();
         pickupOwnsContinuation = false;
     });
     pi.on("tool_result", (event) => {
+        pilot.observeTool(event);
         if (pickupOwnsContinuation && !pickupHasRecoveryState)
             continuation.relinquish();
         continuation.observeToolResult(event.toolName, event.isError, event.input, event.details);
@@ -119,7 +126,7 @@ export default function (pi) {
             continue: true,
         };
     });
-    pi.on("session_before_compact", async (_event, ctx) => {
+    pi.on("session_before_compact", async (compactEvent, ctx) => {
         const state = store.getState();
         if (Object.keys(state.tasks).length > 0) {
             const createdAt = new Date().toISOString();
@@ -139,7 +146,9 @@ export default function (pi) {
             });
             updateTaskUi(pi, ctx, next, "task_mutation");
         }
+        return pilot.before(compactEvent);
     });
+    const pilot = registerCompactionPilot(pi, store, () => asyncRuns.size > 0);
     registerTaskTools(pi, store);
     registerTaskCommands(pi, store);
 }

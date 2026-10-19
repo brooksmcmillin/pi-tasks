@@ -15,6 +15,17 @@ compaction policy or collecting content. It is not loaded by default. See the
 [telemetry contract and local benchmark](docs/compaction-telemetry.md) for loading,
 producer markers, privacy, missingness and report integration.
 
+## Optional checkpoint-backed compaction pilot
+
+Set `PI_TASKS_COMPACTION_COHORT=baseline` or `pilot` to persist an explicit cohort
+for each root task/session. Pilot sessions request native compaction at safe idle
+phase boundaries around 125k current-context tokens (150k fallback), retain the
+native 20k recent-token policy, and expose scoped checkpoint recovery through
+`task_resume`. Native overflow recovery remains untouched. No cohort is enabled
+by default, and this does not activate a local rollout. See the
+[pilot contract and controlled replay](docs/compaction-pilot.md) for smaller-model
+limits, native scheduling constraints, fresh authority checks and rollback.
+
 ## What makes it different
 
 Every other task tool for AI agents is just a todo list. pi-tasks enforces three hard contracts no competitor offers:

@@ -62,7 +62,21 @@ export interface ExtensionAPI {
         on?(event: string, handler: (data: unknown) => void): () => void;
     };
     on(event: "session_start" | "session_tree" | "input" | "session_shutdown", handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void): void;
-    on(event: "session_before_compact", handler: (event: unknown, ctx: ExtensionContext) => Promise<void> | void): void;
+    on(event: "session_before_compact", handler: (event: {
+        customInstructions?: string;
+        preparation: {
+            settings: {
+                keepRecentTokens: number;
+            };
+        };
+    }, ctx: ExtensionContext) => Promise<undefined | {
+        cancel: true;
+    }> | undefined | {
+        cancel: true;
+    }): void;
+    on(event: "agent_settled", handler: (event: {
+        aborted: boolean;
+    }, ctx: ExtensionContext) => void): void;
     on(event: "turn_end", handler: (event: TurnEndEvent, ctx: ExtensionContext) => Promise<void> | void): void;
     on(event: "agent_before_settle", handler: (event: SettlementEvent, ctx: ExtensionContext) => SettlementResult | undefined): void;
     on(event: "tool_result", handler: (event: TaskToolResultEvent, ctx: ExtensionContext) => Promise<void> | void): void;
@@ -72,6 +86,7 @@ export interface ExtensionAPI {
         display: boolean;
     }, options: {
         deliverAs: "followUp";
+        triggerTurn?: boolean;
     }): void;
     registerTool<TParams extends Record<string, unknown>>(tool: ToolDefinition<TParams>): void;
     registerCommand(name: string, options: RegisteredCommand): void;
@@ -83,6 +98,17 @@ export interface ExtensionAPI {
     setActiveTools?(names: string[]): void;
 }
 export interface ExtensionContext {
+    cwd?: string;
+    isIdle?(): boolean;
+    getContextUsage?(): {
+        tokens: number | null;
+        contextWindow: number;
+    } | undefined;
+    compact?(options?: {
+        customInstructions?: string;
+        onComplete?: () => void;
+        onError?: (error: Error) => void;
+    }): void;
     signal?: AbortSignal;
     hasPendingMessages?(): boolean;
     sessionManager: {

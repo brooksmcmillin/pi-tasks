@@ -125,6 +125,15 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Reject duplicate event delivery before changing correlation. Native message_end precedes persistence; a tree leaf is not assistant identity. Invalidate config fingerprints on model changes.
 - Phase/recovery markers are explicit producer observations, not inferred semantics or fresh authority. Document proof limits in `docs/compaction-telemetry.md`.
 
+## Compaction Pilot Contract
+
+- Require explicit persisted baseline/pilot assignment per root task/session; replay and inherited forks preserve it. Keep intervention independently disableable.
+- Use native summarization only at safe idle boundaries; never abort active tools to satisfy an early token target. Native threshold/overflow recovery remains available. Require effective 20k retention only for pilot-owned attempts.
+- Persist checkpoint identities in private session entries alongside existing task snapshots, never in a second authority store. Unknown checkpoint identity skips pilot intervention; unbound evidence or external observations remain unknown.
+- Recovery compares operation-scoped observations, never grants permission, reclaims ownership or relaunches children. A source/head match is not fresh execution authority; preserve task/PR/run/authorization gates and invalidate only affected evidence.
+- Only a successful pilot-owned compaction with current-input execution engagement may request one recovery follow-up. Preserve user redirection, abnormal outcomes, waits and native/installed continuation ownership. Read-only queries or checkpoint calls alone do not arm continuation.
+- Emit allowlisted trigger/deferral and recovery telemetry without content. Test real native-hook dispatch plus controlled failure/continuation replay; distinguish that evidence from runtime activation or semantic recovery guarantees.
+
 ## Verification Rules
 
 Before claiming readiness:

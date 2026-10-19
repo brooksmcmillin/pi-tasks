@@ -54,7 +54,20 @@ export function usage(value: unknown) {
 	};
 }
 
+const POLICY_DECISIONS = [
+	"baseline",
+	"unknown-context",
+	"busy",
+	"below-eligibility",
+	"unknown-checkpoint",
+	"fallback",
+	"phase-target",
+	"before-target",
+	"await-phase-boundary",
+	"retention-mismatch",
+] as const;
 export interface TelemetryRecord {
+	policyDecision?: (typeof POLICY_DECISIONS)[number];
 	schemaVersion: 1;
 	sequence: number;
 	id: string;
@@ -138,7 +151,10 @@ const counters = shape({
 	cacheWrite: nullable(numeric),
 	total: nullable(numeric),
 });
-const recordChecks: Record<keyof TelemetryRecord, Check> = {
+const recordChecks: Record<
+	Exclude<keyof TelemetryRecord, "policyDecision">,
+	Check
+> = {
 	schemaVersion: member([1]),
 	sequence: (value) =>
 		typeof value === "number" && Number.isSafeInteger(value) && value > 0,
@@ -199,8 +215,16 @@ const recordChecks: Record<keyof TelemetryRecord, Check> = {
 		}),
 	),
 };
-const validRecord = (value: unknown): value is TelemetryRecord =>
-	shape(recordChecks)(value);
+const validRecord = (value: unknown): value is TelemetryRecord => {
+	const { policyDecision, ...record } = object(value);
+	return (
+		shape(recordChecks)(record) &&
+		(policyDecision === undefined ||
+			POLICY_DECISIONS.includes(
+				policyDecision as (typeof POLICY_DECISIONS)[number],
+			))
+	);
+};
 
 /** Immutable, exclusive event files give replay deduplication without a second index. */
 export class TelemetryStore {
@@ -525,7 +549,9 @@ export function createCollector(
 				const verdict = (key: string) =>
 					choice(checks[key], ["pass", "mismatch", "unknown"] as const) ??
 					"unknown";
+				const policyDecision = choice(data.policyDecision, POLICY_DECISIONS);
 				write(kind, data.id, {
+					...(policyDecision ? { policyDecision } : {}),
 					compactionId:
 						data.compactionId === undefined
 							? lastCompactionId
