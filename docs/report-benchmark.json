@@ -1,0 +1,16 @@
+{
+	"schemaVersion": 1,
+	"fixture": true,
+	"calendar": "Sat *-*-* 09:00:00 America/Los_Angeles",
+	"calendarValidated": true,
+	"scheduler": "systemd user transient timer and manually triggered oneshot",
+	"persistent": "yes",
+	"firstNotifications": 2,
+	"replayNotifications": 0,
+	"missedWindowNotifications": 1,
+	"mismatchAlertsAcrossPeriods": 1,
+	"historyPeriods": 2,
+	"latest": "2026-11-07T17:00:00.000Z",
+	"elapsedMs": 155,
+	"limitations": "Synthetic clock and notification sink; no live installation, real desktop receipt, daemon restart or runtime cohort performance proved."
+}

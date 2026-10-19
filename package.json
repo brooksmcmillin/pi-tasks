@@ -43,7 +43,7 @@
 	],
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json",
-		"check": "biome check --write --error-on-warnings index.ts telemetry.ts src test docs README.md CHANGELOG.md package.json package-lock.json tsconfig.json tsconfig.build.json",
+		"check": "biome check --write --error-on-warnings index.ts telemetry.ts report.ts src test docs README.md CHANGELOG.md package.json package-lock.json tsconfig.json tsconfig.build.json",
 		"prepack": "npm run build",
 		"release:check": "scripts/release-check.sh",
 		"test": "vitest --run test/unit/",

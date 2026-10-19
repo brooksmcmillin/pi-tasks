@@ -1,0 +1,8 @@
+[Unit]
+Description=Generate private Pi compaction comparison and desktop notifications
+
+[Service]
+Type=oneshot
+UMask=0077
+NoNewPrivileges=true
+ExecStart=/usr/bin/env node %h/.local/share/pi-tasks/dist/report.js
