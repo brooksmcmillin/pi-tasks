@@ -18,7 +18,9 @@ export declare function usage(value: unknown): {
         total: number | null;
     };
 };
+declare const POLICY_DECISIONS: readonly ["baseline", "unknown-context", "busy", "below-eligibility", "unknown-checkpoint", "fallback", "phase-target", "before-target", "await-phase-boundary", "retention-mismatch"];
 export interface TelemetryRecord {
+    policyDecision?: (typeof POLICY_DECISIONS)[number];
     schemaVersion: 1;
     sequence: number;
     id: string;

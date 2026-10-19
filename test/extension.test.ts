@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeReworkInput } from "../src/remediation.ts";
 import type { TaskStateEvent } from "../src/state-events.ts";
 import {
@@ -196,6 +197,7 @@ async function createNativeSession(
 		excludeTools?: string[];
 		foreignTaskNotes?: boolean;
 		telemetry?: boolean;
+		thresholdContinuation?: boolean;
 		queuedSettlement?: boolean;
 		pickupOrder?: "first" | "last";
 		noTools?: "all" | "builtin";
@@ -214,6 +216,11 @@ async function createNativeSession(
 	const events: TaskStateEvent[] = [];
 	const extensionPaths = [join(taskRoot, "index.ts")];
 	if (options.telemetry) extensionPaths.push(join(taskRoot, "telemetry.ts"));
+	if (options.thresholdContinuation)
+		extensionPaths.push(
+			process.env.PI_THRESHOLD_CONTINUATION_EXTENSION ??
+				join(taskRoot, "test/fixtures/resume-after-threshold-compaction.ts"),
+		);
 	if (options.pickupOrder) {
 		const pickupPath = join(
 			taskRoot,
@@ -282,6 +289,321 @@ async function createNativeSession(
 	await result.session.bindExtensions(result.extensionsResult);
 	return { ...result, base, cwd, sessionDir, events, sessionManager, eventBus };
 }
+
+describe("native compaction recovery replay benchmark", () => {
+	it("keeps next-action continuity and one continuation owner across native hook paths", async () => {
+		vi.stubEnv("PI_TASKS_COMPACTION_COHORT", "pilot");
+		const directory = await mkdtemp(join(tmpdir(), "pi-pilot-replay-"));
+		cleanups.push(directory);
+		vi.stubEnv("PI_TASKS_TELEMETRY_DIR", directory);
+		const h = await createNativeSession({
+			telemetry: true,
+			thresholdContinuation: true,
+		});
+		const runner = h.session.extensionRunner;
+		const errors: unknown[] = [];
+		const stopErrors = runner.onError((error: unknown) => errors.push(error));
+		const send = vi
+			.spyOn(h.session, "sendCustomMessage")
+			.mockResolvedValue(undefined);
+		try {
+			execFileSync("git", ["init", "-b", "pilot"], {
+				cwd: h.cwd,
+				stdio: "pipe",
+			});
+			execFileSync(
+				"git",
+				[
+					"-c",
+					"user.name=Test",
+					"-c",
+					"user.email=test@example.com",
+					"commit",
+					"--allow-empty",
+					"-m",
+					"fixture",
+				],
+				{ cwd: h.cwd, stdio: "pipe" },
+			);
+			h.sessionManager.appendMessage({
+				role: "user",
+				content: "Implement only the bounded fixture",
+				timestamp: Date.now(),
+			});
+			appendNativeToolCall(h.sessionManager);
+			await requireTool(h.session, "task_plan").execute(
+				"pilot-plan",
+				validPlan(),
+			);
+			const before = (
+				await requireTool(h.session, "task_resume").execute("before", {})
+			).details;
+			const emitBefore = (
+				reason: string,
+				instructions?: string,
+				retention = 20_000,
+			) =>
+				runner.emit({
+					type: "session_before_compact",
+					reason,
+					willRetry: reason === "overflow",
+					customInstructions: instructions,
+					preparation: {
+						tokensBefore: 125_000,
+						settings: { reserveTokens: 16_384, keepRecentTokens: retention },
+					},
+					branchEntries: h.sessionManager.getBranch(),
+					signal: new AbortController().signal,
+				});
+			const emitSuccess = (reason: string, id: string) =>
+				runner.emit({
+					type: "session_compact",
+					reason,
+					willRetry: reason === "overflow",
+					fromExtension: false,
+					compactionEntry: {
+						id,
+						timestamp: new Date().toISOString(),
+						tokensBefore: 125_000,
+					},
+				});
+			const rows: Array<{
+				path: string;
+				extensionContinuations: number;
+				nativeRetry: boolean;
+			}> = [];
+			for (const reason of ["manual", "threshold", "overflow"]) {
+				send.mockClear();
+				const hook = await emitBefore(reason);
+				expect(hook?.cancel).not.toBe(true);
+				expect(hook?.compaction).toBeUndefined();
+				await emitSuccess(reason, `native-${reason}`);
+				const count = reason === "threshold" ? 1 : 0;
+				expect(send).toHaveBeenCalledTimes(count);
+				rows.push({
+					path: reason,
+					extensionContinuations: send.mock.calls.length,
+					nativeRetry: reason === "overflow",
+				});
+			}
+			send.mockClear();
+			await emitBefore("threshold");
+			await runner.emit({
+				type: "session_compact_failed",
+				reason: "threshold",
+				willRetry: false,
+				aborted: false,
+				errorMessage: "fixture failure",
+				fromExtension: false,
+			});
+			expect(send).not.toHaveBeenCalled();
+			rows.push({
+				path: "failure",
+				extensionContinuations: 0,
+				nativeRetry: false,
+			});
+			const usageSpy = vi.spyOn(h.session, "getContextUsage").mockReturnValue({
+				tokens: 150_000,
+				contextWindow: 1_000_000,
+				percent: 15,
+			});
+			const compactSpy = vi
+				.spyOn(h.session, "compact")
+				.mockImplementation(async (instructions?: string) => {
+					await emitBefore("manual", instructions);
+					await emitSuccess("manual", "pilot-native");
+					return {
+						summary: "synthetic native hook replay",
+						firstKeptEntryId: "fixture",
+						tokensBefore: 150_000,
+					};
+				});
+			// Direct tool.execute above bypasses the agent's normal tool_result dispatch.
+			await runner.emitToolResult({
+				type: "tool_result",
+				toolName: "task_plan",
+				toolCallId: "pilot-plan",
+				input: validPlan(),
+				content: [],
+				details: before,
+				isError: false,
+			});
+			// Real ExtensionContext.compact dispatches asynchronously through AgentSession.compact.
+			await runner.emit({ type: "agent_settled", aborted: false });
+			await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+			expect(compactSpy).toHaveBeenCalledTimes(1);
+			expect(send.mock.calls[0]?.[0]).toMatchObject({
+				customType: "pi-tasks:compaction-recovery",
+				content: expect.stringContaining("Call task_resume"),
+			});
+			const after = (
+				await requireTool(h.session, "task_resume").execute("after", {})
+			).details;
+			expect(after.currentStepId).toBe(before.currentStepId);
+			expect(after.recovery.checks).toMatchObject({
+				identity: "pass",
+				authority: "unknown",
+				authorityGranted: false,
+			});
+			expect(after.recovery.checkpoint.nextAction).toBe(before.currentStepText);
+			rows.push({
+				path: "pilot",
+				extensionContinuations: 1,
+				nativeRetry: false,
+			});
+			compactSpy.mockRestore();
+			usageSpy.mockRestore();
+			const { TelemetryStore } = await import("../src/compaction-telemetry.ts");
+			const records = new TelemetryStore(directory).read().records;
+			expect(records.some((r) => r.policyDecision === "fallback")).toBe(true);
+			expect(
+				records.filter(
+					(r) => r.kind === "compaction_end" && r.outcome === "failure",
+				),
+			).toHaveLength(1);
+			expect(errors).toEqual([]);
+			console.log(
+				JSON.stringify({
+					benchmark: "native-hook-recovery-replay",
+					sdk: sdkRoot,
+					continuation:
+						process.env.PI_THRESHOLD_CONTINUATION_EXTENSION ?? "pinned fixture",
+					rows,
+					nextActionContinuity: true,
+					telemetryRecords: records.length,
+					limits:
+						"Synthetic dispatch and compaction transport; no provider summarization, activation or live performance claim",
+				}),
+			);
+		} finally {
+			send.mockRestore();
+			stopErrors();
+			h.session.dispose();
+			vi.unstubAllEnvs();
+		}
+	});
+});
+
+describe("native pilot lifecycle interruptions", () => {
+	it.each([
+		"input",
+		"session_tree",
+		"session_shutdown",
+		"pending",
+		"live-child",
+	])("suppresses outstanding recovery after %s dispatch", async (boundary) => {
+		vi.stubEnv("PI_TASKS_COMPACTION_COHORT", "pilot");
+		const h = await createNativeSession();
+		const runner = h.session.extensionRunner;
+		const errors: unknown[] = [];
+		const stopErrors = runner.onError((error: unknown) => errors.push(error));
+		const send = vi
+			.spyOn(h.session, "sendCustomMessage")
+			.mockResolvedValue(undefined);
+		const usage = vi.spyOn(h.session, "getContextUsage").mockReturnValue({
+			tokens: 150_000,
+			contextWindow: 1_000_000,
+			percent: 15,
+		});
+		const pending = vi
+			.spyOn(h.session, "pendingMessageCount", "get")
+			.mockReturnValue(0);
+		let finish: ((value: unknown) => void) | undefined;
+		let completion: Promise<unknown> | undefined;
+		const compact = vi.spyOn(h.session, "compact").mockImplementation(() => {
+			completion = new Promise((resolve) => {
+				finish = resolve;
+			});
+			return completion;
+		});
+		try {
+			execFileSync("git", ["init", "-b", "pilot"], {
+				cwd: h.cwd,
+				stdio: "pipe",
+			});
+			execFileSync(
+				"git",
+				[
+					"-c",
+					"user.name=Test",
+					"-c",
+					"user.email=test@example.com",
+					"commit",
+					"--allow-empty",
+					"-m",
+					"fixture",
+				],
+				{ cwd: h.cwd, stdio: "pipe" },
+			);
+			h.sessionManager.appendMessage({
+				role: "user",
+				content: "Implement bounded fixture",
+				timestamp: Date.now(),
+			});
+			appendNativeToolCall(h.sessionManager);
+			await requireTool(h.session, "task_plan").execute("plan", validPlan());
+			await runner.emitToolResult({
+				type: "tool_result",
+				toolName: "task_plan",
+				toolCallId: "plan",
+				input: validPlan(),
+				content: [],
+				details: { taskId: "T1" },
+				isError: false,
+			});
+			const sessionId = h.sessionManager.getSessionId();
+			// Check both admission suppression and an interruption after dispatch.
+			if (boundary === "pending") pending.mockReturnValue(1);
+			if (boundary === "live-child")
+				h.eventBus.emit("subagent:async-started", {
+					sessionId,
+					id: "existing-run",
+				});
+			if (boundary === "pending" || boundary === "live-child") {
+				await runner.emit({ type: "agent_settled", aborted: false });
+				expect(compact).not.toHaveBeenCalled();
+				pending.mockReturnValue(0);
+				h.eventBus.emit("subagent:async-complete", {
+					sessionId,
+					runId: "existing-run",
+				});
+			}
+			await runner.emit({ type: "agent_settled", aborted: false });
+			expect(compact).toHaveBeenCalledTimes(1);
+			if (boundary === "pending") pending.mockReturnValue(1);
+			else if (boundary === "live-child")
+				h.eventBus.emit("subagent:async-started", {
+					sessionId,
+					id: "existing-run",
+				});
+			else
+				await runner.emit({
+					type: boundary,
+					text: "redirect",
+					source: "interactive",
+					reason: "quit",
+				});
+			finish?.({
+				summary: "fixture",
+				firstKeptEntryId: "fixture",
+				tokensBefore: 150_000,
+			});
+			await completion;
+			// Drain the real context callback, without starting any provider request.
+			await Promise.resolve();
+			expect(send).not.toHaveBeenCalled();
+			expect(errors).toEqual([]);
+		} finally {
+			compact.mockRestore();
+			pending.mockRestore();
+			usage.mockRestore();
+			send.mockRestore();
+			stopErrors();
+			h.session.dispose();
+			vi.unstubAllEnvs();
+		}
+	});
+});
 
 describe("native Pi telemetry companion", () => {
 	it("receives explicit markers and native SDK lifecycle dispatch without compaction decisions", async () => {

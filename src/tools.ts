@@ -1,4 +1,11 @@
 import {
+	checkpoint,
+	latestCheckpoint,
+	type RecoveryObservation,
+	recoveryChecks,
+	repositoryIdentity,
+} from "./compaction-recovery.ts";
+import {
 	handoffSchema,
 	type OrchestrationHandoff,
 	validateHandoff,
@@ -476,7 +483,7 @@ export function registerTaskTools(
 			),
 	});
 
-	registerGuidedTool<Record<string, never>>(pi, {
+	registerGuidedTool<{ recovery?: RecoveryObservation }>(pi, {
 		name: "task_resume",
 		label: "Task Resume",
 		description:
@@ -492,14 +499,59 @@ export function registerTaskTools(
 			"Follow next allowed actions; do not complete tasks while verification gaps remain.",
 			"For non-atomic steps, use task_decompose for compound work or task_update with step_granularity_check to classify an already-simple current step without inventing children.",
 		],
-		parameters: Type.Object({}),
-		execute: async () => {
-			if (Object.keys(store.getState().tasks).length > 0) {
-				activateTaskTools(pi);
-			}
+		parameters: Type.Object({
+			recovery: Type.Optional(
+				Type.Object({
+					operation: Type.String({ minLength: 1, maxLength: 1024 }),
+					authorizationSource: Type.Optional(
+						Type.String({ minLength: 1, maxLength: 1024 }),
+					),
+					authorizationRevision: Type.Optional(
+						Type.String({ minLength: 1, maxLength: 1024 }),
+					),
+					prHeads: Type.Optional(
+						Type.Array(
+							Type.Object({ url: Type.String(), head: Type.String() }),
+							{ maxItems: 8 },
+						),
+					),
+					children: Type.Optional(
+						Type.Array(
+							Type.Object({
+								runId: Type.String(),
+								status: Type.Enum(["running", "completed", "failed"]),
+							}),
+							{ maxItems: 8 },
+						),
+					),
+				}),
+			),
+		}),
+		execute: async (_id, params, _signal, _update, ctx) => {
+			const state = store.getState();
+			if (Object.keys(state.tasks).length > 0) activateTaskTools(pi);
+			const saved = latestCheckpoint(ctx.sessionManager.getBranch());
+			const recovery =
+				saved && saved.taskId === state.activeTaskId
+					? {
+							checkpoint: saved,
+							checks: recoveryChecks(
+								saved,
+								checkpoint(
+									state,
+									ctx.sessionManager.getBranch(),
+									repositoryIdentity(ctx.cwd),
+								),
+								params.recovery,
+							),
+						}
+					: undefined;
 			return textResult(
-				formatTaskResume(store.getState()),
-				buildTaskResume(store.getState()),
+				formatTaskResume(state) +
+					(recovery
+						? `\nCompaction recovery: ${JSON.stringify(recovery)}`
+						: ""),
+				{ ...buildTaskResume(state), ...(recovery ? { recovery } : {}) },
 			);
 		},
 	});

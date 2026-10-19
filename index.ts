@@ -1,4 +1,5 @@
 import { registerTaskCommands } from "./src/commands.ts";
+import { registerCompactionPilot } from "./src/compaction-pilot.ts";
 import { createContinuationAdvisory } from "./src/continuation.ts";
 import type { TaskEvent } from "./src/model.ts";
 import type { ExtensionAPI, ExtensionContext } from "./src/pi-types.ts";
@@ -97,6 +98,7 @@ export default function (pi: ExtensionAPI) {
 		reason: Extract<TaskStateEventReason, "session_start" | "session_tree">,
 	) => {
 		continuation.reset();
+		pilot.reset();
 		const result = store.replay(ctx.sessionManager.getBranch());
 		reconcileTaskTools(pi, result.state);
 		updateTaskUi(pi, ctx, result.state, reason);
@@ -113,14 +115,19 @@ export default function (pi: ExtensionAPI) {
 		replay(ctx, "session_start");
 	});
 	pi.on("session_tree", async (_event, ctx) => replay(ctx, "session_tree"));
-	pi.on("input", () => continuation.reset());
+	pi.on("input", () => {
+		continuation.reset();
+		pilot.reset();
+	});
 	pi.on("session_shutdown", () => {
+		pilot.shutdown();
 		continuation.reset();
 		clearAsync();
 		unsubscribePickup?.();
 		pickupOwnsContinuation = false;
 	});
 	pi.on("tool_result", (event) => {
+		pilot.observeTool(event);
 		if (pickupOwnsContinuation && !pickupHasRecoveryState)
 			continuation.relinquish();
 		continuation.observeToolResult(
@@ -156,7 +163,7 @@ export default function (pi: ExtensionAPI) {
 			continue: true,
 		};
 	});
-	pi.on("session_before_compact", async (_event, ctx) => {
+	pi.on("session_before_compact", async (compactEvent, ctx) => {
 		const state = store.getState();
 		if (Object.keys(state.tasks).length > 0) {
 			const createdAt = new Date().toISOString();
@@ -176,8 +183,10 @@ export default function (pi: ExtensionAPI) {
 			});
 			updateTaskUi(pi, ctx, next, "task_mutation");
 		}
+		return pilot.before(compactEvent);
 	});
 
+	const pilot = registerCompactionPilot(pi, store, () => asyncRuns.size > 0);
 	registerTaskTools(pi, store);
 	registerTaskCommands(pi, store);
 }

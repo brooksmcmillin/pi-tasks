@@ -1,3 +1,4 @@
+import { checkpoint, latestCheckpoint, recoveryChecks, repositoryIdentity, } from "./compaction-recovery.js";
 import { handoffSchema, validateHandoff, } from "./handoff.js";
 import { createEventId, SequentialIdGenerator, } from "./ids.js";
 import { evidenceQualityEqual, normalizeEvidenceQuality } from "./reducer.js";
@@ -228,12 +229,33 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Follow next allowed actions; do not complete tasks while verification gaps remain.",
             "For non-atomic steps, use task_decompose for compound work or task_update with step_granularity_check to classify an already-simple current step without inventing children.",
         ],
-        parameters: Type.Object({}),
-        execute: async () => {
-            if (Object.keys(store.getState().tasks).length > 0) {
+        parameters: Type.Object({
+            recovery: Type.Optional(Type.Object({
+                operation: Type.String({ minLength: 1, maxLength: 1024 }),
+                authorizationSource: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
+                authorizationRevision: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
+                prHeads: Type.Optional(Type.Array(Type.Object({ url: Type.String(), head: Type.String() }), { maxItems: 8 })),
+                children: Type.Optional(Type.Array(Type.Object({
+                    runId: Type.String(),
+                    status: Type.Enum(["running", "completed", "failed"]),
+                }), { maxItems: 8 })),
+            })),
+        }),
+        execute: async (_id, params, _signal, _update, ctx) => {
+            const state = store.getState();
+            if (Object.keys(state.tasks).length > 0)
                 activateTaskTools(pi);
-            }
-            return textResult(formatTaskResume(store.getState()), buildTaskResume(store.getState()));
+            const saved = latestCheckpoint(ctx.sessionManager.getBranch());
+            const recovery = saved && saved.taskId === state.activeTaskId
+                ? {
+                    checkpoint: saved,
+                    checks: recoveryChecks(saved, checkpoint(state, ctx.sessionManager.getBranch(), repositoryIdentity(ctx.cwd)), params.recovery),
+                }
+                : undefined;
+            return textResult(formatTaskResume(state) +
+                (recovery
+                    ? `\nCompaction recovery: ${JSON.stringify(recovery)}`
+                    : ""), { ...buildTaskResume(state), ...(recovery ? { recovery } : {}) });
         },
     });
     registerGuidedTool(pi, {
