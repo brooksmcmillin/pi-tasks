@@ -1,0 +1,64 @@
+{
+	"schemaVersion": 1,
+	"workload": "synthetic phase markers; exclusive private files; startup/readback excluded",
+	"node": "v24.21.0",
+	"platform": "linux",
+	"events": 1000,
+	"rounds": 5,
+	"results": [
+		{
+			"enabled": false,
+			"elapsedMs": 0.6526599999999974,
+			"records": 0
+		},
+		{
+			"enabled": true,
+			"elapsedMs": 20.709294999999997,
+			"records": 1001
+		},
+		{
+			"enabled": true,
+			"elapsedMs": 18.389967000000013,
+			"records": 1001
+		},
+		{
+			"enabled": false,
+			"elapsedMs": 0.06498600000000465,
+			"records": 0
+		},
+		{
+			"enabled": false,
+			"elapsedMs": 0.059569999999993684,
+			"records": 0
+		},
+		{
+			"enabled": true,
+			"elapsedMs": 17.431650999999988,
+			"records": 1001
+		},
+		{
+			"enabled": true,
+			"elapsedMs": 17.624326999999994,
+			"records": 1001
+		},
+		{
+			"enabled": false,
+			"elapsedMs": 0.07683900000000676,
+			"records": 0
+		},
+		{
+			"enabled": false,
+			"elapsedMs": 0.06474699999998279,
+			"records": 0
+		},
+		{
+			"enabled": true,
+			"elapsedMs": 16.24257,
+			"records": 1001
+		}
+	],
+	"medianOnMs": 17.624326999999994,
+	"medianOffMs": 0.06498600000000465,
+	"addedMicrosecondsPerEvent": 17.55934099999999,
+	"limits": "Local instrumentation only; no real-session speed, causality or production performance claim."
+}

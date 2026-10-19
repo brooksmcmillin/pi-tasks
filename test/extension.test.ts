@@ -195,6 +195,7 @@ async function createNativeSession(
 		tools?: string[];
 		excludeTools?: string[];
 		foreignTaskNotes?: boolean;
+		telemetry?: boolean;
 		queuedSettlement?: boolean;
 		pickupOrder?: "first" | "last";
 		noTools?: "all" | "builtin";
@@ -212,6 +213,7 @@ async function createNativeSession(
 	]);
 	const events: TaskStateEvent[] = [];
 	const extensionPaths = [join(taskRoot, "index.ts")];
+	if (options.telemetry) extensionPaths.push(join(taskRoot, "telemetry.ts"));
 	if (options.pickupOrder) {
 		const pickupPath = join(
 			taskRoot,
@@ -280,6 +282,85 @@ async function createNativeSession(
 	await result.session.bindExtensions(result.extensionsResult);
 	return { ...result, base, cwd, sessionDir, events, sessionManager, eventBus };
 }
+
+describe("native Pi telemetry companion", () => {
+	it("receives explicit markers and native SDK lifecycle dispatch without compaction decisions", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "pi-native-telemetry-"));
+		cleanups.push(directory);
+		const previous = process.env.PI_TASKS_TELEMETRY_DIR;
+		process.env.PI_TASKS_TELEMETRY_DIR = directory;
+		const h = await createNativeSession({ telemetry: true });
+		try {
+			const { TelemetryStore } = await import("../src/compaction-telemetry.ts");
+			const runner = h.session.extensionRunner;
+			const errors: unknown[] = [];
+			const stopErrors = runner.onError((error: unknown) => errors.push(error));
+			h.eventBus.emit("pi-tasks:phase", {
+				version: 1,
+				id: "native-phase",
+				kind: "phase_start",
+				phaseId: "verification",
+				taskId: "T1",
+			});
+			const result = await runner.emit({
+				type: "session_before_compact",
+				reason: "threshold",
+				willRetry: false,
+				preparation: {
+					tokensBefore: 125000,
+					settings: { reserveTokens: 80000, keepRecentTokens: 20000 },
+				},
+				branchEntries: [],
+				signal: new AbortController().signal,
+			});
+			expect(result?.cancel).not.toBe(true);
+			expect(result?.compaction).toBeUndefined();
+			await runner.emit({
+				type: "session_compact",
+				reason: "threshold",
+				willRetry: false,
+				fromExtension: false,
+				compactionEntry: {
+					id: "native-entry",
+					timestamp: new Date().toISOString(),
+					tokensBefore: 125000,
+				},
+			});
+			const message = {
+				role: "assistant",
+				timestamp: 1,
+				stopReason: "stop",
+				content: [],
+				usage: { input: 20, output: 2 },
+			};
+			await runner.emitMessageEnd({ type: "message_end", message });
+			await runner.emitMessageEnd({
+				type: "message_end",
+				message: { ...message, timestamp: 2 },
+			});
+			await runner.emit({ type: "session_shutdown", reason: "quit" });
+			const records = new TelemetryStore(directory).read().records;
+			expect(
+				records.filter((record) => record.kind === "compaction_end"),
+			).toHaveLength(1);
+			expect(records.filter((record) => record.kind === "usage")).toHaveLength(
+				2,
+			);
+			expect(records.some((record) => record.kind === "phase_start")).toBe(
+				true,
+			);
+			expect(records.some((record) => record.kind === "session_end")).toBe(
+				true,
+			);
+			expect(errors).toEqual([]);
+			stopErrors();
+		} finally {
+			h.session.dispose();
+			if (previous === undefined) delete process.env.PI_TASKS_TELEMETRY_DIR;
+			else process.env.PI_TASKS_TELEMETRY_DIR = previous;
+		}
+	});
+});
 
 describe("native Pi settlement advisories", () => {
 	it.each([
