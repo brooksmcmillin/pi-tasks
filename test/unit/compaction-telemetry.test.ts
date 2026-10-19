@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
 	mkdtempSync,
 	readdirSync,
@@ -589,6 +590,34 @@ describe("passive compaction telemetry", () => {
 		expect(() => f.store.put({ ...valid, id: "../../escape" })).toThrow(
 			"Invalid telemetry record",
 		);
+	});
+	it("rejects a FIFO without blocking the reader", () => {
+		const f = fixture();
+		const fifo = join(f.directory, `${"c".repeat(64)}.json`);
+		const created = spawnSync("mkfifo", ["-m", "600", fifo], {
+			encoding: "utf8",
+			timeout: 2000,
+			killSignal: "SIGKILL",
+		});
+		expect(created.error).toBeUndefined();
+		expect(created.status).toBe(0);
+		const module = new URL("../../src/compaction-telemetry.ts", import.meta.url)
+			.href;
+		const result = spawnSync(
+			process.execPath,
+			[
+				"--experimental-strip-types",
+				"--input-type=module",
+				"-e",
+				`import {TelemetryStore} from ${JSON.stringify(module)}; console.log(JSON.stringify(new TelemetryStore(${JSON.stringify(f.directory)}).read()));`,
+			],
+			{ encoding: "utf8", timeout: 2000, killSignal: "SIGKILL" },
+		);
+		expect(result.error).toBeUndefined();
+		expect(result.status).toBe(0);
+		const read = JSON.parse(result.stdout);
+		expect(read.invalidFiles).toBe(1);
+		expect(read.records).toHaveLength(1);
 	});
 	it("retains visibly invalid/truncated records and does not follow symlinks", () => {
 		const f = fixture();

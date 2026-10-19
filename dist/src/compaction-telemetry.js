@@ -157,7 +157,7 @@ export class TelemetryStore {
             }
             let fd;
             try {
-                fd = openSync(join(this.directory, name), constants.O_RDONLY | constants.O_NOFOLLOW);
+                fd = openSync(join(this.directory, name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
                 const stat = fstatSync(fd);
                 if (!stat.isFile() ||
                     stat.size > 16384 ||
