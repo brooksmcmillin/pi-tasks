@@ -1,0 +1,11 @@
+[Unit]
+Description=Private Pi compaction weekly comparison
+
+[Timer]
+OnCalendar=Sat *-*-* 09:00:00 America/Los_Angeles
+Persistent=true
+AccuracySec=1min
+Unit=pi-compaction-report.service
+
+[Install]
+WantedBy=timers.target

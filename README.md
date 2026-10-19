@@ -26,6 +26,14 @@ by default, and this does not activate a local rollout. See the
 [pilot contract and controlled replay](docs/compaction-pilot.md) for smaller-model
 limits, native scheduling constraints, fresh authority checks and rollback.
 
+## Optional private weekly reports
+
+`node dist/report.js` compares baseline/pilot telemetry with duration distributions,
+recovery checks, usage/cost availability and incomplete/unknown denominators.
+An opt-in systemd user timer runs Saturday 09:00 America/Los_Angeles with private
+history and deduplicated desktop mismatch notifications. No timer is installed
+by the package. See [reporting, fixture exercise and rollback](docs/compaction-report.md).
+
 ## What makes it different
 
 Every other task tool for AI agents is just a todo list. pi-tasks enforces three hard contracts no competitor offers:

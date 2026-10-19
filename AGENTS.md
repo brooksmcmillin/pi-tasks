@@ -134,6 +134,13 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Only a successful pilot-owned compaction with current-input execution engagement may request one recovery follow-up. Preserve user redirection, abnormal outcomes, waits and native/installed continuation ownership. Read-only queries or checkpoint calls alone do not arm continuation.
 - Emit allowlisted trigger/deferral and recovery telemetry without content. Test real native-hook dispatch plus controlled failure/continuation replay; distinguish that evidence from runtime activation or semantic recovery guarantees.
 
+## Compaction Report Contract
+
+- Keep reporting metadata-only, opt-in and independent of policy/authority. Never infer task completion from session shutdown or useful action from bookkeeping.
+- Preserve event deduplication, stable observed cohorts/config strata, child-root accounting and explicit incomplete/unknown denominators. Proxies are not proven waste; unknown costs are not zero.
+- Keep private period history/latest and pending/acknowledged notification state. Deduplicate concrete mismatch notices across periods; describe the notification crash window truthfully.
+- Use the existing local scheduler with Saturday 09:00 America/Los_Angeles and catch-up-one behavior. Fixture validation never claims installed runtime delivery or automatic adoption.
+
 ## Verification Rules
 
 Before claiming readiness:
