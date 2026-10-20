@@ -389,12 +389,16 @@ export function createCollector(store, warn, now = () => new Date().toISOString(
                     return;
                 if (duplicate(kind, data.id))
                     return;
+                if (data.taskId !== undefined) {
+                    const nextTaskId = identity(data.taskId);
+                    if (nextTaskId !== taskId)
+                        checkpointId = phaseId = null;
+                    taskId = nextTaskId;
+                }
                 if (data.checkpointId !== undefined)
                     checkpointId = identity(data.checkpointId);
                 if (data.rootSessionId !== undefined)
                     rootId = identity(data.rootSessionId);
-                if (data.taskId !== undefined)
-                    taskId = identity(data.taskId);
                 if (data.phaseId !== undefined)
                     phaseId = identity(data.phaseId);
                 if (data.policyVersion !== undefined)

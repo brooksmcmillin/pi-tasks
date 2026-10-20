@@ -127,7 +127,8 @@ This project must align with the commercial-quality bar established by `pi-knowl
 
 ## Compaction Pilot Contract
 
-- Require explicit persisted baseline/pilot assignment per root task/session; replay and inherited forks preserve it. Keep intervention independently disableable.
+- Require explicit persisted baseline/pilot assignment per root task/session; replay and inherited forks preserve it. Attribute successful task mutations before idle so same-turn review, blocking or completion cannot drop a cohort. Bind the passive collector with metadata-only observations; never retroactively relabel unknown history.
+- Keep intervention independently disableable. Mutation-time attribution must not compact, arm continuation, or bypass idle, retention, engagement or authority checks.
 - Use native summarization only at safe idle boundaries; never abort active tools to satisfy an early token target. Native threshold/overflow recovery remains available. Require effective 20k retention only for pilot-owned attempts.
 - Persist checkpoint identities in private session entries alongside existing task snapshots, never in a second authority store. Unknown checkpoint identity skips pilot intervention; unbound evidence or external observations remain unknown.
 - Recovery compares operation-scoped observations, never grants permission, reclaims ownership or relaunches children. A source/head match is not fresh execution authority; preserve task/PR/run/authorization gates and invalidate only affected evidence.

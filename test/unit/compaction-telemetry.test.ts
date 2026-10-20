@@ -376,6 +376,52 @@ describe("passive compaction telemetry", () => {
 			1,
 		);
 	});
+	it("preserves same-task correlation on attribution and clears it only when changing tasks", () => {
+		const f = fixture();
+		f.collector.marker({
+			version: 1,
+			kind: "checkpoint",
+			id: "saved",
+			taskId: "T1",
+			phaseId: "phase1",
+			checkpointId: "checkpoint1",
+		});
+		f.collector.marker({
+			version: 1,
+			kind: "checkpoint",
+			id: "rebind",
+			taskId: "T1",
+			cohort: "baseline",
+		});
+		expect(f.store.read().records.at(-1)).toMatchObject({
+			phaseId: identity("phase1"),
+			checkpointId: identity("checkpoint1"),
+		});
+		f.collector.marker({
+			version: 1,
+			kind: "checkpoint",
+			id: "switch",
+			taskId: "T2",
+			cohort: "pilot",
+		});
+		expect(f.store.read().records.at(-1)).toMatchObject({
+			taskId: identity("T2"),
+			phaseId: null,
+			checkpointId: null,
+		});
+		f.collector.marker({
+			version: 1,
+			kind: "checkpoint",
+			id: "explicit",
+			taskId: "T3",
+			phaseId: "phase3",
+			checkpointId: "checkpoint3",
+		});
+		expect(f.store.read().records.at(-1)).toMatchObject({
+			phaseId: identity("phase3"),
+			checkpointId: identity("checkpoint3"),
+		});
+	});
 	it("keeps unknown phases and cross-session or earlier ends incomplete", () => {
 		const f = fixture();
 		f.collector.marker({
