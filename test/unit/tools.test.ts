@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { TASK_EVENT_CUSTOM_TYPE, type TaskEvent } from "../../src/model.ts";
+import {
+	MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH,
+	MAX_EVIDENCE_REFERENCE_LENGTH,
+	MAX_EVIDENCE_SUMMARY_LENGTH,
+	TASK_EVENT_CUSTOM_TYPE,
+	type TaskEvent,
+} from "../../src/model.ts";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -7,6 +13,15 @@ import type {
 } from "../../src/pi-types.ts";
 import { createTaskRuntimeStore } from "../../src/store.ts";
 import { registerTaskTools } from "../../src/tools.ts";
+
+interface ToolSchema {
+	type?: string;
+	enum?: string[];
+	required?: string[];
+	maxLength?: number;
+	properties?: Record<string, ToolSchema>;
+	items?: ToolSchema;
+}
 
 class FixedIds {
 	private index = 0;
@@ -390,7 +405,7 @@ describe("registered task tools", () => {
 			minimum_params: {
 				task_id: "T1",
 				step_id: "T1-S1",
-				activity: "<activity being recorded>",
+				activity: "<meaningful activity performed>",
 			},
 		});
 		expect(skipped.content[0]?.text).toContain("minimum_params:");
@@ -824,19 +839,7 @@ describe("registered task tools", () => {
 	it("uses an omp-compatible task_evidence schema with required quality fields", () => {
 		const { tools } = createHarness();
 		const evidence = requireTool(tools, "task_evidence");
-		const schema = evidence.parameters as {
-			type?: string;
-			required?: string[];
-			properties?: Record<
-				string,
-				{
-					type?: string;
-					enum?: string[];
-					required?: string[];
-					description?: string;
-				}
-			>;
-		};
+		const schema = evidence.parameters as ToolSchema;
 
 		expect(schema.type).toBe("object");
 		expect(schema.required).toEqual(
@@ -873,6 +876,43 @@ describe("registered task tools", () => {
 		);
 		expect(evidence.description).toContain("supersedes_evidence_ids");
 		expect(schema).not.toHaveProperty("oneOf");
+		expect(schema.properties?.summary?.maxLength).toBe(
+			MAX_EVIDENCE_SUMMARY_LENGTH,
+		);
+		expect(schema.properties?.references?.items?.maxLength).toBe(
+			MAX_EVIDENCE_REFERENCE_LENGTH,
+		);
+		expect(schema.properties?.quality?.properties?.source?.maxLength).toBe(
+			MAX_EVIDENCE_REFERENCE_LENGTH,
+		);
+		expect(schema.properties?.quality?.properties?.command?.maxLength).toBe(
+			MAX_EVIDENCE_REFERENCE_LENGTH,
+		);
+		expect(
+			schema.properties?.quality?.properties?.artifactRefs?.items?.maxLength,
+		).toBe(MAX_EVIDENCE_REFERENCE_LENGTH);
+		expect(
+			schema.properties?.quality?.properties?.observedOutput?.maxLength,
+		).toBe(MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH);
+	});
+
+	it("shares evidence limits across fork verification and batch schemas", () => {
+		const { tools } = createHarness();
+		const verify = requireTool(tools, "task_verify_step")
+			.parameters as ToolSchema;
+		const batch = requireTool(tools, "task_evidence_batch")
+			.parameters as ToolSchema;
+		for (const schema of [verify, batch.properties?.entries?.items]) {
+			expect(schema?.properties?.summary?.maxLength).toBe(
+				MAX_EVIDENCE_SUMMARY_LENGTH,
+			);
+			expect(schema?.properties?.references?.items?.maxLength).toBe(
+				MAX_EVIDENCE_REFERENCE_LENGTH,
+			);
+			expect(
+				schema?.properties?.quality?.properties?.observedOutput?.maxLength,
+			).toBe(MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH);
+		}
 	});
 
 	it("records explicit supersession metadata through task_evidence", async () => {
@@ -1052,6 +1092,7 @@ describe("registered task tools", () => {
 					reproducible: true,
 					verifier: "tool",
 					artifactRefs: ["npm test"],
+					command: "npm test",
 				},
 			},
 			ctx,
@@ -1061,6 +1102,7 @@ describe("registered task tools", () => {
 		expect(rejected.content[0]?.text).toContain(
 			"Unvalidated evidence retry template",
 		);
+		expect(rejected.content[0]?.text).not.toContain("Minimal working");
 		expect(rejected.content[0]?.text).toContain('"command": "npm test"');
 		expect(rejected.content[0]?.text).toContain(
 			'"observedOutput": "<concise observed output',
@@ -1077,6 +1119,305 @@ describe("registered task tools", () => {
 				},
 			},
 		});
+	});
+
+	it("keeps required verification commands in test and dogfood retry templates", async () => {
+		for (const type of ["test", "dogfood"] as const) {
+			const { tools, entries, ctx } = createHarness();
+			const plan = requireTool(tools, "task_plan");
+			const evidence = requireTool(tools, "task_evidence");
+			await execute(
+				plan,
+				{
+					title: `${type} recovery`,
+					objective: `Verify ${type} recovery command`,
+					acceptance_criteria: ["Recovery preserves the verification command"],
+					plan_steps: [
+						{
+							text: `Record ${type} evidence`,
+							expectedOutput: `${type} retry template preserves its command`,
+							allowedActions: ["task_evidence"],
+							decompositionStatus: "atomic",
+							granularityCheck: {
+								isAtomic: true,
+								reason:
+									"One rejected evidence call produces one retry template",
+								canBeDoneInOneAgentAction: true,
+								hasSingleObservableOutput: true,
+								hasSingleVerificationMethod: true,
+								hasNoHiddenSubtasks: true,
+							},
+						},
+					],
+				},
+				ctx,
+			);
+
+			const rejected = await execute(
+				evidence,
+				{
+					task_id: "T1",
+					type,
+					level: "not_verified",
+					summary: `${type} run reported 7 passed`,
+					passed: "true",
+					references: ["npm test"],
+					step_ids: ["T1-S1"],
+					quality: {
+						source: "local fixture",
+						reproducible: true,
+						verifier: "tool",
+						command: "npm test",
+						artifactRefs: ["npm test"],
+						observedOutput: "Tests 7 passed (7)",
+					},
+				},
+				ctx,
+			);
+
+			expect(rejected.isError).toBe(true);
+			expect(rejected.details).toMatchObject({
+				retry_example: {
+					type,
+					quality: {
+						command: "npm test",
+					},
+				},
+			});
+			expect(entries).toHaveLength(1);
+		}
+	});
+
+	it("replaces every over-limit retry field without truncating submitted values", async () => {
+		const { tools, entries, ctx } = createHarness();
+		const plan = requireTool(tools, "task_plan");
+		const evidence = requireTool(tools, "task_evidence");
+		await execute(
+			plan,
+			{
+				title: "Bounded recovery",
+				objective: "Verify bounded evidence retry fields",
+				acceptance_criteria: ["Retry fields respect declared limits"],
+				plan_steps: [
+					{
+						text: "Record bounded evidence",
+						expectedOutput: "Rejected evidence returns bounded retry fields",
+						allowedActions: ["task_evidence"],
+						decompositionStatus: "atomic",
+						granularityCheck: {
+							isAtomic: true,
+							reason:
+								"One rejected evidence call produces one bounded template",
+							canBeDoneInOneAgentAction: true,
+							hasSingleObservableOutput: true,
+							hasSingleVerificationMethod: true,
+							hasNoHiddenSubtasks: true,
+						},
+					},
+				],
+			},
+			ctx,
+		);
+		const longSummary = "s".repeat(MAX_EVIDENCE_SUMMARY_LENGTH + 1);
+		const longReference = "r".repeat(MAX_EVIDENCE_REFERENCE_LENGTH + 1);
+		const longSource = "u".repeat(MAX_EVIDENCE_REFERENCE_LENGTH + 1);
+		const longCommand = "c".repeat(MAX_EVIDENCE_REFERENCE_LENGTH + 1);
+		const longArtifact = "a".repeat(MAX_EVIDENCE_REFERENCE_LENGTH + 1);
+		const longOutput = "o".repeat(MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH + 1);
+
+		const rejected = await execute(
+			evidence,
+			{
+				task_id: "T1",
+				type: "test",
+				level: "unit_test",
+				summary: longSummary,
+				passed: "true",
+				references: [longReference],
+				step_ids: ["T1-S1"],
+				quality: {
+					source: longSource,
+					reproducible: true,
+					verifier: "tool",
+					command: longCommand,
+					artifactRefs: [longArtifact],
+					observedOutput: longOutput,
+				},
+			},
+			ctx,
+		);
+
+		expect(rejected.isError).toBe(true);
+		expect(rejected.details).toMatchObject({
+			retry_example: {
+				summary:
+					"<concise evidence summary; put long output in quality.artifactRefs>",
+				references: ["<short-artifact-or-command-reference>"],
+				quality: {
+					source: "<concise evidence source>",
+					command:
+						"Original command recorded in <path-to-saved-command-and-output>",
+					artifactRefs: [
+						"<short-artifact-reference>",
+						"<path-to-saved-command-and-output>",
+					],
+					observedOutput:
+						"<concise observed output from the command/test/dogfood run>",
+				},
+			},
+		});
+		const retryText = rejected.content[0]?.text ?? "";
+		expect(retryText).not.toContain(longSummary);
+		expect(retryText).not.toContain(longReference);
+		expect(retryText).not.toContain(longSource);
+		expect(retryText).not.toContain(longCommand);
+		expect(retryText).not.toContain(longArtifact);
+		expect(retryText).not.toContain(longOutput);
+		expect(entries).toHaveLength(1);
+	});
+
+	it("returns targeted task_update recovery for missing scope fields", async () => {
+		const { tools, entries, ctx, store } = createHarness();
+		const plan = requireTool(tools, "task_plan");
+		const update = requireTool(tools, "task_update");
+		await execute(
+			plan,
+			{
+				title: "Scope recovery",
+				objective: "Verify conditional scope update recovery",
+				acceptance_criteria: ["Scope recovery names the missing field"],
+				plan_steps: [
+					{
+						text: "Verify the current fixture checksum",
+						expectedOutput: "One fixture inspection record",
+						allowedActions: ["Read current fixture"],
+						decompositionStatus: "atomic",
+						granularityCheck: {
+							isAtomic: true,
+							reason: "One fixture read produces one inspection record",
+							canBeDoneInOneAgentAction: true,
+							hasSingleObservableOutput: true,
+							hasSingleVerificationMethod: true,
+							hasNoHiddenSubtasks: true,
+						},
+					},
+				],
+			},
+			ctx,
+		);
+
+		const missingActivity = await execute(
+			update,
+			{ task_id: "T1", scope: "within_step" },
+			ctx,
+		);
+		expect(missingActivity.isError).toBe(true);
+		expect(missingActivity.details).toMatchObject({
+			retry_with: "task_update",
+			correct_rejected_call_first: true,
+			minimum_params: {
+				task_id: "T1",
+				activity: "<meaningful activity performed>",
+				scope: "within_step",
+			},
+		});
+		expect(missingActivity.content[0]?.text).toContain(
+			'- minimum_params: {"task_id":"T1","scope":"within_step","activity":"<meaningful activity performed>"}',
+		);
+		expect(missingActivity.content[0]?.text).not.toContain(
+			"Do now: task_evidence",
+		);
+		expect(entries).toHaveLength(1);
+
+		const missingActivityAndReason = await execute(
+			update,
+			{ task_id: "T1", scope: "off_plan" },
+			ctx,
+		);
+		expect(missingActivityAndReason.isError).toBe(true);
+		expect(missingActivityAndReason.details).toMatchObject({
+			retry_with: "task_update",
+			minimum_params: {
+				task_id: "T1",
+				activity: "<meaningful activity performed>",
+				scope: "off_plan",
+				scope_reason:
+					"<why this scope change or off-plan activity was necessary>",
+			},
+		});
+		expect(entries).toHaveLength(1);
+
+		const withinStep = await execute(
+			update,
+			{
+				task_id: "T1",
+				activity: "Inspected the current fixture",
+				scope: "within_step",
+			},
+			ctx,
+		);
+		expect(withinStep.isError).not.toBe(true);
+		expect(entries).toHaveLength(2);
+
+		const activityOnly = await execute(
+			update,
+			{ task_id: "T1", activity: "Recorded the fixture checksum" },
+			ctx,
+		);
+		expect(activityOnly.isError).not.toBe(true);
+		expect(entries).toHaveLength(3);
+
+		const missingReason = await execute(
+			update,
+			{
+				task_id: "T1",
+				activity: "Inspected an extra fixture",
+				scope: "off_plan",
+			},
+			ctx,
+		);
+		expect(missingReason.isError).toBe(true);
+		expect(missingReason.details).toMatchObject({
+			retry_with: "task_update",
+			minimum_params: {
+				task_id: "T1",
+				activity: "Inspected an extra fixture",
+				scope: "off_plan",
+				scope_reason:
+					"<why this scope change or off-plan activity was necessary>",
+			},
+		});
+		expect(missingReason.content[0]?.text).toContain(
+			'"scope_reason":"<why this scope change or off-plan activity was necessary>"',
+		);
+		expect(entries).toHaveLength(3);
+
+		const offPlan = await execute(
+			update,
+			{
+				task_id: "T1",
+				activity: "Inspected an extra fixture",
+				scope: "off_plan",
+				scope_reason: "Needed to compare fixture formats",
+			},
+			ctx,
+		);
+		expect(offPlan.isError).not.toBe(true);
+		expect(entries).toHaveLength(4);
+		expect(store.getState().tasks.T1?.warnings).toContain(
+			"off_plan: Inspected an extra fixture (Needed to compare fixture formats)",
+		);
+
+		const unrelatedRejection = await execute(
+			update,
+			{ task_id: "T1", step_id: "T1-S1", step_status: "done" },
+			ctx,
+		);
+		expect(unrelatedRejection.isError).toBe(true);
+		expect(unrelatedRejection.details).toMatchObject({
+			retry_with: "task_verify_step",
+		});
+		expect(entries).toHaveLength(4);
 	});
 
 	it("preserves ExtensionAPI method receivers when appending task events", async () => {
@@ -1652,6 +1993,172 @@ describe("registered task tools", () => {
 		expect(store.getState().tasks.T1?.planSteps[0]?.id).toBe("T1-S1.1");
 		expect(store.getState().tasks.T1?.planSteps[0]?.status).toBe("active");
 		expect(store.getState().tasks.T1?.currentStep).toBe("Run package dry-run");
+	});
+
+	it("recovers explicitly when a non-atomic step reaches maximum decomposition depth", async () => {
+		const { tools, entries, ctx, store } = createHarness();
+		const plan = requireTool(tools, "task_plan");
+		const check = requireTool(tools, "task_granularity_check");
+		const decompose = requireTool(tools, "task_decompose");
+		const update = requireTool(tools, "task_update");
+		const focus = requireTool(tools, "task_focus");
+		const next = requireTool(tools, "task_next");
+		const resume = requireTool(tools, "task_resume");
+		const childStep = {
+			text: "Verify the synthetic fixture checksum",
+			allowedActions: ["Validate fixture checksum"],
+			expectedOutput: "A synthetic inspection record",
+			decompositionStatus: "deferred",
+		};
+
+		await execute(
+			plan,
+			{
+				title: "Depth recovery",
+				objective: "Recover from the maximum decomposition depth",
+				acceptance_criteria: ["Recovery names an executable next tool"],
+				plan_steps: [
+					{
+						...childStep,
+						allowedActions: ["Read synthetic fixture"],
+					},
+				],
+			},
+			ctx,
+		);
+
+		let stepId = "T1-S1";
+		for (let depth = 0; depth < 4; depth += 1) {
+			const decomposed = await execute(
+				decompose,
+				{
+					task_id: "T1",
+					step_id: stepId,
+					reason: "Reduce one synthetic layer",
+					child_steps: [childStep, { ...childStep }],
+				},
+				ctx,
+			);
+			expect(decomposed.isError).not.toBe(true);
+			stepId += ".1";
+		}
+
+		expect(store.getState().tasks.T1?.nextAction).toContain(
+			"maximum decomposition depth reached",
+		);
+		const resumed = await execute(resume, {}, ctx);
+		expect(resumed.details).toMatchObject({
+			mode: "blocked",
+			recommendedTool: "task_update",
+			nextAllowedActions: expect.arrayContaining(["task_update", "read"]),
+			minimumParams: {
+				task_id: "T1",
+				status: "blocked",
+				blocker: {
+					blockedBy: "ambiguity",
+				},
+			},
+		});
+		const focused = await execute(focus, {}, ctx);
+		const nextResult = await execute(next, {}, ctx);
+		const checked = await execute(
+			check,
+			{ task_id: "T1", step_id: stepId },
+			ctx,
+		);
+		expect(resumed.content[0]?.text).toContain("Do now: task_update");
+		expect(resumed.content[0]?.text).toContain("maximum decomposition depth");
+		expect(focused.content[0]?.text).toContain(
+			"Next allowed action: task_update",
+		);
+		expect(nextResult.content[0]?.text).toContain(
+			"Recommended tool: task_update",
+		);
+		expect(checked.content[0]?.text).toContain(
+			"Next allowed action: task_update",
+		);
+		const persistedAtLimit = entries.length;
+		const rejectedScope = await execute(
+			update,
+			{ task_id: "T1", scope: "within_step" },
+			ctx,
+		);
+		expect(rejectedScope.isError).toBe(true);
+		expect(rejectedScope.details).toMatchObject({
+			retry_with: "task_update",
+			correct_rejected_call_first: true,
+			minimum_params: {
+				task_id: "T1",
+				activity: "<meaningful activity performed>",
+				scope: "within_step",
+			},
+		});
+		expect(rejectedScope.content[0]?.text).not.toContain(
+			"maximum decomposition depth",
+		);
+		expect(entries).toHaveLength(persistedAtLimit);
+		const rejectedDone = await execute(
+			update,
+			{ task_id: "T1", step_id: stepId, step_status: "done" },
+			ctx,
+		);
+		expect(rejectedDone.isError).toBe(true);
+		expect(rejectedDone.content[0]?.text).toContain(
+			"maximum decomposition depth while still non-atomic",
+		);
+		expect(rejectedDone.details).toMatchObject({
+			retry_with: "task_update",
+			minimum_params: {
+				status: "blocked",
+			},
+		});
+		expect(entries).toHaveLength(persistedAtLimit);
+
+		const rejectedDecompose = await execute(
+			decompose,
+			{
+				task_id: "T1",
+				step_id: stepId,
+				reason: "Try one more layer",
+				child_steps: [childStep, { ...childStep }],
+			},
+			ctx,
+		);
+		expect(rejectedDecompose.isError).toBe(true);
+		expect(rejectedDecompose.details).toMatchObject({
+			retry_with: "task_update",
+			minimum_params: {
+				task_id: "T1",
+				status: "blocked",
+			},
+			resume: {
+				recommendedTool: "task_update",
+			},
+		});
+		expect(entries).toHaveLength(persistedAtLimit);
+
+		const blocked = await execute(
+			update,
+			{
+				task_id: "T1",
+				status: "blocked",
+				blocker: {
+					reason: "Plan step remains non-atomic at maximum decomposition depth",
+					blockedBy: "ambiguity",
+					neededToUnblock:
+						"Create a flat successor task with the remaining scope",
+				},
+			},
+			ctx,
+		);
+		expect(blocked.isError).not.toBe(true);
+		expect(store.getState().tasks.T1?.status).toBe("blocked");
+		expect(store.getState().activeTaskId).toBeUndefined();
+		const afterBlock = await execute(resume, {}, ctx);
+		expect(afterBlock.details).toMatchObject({
+			mode: "planning",
+			recommendedTool: "task_plan",
+		});
 	});
 
 	it("checkpoints resume state as a snapshot custom entry", async () => {

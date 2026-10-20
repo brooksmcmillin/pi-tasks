@@ -5,6 +5,10 @@ export type TaskStatus = "pending" | "active" | "blocked" | "review" | "done" | 
 export type TaskPriority = "low" | "normal" | "high" | "urgent";
 export type TaskStepStatus = "pending" | "active" | "done" | "skipped";
 export type TaskStepGranularityStatus = "needs_breakdown" | "breaking_down" | "atomic" | "deferred";
+export declare const MAX_DECOMPOSITION_DEPTH = 4;
+export declare const MAX_EVIDENCE_SUMMARY_LENGTH = 500;
+export declare const MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH = 1000;
+export declare const MAX_EVIDENCE_REFERENCE_LENGTH = 300;
 export type VerificationLevel = "not_verified" | "static_read" | "unit_test" | "integration_test" | "e2e_smoke" | "release_grade_e2e" | "pi_dogfood" | "external_unverified";
 export type EvidenceType = "test" | "command" | "review" | "file" | "commit" | "dogfood" | "user_acceptance" | "external" | "note";
 export type EvidenceRole = "acceptance" | "diagnostic";
@@ -80,6 +84,7 @@ export interface TaskStep {
     startedAt?: string;
     completedAt?: string;
 }
+export declare function isAtMaximumDecompositionDepth(step: Pick<TaskStep, "decompositionStatus" | "depth">): boolean;
 export interface TaskStepInput {
     text: string;
     expectedOutput: string;

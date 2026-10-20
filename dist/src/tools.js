@@ -1,7 +1,8 @@
 import { checkpoint, latestCheckpoint, recoveryChecks, repositoryIdentity, } from "./compaction-recovery.js";
 import { handoffSchema, validateHandoff, } from "./handoff.js";
 import { createEventId, SequentialIdGenerator, } from "./ids.js";
-import { evidenceQualityEqual, normalizeEvidenceQuality } from "./reducer.js";
+import { isAtMaximumDecompositionDepth, MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH, MAX_EVIDENCE_REFERENCE_LENGTH, MAX_EVIDENCE_SUMMARY_LENGTH, } from "./model.js";
+import { evidenceQualityEqual, normalizeEvidenceQuality, TaskTransitionError, } from "./reducer.js";
 import { COMPACT_REMEDIATION_GUIDANCE, compactRemediationSchema, normalizeReworkInput, } from "./remediation.js";
 import { buildTaskResume, formatTaskFocus, formatTaskList, formatTaskNext, formatTaskReceipt, formatTaskResume, } from "./render.js";
 import { Type } from "./schema.js";
@@ -208,7 +209,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             REWORK_GUIDANCE,
             "Smart models: compare intended work to the current step lock before acting; record drift before off-step work.",
             "Weak models: copy the current step ID, criterion IDs, and evidence IDs exactly into the next tool call.",
-            "If Granularity is not atomic, use task_decompose before doing implementation work.",
+            "If Granularity is not atomic, follow the displayed next action; decompose below the depth limit, or explicitly block at the limit.",
             "If intended work does not match the active step, record scope_change or off_plan with task_update first.",
             "Use task_evidence before marking an evidence-required step done.",
         ],
@@ -227,7 +228,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             REWORK_GUIDANCE,
             PLAN_REPAIR_GUIDANCE,
             "Follow next allowed actions; do not complete tasks while verification gaps remain.",
-            "For non-atomic steps, use task_decompose for compound work or task_update with step_granularity_check to classify an already-simple current step without inventing children.",
+            "For non-atomic steps below maximum depth, use task_decompose for compound work or task_update with step_granularity_check to classify an already-simple current step without inventing children. At maximum depth, use the displayed task_update blocker recovery instead.",
         ],
         parameters: Type.Object({
             recovery: Type.Optional(Type.Object({
@@ -309,9 +310,9 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
         promptGuidelines: [
             "Use this before implementation when task_focus shows a non-atomic step.",
             "Smart models: classify any hidden subtask, second output, or second verification method as non-atomic.",
-            "Weak models: if any atomicity field is false, call task_decompose instead of executing the step.",
+            "Weak models: follow the returned next action; decompose below the depth limit, or block at the limit.",
             "Atomic means one agent action, one observable output, one verification method, and no hidden subtasks.",
-            "If the step is already simple but unclassified, use task_update with step_id and step_granularity_check. Otherwise call task_decompose with smaller deliverables, not support reads or implementation mechanics.",
+            "At maximum depth, follow the displayed blocker recovery. Below the limit, if the step is already simple but unclassified, use task_update with step_id and step_granularity_check. Otherwise call task_decompose with smaller deliverables, not support reads or implementation mechanics.",
         ],
         parameters: Type.Object({
             task_id: Type.Optional(Type.String()),
@@ -345,7 +346,9 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 `Reason: ${check.reason}`,
                 step.decompositionStatus === "atomic"
                     ? "Next allowed action: task_focus or execution work"
-                    : `Next allowed action: task_decompose ${step.id}, or task_update with step_id and step_granularity_check if already simple`,
+                    : isAtMaximumDecompositionDepth(step)
+                        ? `Next allowed action: task_update ${step.id} to blocked; maximum decomposition depth reached`
+                        : `Next allowed action: task_decompose ${step.id}, or task_update with step_id and step_granularity_check if already simple`,
             ].join("\n"), buildTaskResume(state));
         },
     });
@@ -362,6 +365,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Omit child step criterionIds unless you are carrying forward known generated IDs from task_focus or task_resume.",
             "Only mark a child atomic when it truly has one action, one output, one verification method, and no hidden subtasks.",
             "Do not use task_decompose for execution evidence; record execution evidence with task_evidence.",
+            "At maximum decomposition depth, do not retry task_decompose; explicitly block the task and carry remaining scope into a flat successor task.",
         ],
         parameters: Type.Object({
             task_id: Type.String(),
@@ -495,10 +499,10 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Use step_id with step_status=done when the current planned step is finished.",
             "Smart models: record one state transition per call; do not bundle drift, evidence, and completion into one update.",
             "Weak models: use task_focus current step_id; for done, include step_evidence_ids when evidence was just recorded.",
-            "Only atomic steps can be marked done. Classify an already-simple current step with step_granularity_check; use task_decompose for genuine compound work.",
+            "Only atomic steps can be marked done. Below the depth limit, classify an already-simple current step with step_granularity_check or use task_decompose for genuine compound work; explicitly block at the limit.",
             "Evidence-required steps need linked evidence before step_status=done.",
             "Do not skip ahead; ordered plan steps must be completed or skipped in the displayed order.",
-            "Use activity with scope=within_step, scope_change, or off_plan to document meaningful work and drift.",
+            "Use activity with scope=within_step, scope_change, or off_plan to document meaningful work and drift; setting scope requires activity, and scope_change/off_plan also require scope_reason.",
             "Use resolve_warnings to explicitly close scope drift warnings before task_complete.",
             "Moving to blocked requires blocker details; unblocking requires a reason.",
         ],
@@ -513,11 +517,15 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             step_evidence_ids: Type.Optional(Type.Array(Type.String())),
             step_granularity_check: Type.Optional(granularityCheckSchema()),
             activity: Type.Optional(Type.String({
+                description: "Meaningful work performed; required whenever scope is provided.",
                 minLength: 1,
-                description: "Required when scope is supplied.",
             })),
-            scope: Type.Optional(Type.Enum(["within_step", "scope_change", "off_plan"])),
-            scope_reason: Type.Optional(Type.String()),
+            scope: Type.Optional(Type.Enum(["within_step", "scope_change", "off_plan"], {
+                description: "Activity classification; requires activity. scope_change and off_plan also require scope_reason.",
+            })),
+            scope_reason: Type.Optional(Type.String({
+                description: "Required for scope_change and off_plan; not required for within_step.",
+            })),
             note: Type.Optional(Type.String()),
             resolve_warnings: Type.Optional(Type.Array(Type.String())),
             reason: Type.Optional(Type.String({
@@ -727,8 +735,8 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             step_id: Type.String(),
             type: Type.Enum(EVIDENCE_TYPES),
             level: Type.Enum(VERIFICATION_LEVELS),
-            summary: Type.String(),
-            references: Type.Array(Type.String()),
+            summary: Type.String({ maxLength: MAX_EVIDENCE_SUMMARY_LENGTH }),
+            references: Type.Array(Type.String({ maxLength: MAX_EVIDENCE_REFERENCE_LENGTH })),
             criterion_ids: Type.Optional(Type.Array(Type.String())),
             quality: evidenceQualitySchema(),
         }),
@@ -904,9 +912,15 @@ function taskEvidenceParametersSchema() {
             description: "Evidence purpose. Defaults to acceptance; diagnostic evidence cannot satisfy criteria or task completion.",
         })),
         level: Type.Enum(VERIFICATION_LEVELS),
-        summary: Type.String(),
+        summary: Type.String({
+            maxLength: MAX_EVIDENCE_SUMMARY_LENGTH,
+            description: `Concise evidence summary, at most ${MAX_EVIDENCE_SUMMARY_LENGTH} characters; store long output in an artifact and reference it via quality.artifactRefs`,
+        }),
         passed: Type.Enum(["true", "false", "unknown"]),
-        references: Type.Array(Type.String()),
+        references: Type.Array(Type.String({
+            maxLength: MAX_EVIDENCE_REFERENCE_LENGTH,
+            description: `Artifact path or command reference, at most ${MAX_EVIDENCE_REFERENCE_LENGTH} characters`,
+        })),
         criterion_ids: Type.Optional(Type.Array(Type.String())),
         step_ids: Type.Optional(Type.Array(Type.String())),
         supersedes_evidence_ids: Type.Optional(Type.Array(Type.String(), {
@@ -938,19 +952,23 @@ function evidenceBatchEntrySchema() {
 }
 function evidenceQualitySchema() {
     return Type.Object({
-        source: Type.String(),
+        source: Type.String({
+            maxLength: MAX_EVIDENCE_REFERENCE_LENGTH,
+            description: `Evidence source, at most ${MAX_EVIDENCE_REFERENCE_LENGTH} characters`,
+        }),
         reproducible: Type.Boolean(),
         verifier: Type.Enum(["agent", "tool", "user", "external"]),
         command: Type.String({
-            maxLength: 300,
+            maxLength: MAX_EVIDENCE_REFERENCE_LENGTH,
             description: "Exact command or verification action (maximum 300 characters). For longer commands, preserve the original command and observed output in an artifact, use a short artifact reference here, and link it in artifactRefs. Do not shorten or rerun a successful check just to fit this field.",
         }),
-        artifactRefs: Type.Array(Type.String({ minLength: 1 }), {
+        artifactRefs: Type.Array(Type.String({ minLength: 1, maxLength: MAX_EVIDENCE_REFERENCE_LENGTH }), {
             minItems: 1,
             description: "Required nonempty field for every evidence type; exact command or verification-action references count as artifacts.",
         }),
         observedOutput: Type.String({
-            description: "Concise observed output proving what happened; put long logs in artifactRefs.",
+            maxLength: MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH,
+            description: `Concise observed output, at most ${MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH} characters; store long logs in an artifact and reference it via artifactRefs`,
         }),
     });
 }
@@ -1028,8 +1046,12 @@ function rejectionResult(error, store, event) {
                 ]
                 : []),
             "",
-            "Recovery guidance:",
-            resume,
+            ...(!recovery.correct_rejected_call_first &&
+                recovery.retry_with === recovery.resume.recommendedTool
+                ? ["Recovery guidance:", resume]
+                : [
+                    "Recovery guidance: correct the rejected call above, then call task_resume for the next task action.",
+                ]),
         ].join("\n"), recovery),
         isError: true,
     };
@@ -1053,11 +1075,18 @@ function buildRejectionRecovery(error, state, event) {
             }),
         }
         : buildEvidenceRetryExample(event);
-    const updateRepair = buildUpdateArgumentRepair(event, errorText(error));
+    const scopeRepair = buildScopeUpdateRecovery(error, event)?.minimum_params;
+    const argumentRepair = buildUpdateArgumentRepair(event, errorText(error));
+    const updateRepair = scopeRepair
+        ? { ...argumentRepair, ...scopeRepair }
+        : argumentRepair;
     const authoringTool = event?.type === "task.created"
         ? "task_plan"
         : event?.type === "task.steps_decomposed"
-            ? "task_decompose"
+            ? state.tasks[event.taskId]?.planSteps.some((step) => step.id === event.parentStepId &&
+                isAtMaximumDecompositionDepth(step))
+                ? "task_update"
+                : "task_decompose"
             : event?.type === "task.replanned"
                 ? "task_replan"
                 : undefined;
@@ -1097,6 +1126,7 @@ function buildRejectionRecovery(error, state, event) {
                         ],
                     }
                     : (resume.minimumParams ?? {})),
+        correct_rejected_call_first: updateRepair !== undefined,
         do_not_retry_same_call: true,
         ...(retryExample
             ? {
@@ -1112,6 +1142,7 @@ function buildUpdateArgumentRepair(event, message) {
     if (event?.type !== "task.updated")
         return undefined;
     if (message !== "Scope updates require an activity" &&
+        message !== "Scope change or off-plan activity requires scopeReason" &&
         message !== "Cancelling a task requires a reason")
         return undefined;
     return {
@@ -1132,29 +1163,66 @@ function buildUpdateArgumentRepair(event, message) {
             : {}),
     };
 }
+function buildScopeUpdateRecovery(error, event) {
+    if (!(error instanceof TaskTransitionError) ||
+        event?.type !== "task.updated") {
+        return undefined;
+    }
+    if (error.code === "scope_activity_required") {
+        return {
+            retry_with: "task_update",
+            minimum_params: {
+                task_id: event.taskId,
+                activity: "<meaningful activity performed>",
+                ...(event.scope ? { scope: event.scope } : {}),
+                ...(event.scope === "scope_change" || event.scope === "off_plan"
+                    ? {
+                        scope_reason: event.scopeReason?.trim() ||
+                            "<why this scope change or off-plan activity was necessary>",
+                    }
+                    : {}),
+            },
+        };
+    }
+    if (error.code === "scope_reason_required") {
+        return {
+            retry_with: "task_update",
+            minimum_params: {
+                task_id: event.taskId,
+                activity: event.activity?.trim() || "<meaningful activity performed>",
+                scope: event.scope,
+                scope_reason: "<why this scope change or off-plan activity was necessary>",
+            },
+        };
+    }
+    return undefined;
+}
 function buildEvidenceRetryExample(event) {
     if (event?.type !== "task.evidence_added" &&
         event?.type !== "task.step_verified")
         return undefined;
+    const referencePlaceholder = "<short-artifact-or-command-reference>";
     const references = event.evidence.references.length > 0
-        ? event.evidence.references
-        : ["<artifact-or-command-reference>"];
-    const artifactRefs = event.evidence.quality?.artifactRefs &&
-        event.evidence.quality.artifactRefs.length > 0
-        ? event.evidence.quality.artifactRefs
+        ? event.evidence.references.map((reference) => boundedRetryText(reference, MAX_EVIDENCE_REFERENCE_LENGTH, referencePlaceholder))
+        : [referencePlaceholder];
+    const originalArtifactRefs = event.evidence.quality?.artifactRefs;
+    const artifactRefs = originalArtifactRefs && originalArtifactRefs.length > 0
+        ? originalArtifactRefs.map((artifactRef) => boundedRetryText(artifactRef, MAX_EVIDENCE_REFERENCE_LENGTH, "<short-artifact-reference>"))
         : references;
+    const originalCommand = event.evidence.quality?.command?.trim();
+    const command = originalCommand
+        ? boundedRetryText(originalCommand, MAX_EVIDENCE_REFERENCE_LENGTH, "<exact verification command or action; full command in artifactRefs>")
+        : "<exact verification command or action>";
     const quality = {
-        source: event.evidence.quality?.source?.trim() || event.evidence.type,
+        source: boundedRetryText(event.evidence.quality?.source, MAX_EVIDENCE_REFERENCE_LENGTH, "<concise evidence source>"),
         reproducible: event.evidence.quality?.reproducible ?? true,
         verifier: event.evidence.quality?.verifier ?? "tool",
+        command,
         artifactRefs,
-        observedOutput: event.evidence.quality?.observedOutput?.trim() ||
-            "<concise observed output from the command/test/dogfood run>",
+        observedOutput: boundedRetryText(event.evidence.quality?.observedOutput, MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH, "<concise observed output from the command/test/dogfood run>"),
     };
-    const command = event.evidence.quality?.command?.trim();
-    quality.command =
-        command || references[0] || "<exact command or verification action>";
-    if (command && command.length > 300) {
+    if (originalCommand &&
+        originalCommand.length > MAX_EVIDENCE_REFERENCE_LENGTH) {
         const artifact = "<path-to-saved-command-and-output>";
         quality.command = `Original command recorded in ${artifact}`;
         quality.artifactRefs = [...artifactRefs, artifact];
@@ -1164,7 +1232,7 @@ function buildEvidenceRetryExample(event) {
         type: event.evidence.type,
         role: event.evidence.role ?? "acceptance",
         level: event.evidence.level,
-        summary: event.evidence.summary,
+        summary: boundedRetryText(event.evidence.summary, MAX_EVIDENCE_SUMMARY_LENGTH, "<concise evidence summary; put long output in quality.artifactRefs>"),
         passed: String(event.evidence.passed),
         references,
         quality,
@@ -1187,6 +1255,12 @@ function buildEvidenceRetryExample(event) {
     if (event.type === "task.evidence_added" && event.overrideReason)
         example.override_reason = event.overrideReason;
     return example;
+}
+function boundedRetryText(value, maxLength, placeholder) {
+    const normalized = value?.trim();
+    return normalized && normalized.length <= maxLength
+        ? normalized
+        : placeholder;
 }
 function selectTask(state, taskId) {
     if (taskId)

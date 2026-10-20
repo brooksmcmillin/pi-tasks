@@ -1,4 +1,4 @@
-import type { Task, TaskResumeContext, TaskState } from "./model.ts";
+import { type Task, type TaskResumeContext, type TaskState } from "./model.ts";
 export declare function truncateText(text: string, maxWidth: number): string;
 export declare function formatStatusText(state: TaskState, maxWidth?: number): string | undefined;
 export declare function formatWidgetLines(state: TaskState, maxWidth?: number): string[] | undefined;

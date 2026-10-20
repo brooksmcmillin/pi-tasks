@@ -141,6 +141,14 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Keep private period history/latest and pending/acknowledged notification state. Deduplicate concrete mismatch notices across periods; describe the notification crash window truthfully.
 - Use the existing local scheduler with Saturday 09:00 America/Los_Angeles and catch-up-one behavior. Fixture validation never claims installed runtime delivery or automatic adoption.
 
+## Runtime Recovery Contracts
+
+- A non-atomic step at decomposition depth 4 must direct every guidance surface to an explicit `task_update` blocker; never recommend another decomposition, mark the step done, or create a successor automatically.
+- Evidence schemas and reducer validation must share the 500-character summary, 1,000-character observed-output, and 300-character reference/source/command limits. Rejected command, test, and dogfood evidence retries must preserve valid submitted values and use explicit caller-replacement placeholders for missing or over-limit values.
+- Supplying `task_update.scope` requires non-empty `activity`; `scope_change` and `off_plan` also require `scope_reason`. Those reducer rejections must recover with a corrected snake_case `task_update`, not the task's unrelated next action.
+- Plan-quality wording guards must ignore action-like words inside path tokens while retaining broad-action and compound-action detection, including action words followed by sentence punctuation.
+
+
 ## Verification Rules
 
 Before claiming readiness:

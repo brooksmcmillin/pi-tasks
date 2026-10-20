@@ -1,25 +1,21 @@
 import { validateHandoff } from "./handoff.js";
-import { createEmptyState, } from "./model.js";
+import { createEmptyState, isAtMaximumDecompositionDepth, MAX_DECOMPOSITION_DEPTH, MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH, MAX_EVIDENCE_REFERENCE_LENGTH, MAX_EVIDENCE_SUMMARY_LENGTH, } from "./model.js";
 import { classifyMechanicStep, mechanicStepMessage, } from "./support-actions.js";
 const TERMINAL_STATUSES = ["done", "cancelled"];
-const MAX_DECOMPOSITION_DEPTH = 4;
 const MIN_PLAN_QUALITY_SCORE = 80;
-const MAX_EVIDENCE_SUMMARY_LENGTH = 500;
-const MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH = 1000;
-const MAX_EVIDENCE_REFERENCE_LENGTH = 300;
 const COMPOUND_STEP_PATTERNS = [
-    /\b(and|then|also|plus|after that)\b/i,
+    /(?<![/\\._-])\b(and|then|also|plus|after that)\b(?![/\\_-]|\.[\p{L}\p{N}_-])/iu,
     /[;&]/,
-    /並且|然後|接著|以及|同時|再來/,
+    /(?<![/\\._-])(?:並且|然後|接著|以及|同時|再來)(?![/\\_-]|\.[\p{L}\p{N}_-])/u,
 ];
 const VAGUE_PLAN_PATTERNS = [
-    /\b(do|handle|fix|improve|update|implement|complete|work on|deal with)\b/i,
-    /完成(全部|所有|整個)?/,
-    /處理(一下|全部|所有)?/,
-    /修好/,
-    /優化/,
-    /弄好/,
-    /整理/,
+    /(?<![/\\._-])\b(do|handle|fix|improve|update|implement|complete|work on|deal with)\b(?![/\\_-]|\.[\p{L}\p{N}_-])/iu,
+    /(?<![/\\._-])完成(全部|所有|整個)?(?![/\\_-]|\.[\p{L}\p{N}_-])/u,
+    /(?<![/\\._-])處理(一下|全部|所有)?(?![/\\_-]|\.[\p{L}\p{N}_-])/u,
+    /(?<![/\\._-])修好(?![/\\_-]|\.[\p{L}\p{N}_-])/u,
+    /(?<![/\\._-])優化(?![/\\_-]|\.[\p{L}\p{N}_-])/u,
+    /(?<![/\\._-])弄好(?![/\\_-]|\.[\p{L}\p{N}_-])/u,
+    /(?<![/\\._-])整理(?![/\\_-]|\.[\p{L}\p{N}_-])/u,
 ];
 const VAGUE_EVIDENCE_PATTERNS = [
     /\b(done|looks good|seems ok|probably|should work)\b/i,
@@ -39,9 +35,11 @@ const CONCRETE_EVIDENCE_SIGNAL_PATTERNS = [
 ];
 const VAGUE_EVIDENCE_SHORT_SUMMARY_LENGTH = 60;
 export class TaskTransitionError extends Error {
-    constructor(message) {
+    code;
+    constructor(message, code) {
         super(message);
         this.name = "TaskTransitionError";
+        this.code = code;
     }
 }
 export function reduceTaskState(state, event) {
@@ -221,7 +219,9 @@ function decomposeStep(state, event) {
         task.nextAction =
             activeStep.decompositionStatus === "atomic"
                 ? activeStep.text
-                : `Break down ${activeStep.id}`;
+                : isAtMaximumDecompositionDepth(activeStep)
+                    ? `Block ${activeStep.id}; maximum decomposition depth reached`
+                    : `Break down ${activeStep.id}`;
     }
     else {
         delete task.currentStep;
@@ -920,6 +920,9 @@ function updatePlanStep(task, event) {
     }
     if (event.stepStatus === "done" &&
         currentStep.decompositionStatus !== "atomic") {
+        if (isAtMaximumDecompositionDepth(currentStep)) {
+            throw new TaskTransitionError(`Plan step ${currentStep.id} reached maximum decomposition depth while still non-atomic; block the task and carry the remaining scope into a flat successor task`);
+        }
         throw new TaskTransitionError(`Plan step ${currentStep.id} is ${currentStep.decompositionStatus}; use task_decompose until it is atomic before done`);
     }
     if (event.stepStatus === "skipped" &&
@@ -965,12 +968,12 @@ function recordScopeSignal(task, event) {
     if (!event.activity && !event.scope)
         return;
     if (!event.activity?.trim()) {
-        throw new TaskTransitionError("Scope updates require an activity");
+        throw new TaskTransitionError("Scope updates require an activity", "scope_activity_required");
     }
     const scope = event.scope ?? "within_step";
     if ((scope === "scope_change" || scope === "off_plan") &&
         !event.scopeReason?.trim()) {
-        throw new TaskTransitionError("Scope change or off-plan activity requires scopeReason");
+        throw new TaskTransitionError("Scope change or off-plan activity requires scopeReason", "scope_reason_required");
     }
     if (scope === "scope_change" || scope === "off_plan") {
         task.warnings.push(`${scope}: ${event.activity.trim()} (${event.scopeReason?.trim()})`);
@@ -1393,7 +1396,7 @@ function clampProgress(progress) {
     return Math.max(0, Math.min(100, Math.round(progress)));
 }
 function cloneState(state) {
-    return structuredClone(state);
+    return structuredClone({ ...state, events: [] });
 }
 function unique(values) {
     return [...new Set(values)];

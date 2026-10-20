@@ -20,6 +20,25 @@
 - `pi-tasks:state` now publishes a version-2 compact delta/resume contract instead of a full task snapshot. The contract contains the active task, current atomic step, unresolved blockers, evidence gaps, and state version.
 - Weak-model resume guidance now recommends the compound verification tool for the successful current-step path while retaining `task_evidence` and `task_update` for failure, backfill, skip, blocker, and scope workflows.
 
+## [0.2.9] - 2026-10-16
+
+### Fixed
+- Stopped reducer replay from repeatedly deep-cloning accumulated event history that is immediately replaced, removing the dominant cost behind reported large-session startup timeouts while preserving immutable task-state transitions and append-only history.
+
+## [0.2.8] - 2026-10-14
+
+### Fixed
+- Replaced impossible `task_decompose` guidance at the maximum decomposition depth with a consistent explicit blocker recovery across resume, next, focus, granularity, state, and rejection outputs.
+- Declared runtime evidence text limits in the tool schema and made command/test/dogfood retry templates preserve required commands while replacing over-limit values with explicit caller-supplied placeholders.
+- Made scope-update field dependencies model-visible and changed missing `activity`/`scope_reason` rejections to return corrected `task_update` recovery parameters instead of unrelated resume tools.
+- Stopped plan-quality language guards from interpreting action-like path segments such as `fixtures/fix.json`, `update.json`, or `then.json` as vague or compound instructions while retaining broad and multi-action rejection controls.
+
+### Changed
+- Updated English and Traditional Chinese dogfood prompts to enter task-free sessions through the active `task_resume` entrypoint before exercising lazy task controls.
+
+### Security
+- Updated transitive `source-map-js` to `1.2.2` after the release audit detected GHSA-68fv-2mgg-jv7q.
+
 ## [0.2.7] - 2026-09-10
 
 ### Added
