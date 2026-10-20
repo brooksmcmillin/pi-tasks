@@ -21,7 +21,12 @@ if (!sdkRoot) {
 	);
 }
 
+// PI_SDK_ROOT selects the installed SDK version under test; a static import
+// would resolve the repository's dependencies instead of that release.
 const sdk = await import(pathToFileURL(join(sdkRoot, "dist/index.js")).href);
+const piAi = await import(
+	pathToFileURL(join(sdkRoot, "..", "pi-ai", "dist", "index.js")).href
+);
 const taskRoot = resolve(import.meta.dirname, "..");
 const taskToolNames = new Set([
 	"task_plan",
@@ -69,6 +74,7 @@ function isToolActive(
 
 type NativeToolResult = {
 	content: Array<{ type: string; text: string }>;
+	details?: unknown;
 	isError?: boolean;
 };
 
@@ -119,19 +125,18 @@ function toolSurface(session: {
 
 async function waitForPersistedTaskEvent(
 	sessionFile: string,
-	eventType: "task.created" | "task.updated" = "task.created",
+	eventType:
+		| "task.created"
+		| "task.updated"
+		| "task.evidence_added" = "task.created",
 ): Promise<void> {
-	for (let attempt = 0; attempt < 20; attempt += 1) {
-		const contents = await readFile(sessionFile, "utf8");
-		if (
-			contents.includes('"customType":"pi-tasks:event"') &&
-			contents.includes(`"type":"${eventType}"`)
-		) {
-			return;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 10));
+	const contents = await readFile(sessionFile, "utf8");
+	if (
+		!contents.includes('"customType":"pi-tasks:event"') ||
+		!contents.includes(`"type":"${eventType}"`)
+	) {
+		throw new Error(`pi-tasks ${eventType} event was not persisted to JSONL`);
 	}
-	throw new Error(`pi-tasks ${eventType} event was not persisted to JSONL`);
 }
 
 function appendNativeToolCall(sessionManager: {
@@ -1352,6 +1357,229 @@ describe("native Pi dynamic task tools", () => {
 			}
 		} finally {
 			first.session.dispose();
+		}
+	});
+
+	it("enforces task_evidence text limits through the native Pi validator", async () => {
+		const active = await createNativeSession();
+		try {
+			await requireTool(active.session, "task_plan").execute(
+				"native-evidence-plan",
+				validPlan(),
+				undefined,
+				undefined,
+			);
+			const evidence = requireTool(active.session, "task_evidence");
+			const argumentsAtBoundary = {
+				task_id: "T1",
+				type: "test",
+				level: "unit_test",
+				summary: "native validator accepted the evidence boundary",
+				passed: "true",
+				references: ["npm test"],
+				step_ids: ["T1-S1"],
+				quality: {
+					source: "native validator",
+					reproducible: true,
+					verifier: "tool",
+					command: "x".repeat(300),
+					artifactRefs: ["npm test"],
+					observedOutput: "Tests 1 passed (1)",
+				},
+			};
+
+			expect(
+				piAi.validateToolArguments(evidence, {
+					name: "task_evidence",
+					arguments: argumentsAtBoundary,
+				}),
+			).toMatchObject(argumentsAtBoundary);
+			expect(() =>
+				piAi.validateToolArguments(evidence, {
+					name: "task_evidence",
+					arguments: {
+						...argumentsAtBoundary,
+						quality: {
+							...argumentsAtBoundary.quality,
+							command: "x".repeat(301),
+						},
+					},
+				}),
+			).toThrow(/quality\.command.*300/);
+		} finally {
+			active.session.dispose();
+		}
+	});
+
+	it("returns a native-valid evidence retry and restores the corrected evidence", async () => {
+		const active = await createNativeSession();
+		try {
+			appendNativeToolCall(active.sessionManager);
+			await requireTool(active.session, "task_plan").execute(
+				"native-evidence-retry-plan",
+				validPlan(),
+				undefined,
+				undefined,
+			);
+			const evidence = requireTool(active.session, "task_evidence");
+			const persistedBefore = active.sessionManager
+				.getEntries()
+				.filter(
+					(entry: { type: string; customType?: string }) =>
+						entry.type === "custom" && entry.customType === "pi-tasks:event",
+				).length;
+			const rejected = await evidence.execute(
+				"native-evidence-rejected",
+				{
+					task_id: "T1",
+					type: "test",
+					level: "not_verified",
+					summary: "test run reported 7 passed",
+					passed: "true",
+					references: ["npm test"],
+					step_ids: ["T1-S1"],
+					quality: {
+						source: "native test fixture",
+						reproducible: true,
+						verifier: "tool",
+						command: "npm test",
+						artifactRefs: ["npm test"],
+						observedOutput: "Tests 7 passed (7)",
+					},
+				},
+				undefined,
+				undefined,
+			);
+			expect(rejected.isError).toBe(true);
+			expect(rejected.details).toMatchObject({
+				retry_example: {
+					type: "test",
+					quality: {
+						command: "npm test",
+					},
+				},
+			});
+			expect(
+				active.sessionManager
+					.getEntries()
+					.filter(
+						(entry: { type: string; customType?: string }) =>
+							entry.type === "custom" && entry.customType === "pi-tasks:event",
+					),
+			).toHaveLength(persistedBefore);
+
+			assert.ok(rejected.details && typeof rejected.details === "object");
+			assert.ok("retry_example" in rejected.details);
+			const retryExample = rejected.details.retry_example;
+			assert.ok(retryExample && typeof retryExample === "object");
+			const correctedParams = {
+				...(retryExample as Record<string, unknown>),
+				level: "unit_test",
+			};
+			expect(
+				piAi.validateToolArguments(evidence, {
+					name: "task_evidence",
+					arguments: correctedParams,
+				}),
+			).toMatchObject(correctedParams);
+			const corrected = await evidence.execute(
+				"native-evidence-corrected",
+				correctedParams,
+				undefined,
+				undefined,
+			);
+			expect(corrected.isError).not.toBe(true);
+			const sessionFile = active.sessionManager.getSessionFile();
+			assert.ok(sessionFile);
+			await waitForPersistedTaskEvent(sessionFile, "task.evidence_added");
+
+			active.session.dispose();
+			const restored = await createNativeSession({
+				base: active.base,
+				sessionFile,
+			});
+			try {
+				const listed = await requireTool(restored.session, "task_list").execute(
+					"native-evidence-list",
+					{ include_evidence: true },
+					undefined,
+					undefined,
+				);
+				expect(listed.content[0]?.text).toContain("test run reported 7 passed");
+			} finally {
+				restored.session.dispose();
+			}
+		} finally {
+			active.session.dispose();
+		}
+	});
+
+	it("persists only corrected native scope updates after targeted recovery", async () => {
+		const active = await createNativeSession();
+		try {
+			appendNativeToolCall(active.sessionManager);
+			await requireTool(active.session, "task_plan").execute(
+				"native-scope-plan",
+				validPlan(),
+				undefined,
+				undefined,
+			);
+			const update = requireTool(active.session, "task_update");
+			const persistedBefore = active.sessionManager
+				.getEntries()
+				.filter(
+					(entry: { type: string; customType?: string }) =>
+						entry.type === "custom" && entry.customType === "pi-tasks:event",
+				).length;
+
+			const rejected = await update.execute(
+				"native-scope-rejected",
+				{ task_id: "T1", scope: "within_step" },
+				undefined,
+				undefined,
+			);
+			expect(rejected.isError).toBe(true);
+			expect(rejected.content[0]?.text).toContain("retry_with: task_update");
+			expect(rejected.details).toMatchObject({
+				retry_with: "task_update",
+				minimum_params: {
+					activity: "<meaningful activity performed>",
+					scope: "within_step",
+				},
+			});
+			expect(
+				active.sessionManager
+					.getEntries()
+					.filter(
+						(entry: { type: string; customType?: string }) =>
+							entry.type === "custom" && entry.customType === "pi-tasks:event",
+					),
+			).toHaveLength(persistedBefore);
+
+			const corrected = await update.execute(
+				"native-scope-corrected",
+				{
+					task_id: "T1",
+					activity: "Inspected the current fixture",
+					scope: "within_step",
+				},
+				undefined,
+				undefined,
+			);
+			expect(corrected.isError).not.toBe(true);
+			const sessionFile = active.sessionManager.getSessionFile();
+			assert.ok(sessionFile);
+			await waitForPersistedTaskEvent(sessionFile, "task.updated");
+			expect(
+				active.sessionManager
+					.getEntries()
+					.filter(
+						(entry: { type: string; customType?: string }) =>
+							entry.type === "custom" && entry.customType === "pi-tasks:event",
+					),
+			).toHaveLength(persistedBefore + 1);
+		} finally {
+			active.session.dispose();
 		}
 	});
 

@@ -170,11 +170,15 @@ describe("bounded atomic evidence batch", () => {
 			const retry = structuredClone(recovery.retry_example);
 			if (name === "task_evidence_batch") {
 				const entries = retry.entries as Record<string, unknown>[];
-				expect(entries[1]?.summary).toBe(long.summary);
+				expect(entries[1]?.summary).toBe(
+					"<concise evidence summary; put long output in quality.artifactRefs>",
+				);
 				required(entries[1]).summary =
 					"Parser regression suite measured four passing tests";
 			} else {
-				expect(retry.summary).toBe(long.summary);
+				expect(retry.summary).toBe(
+					"<concise evidence summary; put long output in quality.artifactRefs>",
+				);
 				retry.summary = "Parser regression suite measured four passing tests";
 			}
 			const tool = required(h.tools.get(name));

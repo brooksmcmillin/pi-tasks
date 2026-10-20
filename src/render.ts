@@ -1,12 +1,13 @@
 import { handoffRecovery } from "./handoff.ts";
-import type {
-	Task,
-	TaskExecutionMode,
-	TaskResumeContext,
-	TaskResumeStep,
-	TaskState,
-	TaskStatus,
-	TaskStep,
+import {
+	isAtMaximumDecompositionDepth,
+	type Task,
+	type TaskExecutionMode,
+	type TaskResumeContext,
+	type TaskResumeStep,
+	type TaskState,
+	type TaskStatus,
+	type TaskStep,
 } from "./model.ts";
 import { hasFreshCriterionEvidence } from "./reducer.ts";
 import { isSupportAction, SUPPORT_ACTIONS } from "./support-actions.ts";
@@ -203,6 +204,11 @@ export function formatTaskFocus(state: TaskState): string {
 		if (step.allowedActions.length > 0) {
 			lines.push(
 				`Allowed actions: ${step.allowedActions.map(compactRef).join(", ")}`,
+			);
+		}
+		if (isAtMaximumDecompositionDepth(step)) {
+			lines.push(
+				`Next allowed action: task_update ${step.id} to blocked; maximum decomposition depth reached`,
 			);
 		}
 	} else {
@@ -619,11 +625,10 @@ function unique(values: string[]): string[] {
 }
 
 function getNextAllowedActions(step: TaskStep, hasBlockers: boolean): string[] {
-	// Support actions (safe local reads, searches, instruction/tool discovery)
-	// never mutate repo or task state, so they are always admissible
-	// regardless of decomposition status or blockers - an agent must never
-	// need to decompose a step just to unlock a safe read.
-	if (hasBlockers) return withSupportActions(["task_update"]);
+	// Read-only support remains available even when execution is blocked.
+	if (hasBlockers || isAtMaximumDecompositionDepth(step)) {
+		return withSupportActions(["task_update"]);
+	}
 	if (step.decompositionStatus !== "atomic") {
 		return withSupportActions([
 			"task_decompose",
@@ -659,6 +664,7 @@ function getExecutionMode(
 ): TaskExecutionMode {
 	if (hasBlockers || task.status === "blocked") return "blocked";
 	if (!step) return gaps.length > 0 ? "verifying" : "completing";
+	if (isAtMaximumDecompositionDepth(step)) return "blocked";
 	if (step.decompositionStatus !== "atomic") return "decomposing";
 	if (step.evidenceRequired && step.evidenceIds.length === 0)
 		return "verifying";
@@ -671,7 +677,11 @@ function getRecommendedTool(
 ): string {
 	if (mode === "planning") return "task_plan";
 	if (mode === "blocked") return "task_update";
-	if (mode === "decomposing") return "task_decompose";
+	if (mode === "decomposing") {
+		return step && isAtMaximumDecompositionDepth(step)
+			? "task_update"
+			: "task_decompose";
+	}
 	if (mode === "verifying") return step ? "task_verify_step" : "task_evidence";
 	if (mode === "completing") return "task_complete";
 	return step?.allowedActions[0] ?? "task_update";
@@ -704,6 +714,22 @@ function getMinimumParams(
 			task_id: task.id,
 			step_id: step.id,
 			child_steps: ["<2+ atomic child steps>"],
+		};
+	}
+	if (
+		recommendedTool === "task_update" &&
+		step &&
+		isAtMaximumDecompositionDepth(step)
+	) {
+		return {
+			task_id: task.id,
+			status: "blocked",
+			blocker: {
+				reason: `Plan step ${step.id} remains non-atomic at maximum decomposition depth`,
+				blockedBy: "ambiguity",
+				neededToUnblock:
+					"Create a flat successor task carrying the remaining scope and existing evidence references",
+			},
 		};
 	}
 	if (recommendedTool === "task_evidence") {
@@ -851,7 +877,9 @@ function buildResumeInstruction(
 			: "No open step remains. Use task_complete only if implementation is verified; if review finds gaps, use task_rework with findings and remediation steps without requesting permission for in-scope repairs.";
 	}
 	if (step.decompositionStatus !== "atomic") {
-		return `For compound work, decompose ${step.id}. If already simple, use task_update with step_id and step_granularity_check (reason and all flags true) to classify it without inventing children. Do not execute or mark it done until atomic.`;
+		return isAtMaximumDecompositionDepth(step)
+			? `Block ${step.id} with task_update instead of decomposing again; carry the remaining scope and existing evidence references into an explicitly planned flat successor task.`
+			: `For compound work, decompose ${step.id}. If already simple, use task_update with step_id and step_granularity_check (reason and all flags true) to classify it without inventing children. Do not execute or mark it done until atomic.`;
 	}
 	if (step.evidenceRequired && step.evidenceIds.length === 0) {
 		return step.granularityCheck.unit === "deliverable"
