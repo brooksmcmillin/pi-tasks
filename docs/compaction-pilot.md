@@ -6,11 +6,20 @@ Task: https://nexus.brooksmcmillin.com/task/7678
 
 The default entrypoint contains the pilot, but takes no action without an explicit
 `PI_TASKS_COMPACTION_COHORT=baseline` or `pilot` environment value. Assignment is
-persisted once per root Pi task/session in a `pi-tasks:compaction-cohort` entry;
-resume and inherited fork entries keep the original cohort despite environment
+persisted once per root Pi task/session in a `pi-tasks:compaction-cohort` entry
+when a successful task mutation identifies that task, before waiting for idle.
+A metadata-only checkpoint marker binds the passive collector immediately; it is
+not a saved recovery checkpoint or a phase boundary. Tasks handed off to review,
+blocked or completed in the same turn therefore retain cohort attribution.
+Idle settlement remains a fallback for an already-active task. Read-only queries,
+failed tools and inactive creation do not assign the previous active task.
+Resume and inherited fork entries keep the original cohort despite environment
 changes. Different root tasks have independent assignments. This is explicit
 cohort selection, not randomization or a causal experiment. Use comparable cohorts.
-`PI_TASKS_COMPACTION_DISABLE=1` disables intervention without rewriting assignments.
+`PI_TASKS_COMPACTION_DISABLE=1` disables intervention without suppressing mutation-time
+attribution or rewriting assignments. Attribution alone never compacts or arms a
+recovery continuation. Load the companion from session start to capture markers;
+existing unknown historical records are not retroactively relabeled.
 No installed configuration, model, memory policy or extension is changed here.
 Load the [passive telemetry companion](compaction-telemetry.md) to collect records.
 

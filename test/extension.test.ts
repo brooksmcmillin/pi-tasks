@@ -202,6 +202,7 @@ async function createNativeSession(
 		excludeTools?: string[];
 		foreignTaskNotes?: boolean;
 		telemetry?: boolean;
+		compiled?: boolean;
 		thresholdContinuation?: boolean;
 		queuedSettlement?: boolean;
 		pickupOrder?: "first" | "last";
@@ -219,8 +220,13 @@ async function createNativeSession(
 		mkdir(agentDir, { recursive: true }),
 	]);
 	const events: TaskStateEvent[] = [];
-	const extensionPaths = [join(taskRoot, "index.ts")];
-	if (options.telemetry) extensionPaths.push(join(taskRoot, "telemetry.ts"));
+	const extensionPaths = [
+		join(taskRoot, options.compiled ? "dist/index.js" : "index.ts"),
+	];
+	if (options.telemetry)
+		extensionPaths.push(
+			join(taskRoot, options.compiled ? "dist/telemetry.js" : "telemetry.ts"),
+		);
 	if (options.thresholdContinuation)
 		extensionPaths.push(
 			process.env.PI_THRESHOLD_CONTINUATION_EXTENSION ??
@@ -294,6 +300,105 @@ async function createNativeSession(
 	await result.session.bindExtensions(result.extensionsResult);
 	return { ...result, base, cwd, sessionDir, events, sessionManager, eventBus };
 }
+
+describe("native early cohort attribution", () => {
+	it.each([
+		{ status: "review", compiled: false },
+		{ status: "blocked", compiled: false },
+		{ status: "review", compiled: true },
+		{ status: "blocked", compiled: true },
+	])(
+		"keeps baseline telemetry before $status handoff (compiled=$compiled)",
+		async ({ status, compiled }) => {
+			vi.stubEnv("PI_TASKS_COMPACTION_COHORT", "baseline");
+			const directory = await mkdtemp(
+				join(tmpdir(), "pi-baseline-attribution-"),
+			);
+			cleanups.push(directory);
+			vi.stubEnv("PI_TASKS_TELEMETRY_DIR", directory);
+			const h = await createNativeSession({ telemetry: true, compiled });
+			const runner = h.session.extensionRunner;
+			const compact = vi.spyOn(h.session, "compact");
+			try {
+				appendNativeToolCall(h.sessionManager);
+				const plan = validPlan();
+				const created = await requireTool(h.session, "task_plan").execute(
+					"baseline-plan",
+					plan,
+				);
+				expect(created.isError).not.toBe(true);
+				await runner.emitToolResult({
+					type: "tool_result",
+					toolName: "task_plan",
+					toolCallId: "baseline-plan",
+					input: plan,
+					content: created.content,
+					details: created.details,
+					isError: false,
+				});
+				const assignment = h.sessionManager
+					.getBranch()
+					.filter(
+						(e: { customType?: string }) =>
+							e.customType === "pi-tasks:compaction-cohort",
+					);
+				expect(assignment).toHaveLength(1);
+				expect(assignment[0].data).toMatchObject({
+					cohort: "baseline",
+					rootTaskId: "T1",
+				});
+				const input = {
+					task_id: "T1",
+					status,
+					progress: 50,
+					...(status === "blocked"
+						? {
+								blocker: {
+									reason: "External fixture wait",
+									blockedBy: "external",
+									neededToUnblock: "Fixture notification",
+								},
+							}
+						: {}),
+				};
+				const updated = await requireTool(h.session, "task_update").execute(
+					"baseline-park",
+					input,
+				);
+				expect(updated.isError).not.toBe(true);
+				await runner.emitToolResult({
+					type: "tool_result",
+					toolName: "task_update",
+					toolCallId: "baseline-park",
+					input,
+					content: updated.content,
+					details: updated.details,
+					isError: false,
+				});
+				await runner.emit({ type: "agent_settled", aborted: false });
+				await runner.emit({ type: "session_shutdown" });
+				const { TelemetryStore } = await import(
+					"../src/compaction-telemetry.ts"
+				);
+				const readback = new TelemetryStore(directory).read();
+				expect(readback.invalidFiles).toBe(0);
+				expect(
+					readback.records.some(
+						(r) => r.cohort === "baseline" && r.kind === "checkpoint",
+					),
+				).toBe(true);
+				expect(
+					readback.records.find((r) => r.kind === "session_end")?.cohort,
+				).toBe("baseline");
+				expect(compact).not.toHaveBeenCalled();
+			} finally {
+				compact.mockRestore();
+				h.session.dispose();
+				vi.unstubAllEnvs();
+			}
+		},
+	);
+});
 
 describe("native compaction recovery replay benchmark", () => {
 	it("keeps next-action continuity and one continuation owner across native hook paths", async () => {

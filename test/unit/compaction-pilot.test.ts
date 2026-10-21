@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerCompactionPilot } from "../../src/compaction-pilot.ts";
+import { COHORT_ENTRY } from "../../src/compaction-policy.ts";
 import { RECOVERY_ENTRY } from "../../src/compaction-recovery.ts";
 import {
 	createCollector,
@@ -92,11 +93,14 @@ function harness(entries: BranchEntry[] = []) {
 	const settle = (aborted = false) =>
 		handlers.get("agent_settled")?.({ aborted } as never, ctx);
 	const phase = () =>
-		pilot.observeTool({
-			toolName: "task_verify_step",
-			isError: false,
-			input: { task_id: "T1" },
-		} as TaskToolResultEvent);
+		pilot.observeTool(
+			{
+				toolName: "task_verify_step",
+				isError: false,
+				input: { task_id: "T1" },
+			} as TaskToolResultEvent,
+			ctx,
+		);
 	return {
 		store,
 		entries,
@@ -116,7 +120,51 @@ const user = {
 	message: { role: "user" },
 } as BranchEntry;
 describe("idle native compaction pilot", () => {
+	it.each(["baseline", "pilot"])(
+		"attributes %s work before a same-turn handoff or block",
+		(cohort) => {
+			vi.stubEnv("PI_TASKS_COMPACTION_COHORT", cohort);
+			for (const status of ["review", "blocked", "done"] as const) {
+				const h = harness([user]);
+				h.ctx.isIdle = () => false;
+				h.pilot.observeTool(
+					{
+						toolName: "task_plan",
+						isError: false,
+						input: {},
+						details: { taskId: "T1" },
+					},
+					h.ctx,
+				);
+				expect(
+					h.entries.filter((e) => e.customType === COHORT_ENTRY),
+				).toHaveLength(1);
+				expect(h.records.at(-1)).toMatchObject({ cohort });
+				expect(h.calls()).toBe(0);
+				const state = h.store.getState();
+				const task = state.tasks.T1;
+				if (!task) throw new Error("Missing fixture task");
+				task.status = status;
+				delete state.activeTaskId;
+				h.pilot.observeTool(
+					{
+						toolName: status === "done" ? "task_complete" : "task_update",
+						isError: false,
+						input: { task_id: "T1" },
+					},
+					h.ctx,
+				);
+				h.settle();
+				expect(
+					h.entries.filter((e) => e.customType === COHORT_ENTRY),
+				).toHaveLength(1);
+				expect(h.calls()).toBe(0);
+				expect(h.sendMessage).not.toHaveBeenCalled();
+			}
+		},
+	);
 	it("is opt-in and unknown checkpoints skip only pilot intervention", () => {
+		vi.stubEnv("PI_TASKS_COMPACTION_COHORT", undefined);
 		const h = harness([user]);
 		h.phase();
 		h.settle();
@@ -132,6 +180,92 @@ describe("idle native compaction pilot", () => {
 				preparation: { settings: { keepRecentTokens: 1 } },
 			}),
 		).toBeUndefined();
+	});
+	it("attributes while intervention is disabled without compacting or arming continuation", () => {
+		vi.stubEnv("PI_TASKS_COMPACTION_COHORT", "pilot");
+		vi.stubEnv("PI_TASKS_COMPACTION_DISABLE", "1");
+		const h = harness([user]);
+		h.pilot.observeTool(
+			{ toolName: "task_decision", isError: false, input: { task_id: "T1" } },
+			h.ctx,
+		);
+		expect(h.records.at(-1)?.cohort).toBe("pilot");
+		h.settle();
+		expect(h.calls()).toBe(0);
+		expect(h.sendMessage).not.toHaveBeenCalled();
+	});
+	it("does not assign on failed, read-only, inactive-create or unknown-task results", () => {
+		vi.stubEnv("PI_TASKS_COMPACTION_COHORT", "baseline");
+		const h = harness([user]);
+		for (const event of [
+			{
+				toolName: "task_plan",
+				isError: true,
+				input: {},
+				details: { taskId: "T1" },
+			},
+			{ toolName: "task_resume", isError: false, input: { task_id: "T1" } },
+			{
+				toolName: "task_plan",
+				isError: false,
+				input: { activate: false },
+				details: { taskId: "T1" },
+			},
+			{
+				toolName: "task_update",
+				isError: false,
+				input: { task_id: "missing" },
+			},
+		])
+			h.pilot.observeTool(event, h.ctx);
+		expect(h.entries.filter((e) => e.customType === COHORT_ENTRY)).toHaveLength(
+			0,
+		);
+	});
+	it("rebinds root and child telemetry without changing inherited assignments", () => {
+		vi.stubEnv("PI_TASKS_COMPACTION_COHORT", "baseline");
+		const h = harness([user]);
+		h.phase();
+		const root = h.store.getState().tasks.T1;
+		if (!root) throw new Error("Missing fixture task");
+		h.store.getState().tasks.T2 = { ...root, id: "T2" };
+		h.store.getState().tasks.T3 = { ...root, id: "T3", parentId: "T1" };
+		vi.stubEnv("PI_TASKS_COMPACTION_COHORT", "pilot");
+		h.pilot.observeTool(
+			{ toolName: "task_update", isError: false, input: { task_id: "T2" } },
+			h.ctx,
+		);
+		expect(h.records.at(-1)?.cohort).toBe("pilot");
+		h.pilot.observeTool(
+			{ toolName: "task_update", isError: false, input: { task_id: "T3" } },
+			h.ctx,
+		);
+		expect(h.records.at(-1)?.cohort).toBe("baseline");
+		expect(h.entries.filter((e) => e.customType === COHORT_ENTRY)).toHaveLength(
+			2,
+		);
+		const resumed = harness(h.entries);
+		resumed.ctx.sessionManager.getSessionId = () => "fork";
+		resumed.phase();
+		expect(resumed.records.at(-1)).toMatchObject({ cohort: "baseline" });
+		expect(h.entries.filter((e) => e.customType === COHORT_ENTRY)).toHaveLength(
+			2,
+		);
+	});
+	it("keeps successful mutations non-failing when attribution storage is unavailable", () => {
+		vi.stubEnv("PI_TASKS_COMPACTION_COHORT", "baseline");
+		const h = harness([user]);
+		vi.spyOn(h.ctx.sessionManager, "getBranch").mockImplementationOnce(() => {
+			throw new Error("storage unavailable");
+		});
+		expect(() => h.phase()).not.toThrow();
+		expect(h.entries.filter((e) => e.customType === COHORT_ENTRY)).toHaveLength(
+			0,
+		);
+		h.phase();
+		expect(h.entries.filter((e) => e.customType === COHORT_ENTRY)).toHaveLength(
+			1,
+		);
 	});
 	it("persists cohort and exact checkpoint before native compaction, resumes exactly once", () => {
 		vi.stubEnv("PI_TASKS_COMPACTION_COHORT", "pilot");
@@ -170,11 +304,14 @@ describe("idle native compaction pilot", () => {
 	it("does not attribute other-task verification to the active phase", () => {
 		vi.stubEnv("PI_TASKS_COMPACTION_COHORT", "pilot");
 		const h = harness([user]);
-		h.pilot.observeTool({
-			toolName: "task_verify_step",
-			isError: false,
-			input: { task_id: "T2" },
-		});
+		h.pilot.observeTool(
+			{
+				toolName: "task_verify_step",
+				isError: false,
+				input: { task_id: "T2" },
+			},
+			h.ctx,
+		);
 		h.settle();
 		expect(h.calls()).toBe(0);
 		expect(h.records.at(-1)?.policyDecision).toBe("await-phase-boundary");
@@ -196,7 +333,7 @@ describe("idle native compaction pilot", () => {
 				tokens: 150_000,
 				contextWindow: 1_000_000,
 			});
-			h.pilot.observeTool({ ...event, isError: false });
+			h.pilot.observeTool({ ...event, isError: false }, h.ctx);
 			h.settle();
 			expect(h.calls()).toBe(1);
 			h.options()?.onComplete?.();
@@ -235,11 +372,14 @@ describe("idle native compaction pilot", () => {
 	it("does not arm continuation from read-only recovery or checkpoint bookkeeping", () => {
 		vi.stubEnv("PI_TASKS_COMPACTION_COHORT", "pilot");
 		const h = harness([user]);
-		h.pilot.observeTool({
-			toolName: "task_checkpoint",
-			isError: false,
-			input: {},
-		});
+		h.pilot.observeTool(
+			{
+				toolName: "task_checkpoint",
+				isError: false,
+				input: {},
+			},
+			h.ctx,
+		);
 		h.settle();
 		h.options()?.onComplete?.();
 		expect(h.calls()).toBe(1);

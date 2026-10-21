@@ -126,8 +126,8 @@ export default function (pi: ExtensionAPI) {
 		unsubscribePickup?.();
 		pickupOwnsContinuation = false;
 	});
-	pi.on("tool_result", (event) => {
-		pilot.observeTool(event);
+	pi.on("tool_result", (event, ctx) => {
+		pilot.observeTool(event, ctx);
 		if (pickupOwnsContinuation && !pickupHasRecoveryState)
 			continuation.relinquish();
 		continuation.observeToolResult(

@@ -8,6 +8,7 @@ export function registerCompactionPilot(pi, store, waiting) {
     let boundaryTask;
     let engagedTask;
     let generation = 0;
+    let cohortBinding;
     let pending;
     const mark = (data) => {
         try {
@@ -20,6 +21,45 @@ export function registerCompactionPilot(pi, store, waiting) {
         catch {
             /* Observers cannot own compaction. */
         }
+    };
+    const observeCohort = (taskId, ctx) => {
+        const state = store.getState();
+        const task = taskId ? state.tasks[taskId] : undefined;
+        if (!task)
+            return;
+        let root = task;
+        const seen = new Set();
+        while (root.parentId) {
+            const parent = state.tasks[root.parentId];
+            if (seen.has(root.id) || !parent)
+                return;
+            seen.add(root.id);
+            root = parent;
+        }
+        const prior = ctx.sessionManager
+            .getBranch()
+            .filter((e) => e.type === "custom" && e.customType === COHORT_ENTRY)
+            .map((e) => e.data);
+        const sessionId = ctx.sessionManager.getSessionId?.() ?? "";
+        const assignment = assignCohort(prior, root.id, sessionId, process.env.PI_TASKS_COMPACTION_COHORT);
+        if (!assignment)
+            return;
+        if (!prior.some((a) => isAssignment(a) && a.rootTaskId === root.id))
+            pi.appendEntry(COHORT_ENTRY, assignment);
+        const binding = JSON.stringify([sessionId, task.id, assignment]);
+        if (cohortBinding !== binding) {
+            // Attribution is an observation, not a saved recovery checkpoint or phase boundary.
+            mark({
+                kind: "checkpoint",
+                id: randomUUID(),
+                taskId: task.id,
+                rootSessionId: assignment.rootSessionId,
+                cohort: assignment.cohort,
+                outcome: "unknown",
+            });
+            cohortBinding = binding;
+        }
+        return assignment;
     };
     const reset = () => {
         generation++;
@@ -36,7 +76,7 @@ export function registerCompactionPilot(pi, store, waiting) {
             data.taskId === store.getState().activeTaskId)
             boundaryTask = data.taskId;
     });
-    const observeTool = (event) => {
+    const observeTool = (event, ctx) => {
         if (event.isError)
             return;
         const target = event.toolName === "task_checkpoint"
@@ -44,6 +84,17 @@ export function registerCompactionPilot(pi, store, waiting) {
             : executionTaskId(event.toolName, event.input, event.details);
         if (EXECUTION_TOOLS.has(event.toolName))
             engagedTask = target;
+        if (EXECUTION_TOOLS.has(event.toolName) ||
+            event.toolName === "task_complete" ||
+            event.toolName === "task_decision" ||
+            event.toolName === "task_checkpoint") {
+            try {
+                observeCohort(target, ctx);
+            }
+            catch {
+                /* Attribution failure must not change a successful task mutation. */
+            }
+        }
         if (target === store.getState().activeTaskId &&
             target !== undefined &&
             (event.toolName === "task_verify_step" ||
@@ -80,24 +131,10 @@ export function registerCompactionPilot(pi, store, waiting) {
             ctx.signal?.aborted ||
             process.env.PI_TASKS_COMPACTION_DISABLE === "1")
             return;
-        let root = task;
-        const seen = new Set();
-        while (root.parentId) {
-            const parent = state.tasks[root.parentId];
-            if (seen.has(root.id) || !parent)
-                return;
-            seen.add(root.id);
-            root = parent;
-        }
-        const branch = ctx.sessionManager.getBranch();
-        const prior = branch
-            .filter((e) => e.type === "custom" && e.customType === COHORT_ENTRY)
-            .map((e) => e.data);
-        const assignment = assignCohort(prior, root.id, ctx.sessionManager.getSessionId?.() ?? "", process.env.PI_TASKS_COMPACTION_COHORT);
+        const assignment = observeCohort(task.id, ctx);
         if (!assignment)
             return;
-        if (!prior.some((a) => isAssignment(a) && a.rootTaskId === root.id))
-            pi.appendEntry(COHORT_ENTRY, assignment);
+        const branch = ctx.sessionManager.getBranch();
         const context = ctx.getContextUsage?.();
         const betweenTurns = ctx.isIdle?.() === true && !ctx.hasPendingMessages?.() && !waiting();
         const saved = betweenTurns && assignment.cohort === "pilot"
@@ -201,6 +238,7 @@ export function registerCompactionPilot(pi, store, waiting) {
         before,
         shutdown: () => {
             reset();
+            cohortBinding = undefined;
             unsubscribe?.();
         },
     };
