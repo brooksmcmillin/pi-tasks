@@ -272,10 +272,11 @@ Rules:
 
 - `initial_steps` become ordered task steps with IDs such as `T1-S1`.
 - Structured `plan_steps` should provide expected output, linked criteria, evidence requirement, and allowed actions.
-- During new task creation, agents should omit `plan_steps.criterionIds` unless generated criterion IDs are already known. Omitted criterion IDs link the step to all task criteria after IDs such as `T1-AC1` are generated.
+- During new task creation, agents should omit `plan_steps.criterionIds` or pass an empty array unless generated criterion IDs are already known. Both forms link the step to all task criteria after IDs such as `T1-AC1` are generated; a non-empty array must contain only known IDs.
 - Structured `plan_steps` should also include a granularity check. A step is executable only when it is `atomic`.
-- Atomic steps must not bundle obvious sequential work. The quality gate rejects compound wording such as `and`, `then`, `also`, `並且`, `然後`, `接著`, `以及`, or `同時` in atomic step text, expected output, or allowed actions.
+- Atomic steps must not bundle obvious sequential work. Every atomic plan-quality issue is a hard failure, including compound wording such as `and`, `then`, `also`, `並且`, `然後`, `接著`, `以及`, or `同時` in step text, expected output, or allowed actions. Wording failures include the exact matched fragment.
 - Action-like words adjacent to path punctuation are excluded from vague/compound matching, so filenames such as `fixtures/fix.json`, `update.json`, and `then.json` do not change an otherwise concrete step's quality score. The same words used as instructions, including before sentence punctuation, remain guarded.
+- Plan creation and decomposition validate every submitted step before rejecting the event and report all invalid step numbers in one error without persisting partial state.
 - The first step is active when the task is activated.
 - Agents must complete or skip the current open step before advancing.
 - Non-atomic steps must be recursively decomposed with `task_decompose` before they can be marked `done`. At maximum depth 4, every next-action surface instead directs the agent to block the task explicitly and carry remaining scope/evidence references into a manually planned flat successor.

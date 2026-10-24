@@ -315,7 +315,7 @@ export function registerTaskTools(
 		promptGuidelines: [
 			"Use task_plan for multi-step work before implementation when no suitable active task exists.",
 			"Constrain the plan to the user's stated objective; do not add speculative scope, gates, or abstractions.",
-			"Use concrete acceptance criteria and omit unknown generated criterion IDs during new task creation.",
+			"Use concrete acceptance criteria; omit unknown generated criterion IDs or pass an empty criterionIds array during new task creation to auto-link all task criteria.",
 			"Mark a plan step atomic only when its granularityCheck proves it has one action, one observable output, one verification method, and no hidden subtasks.",
 			"Activate only one task unless the user explicitly asks for parallel work.",
 		],
@@ -337,7 +337,7 @@ export function registerTaskTools(
 							Type.Array(
 								Type.String({
 									description:
-										"Known generated criterion IDs, for example T1-AC1. Omit during new task creation to auto-link all criteria.",
+										"Known generated criterion IDs, for example T1-AC1. Omit or pass an empty array during new task creation to auto-link all criteria.",
 								}),
 							),
 						),
@@ -560,7 +560,7 @@ export function registerTaskTools(
 			"Smart models: preserve the parent objective and criteria; do not add unsolicited features or release gates.",
 			"Weak models: make each child one verb, one output, one evidence method, and copy criterionIds only from task_focus/task_resume.",
 			"Each child step must include expectedOutput, evidenceRequired, allowedActions, and granularityCheck.",
-			"Omit child step criterionIds unless you are carrying forward known generated IDs from task_focus or task_resume.",
+			"Omit child step criterionIds or pass an empty array unless you are carrying forward known generated IDs from task_focus or task_resume; either form auto-links the parent criteria.",
 			"Only mark a child atomic when it truly has one action, one output, one verification method, and no hidden subtasks.",
 			"Do not use task_decompose for execution evidence; record execution evidence with task_evidence.",
 			"At maximum decomposition depth, do not retry task_decompose; explicitly block the task and carry remaining scope into a flat successor task.",

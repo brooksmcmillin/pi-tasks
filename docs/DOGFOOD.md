@@ -1129,6 +1129,27 @@ Observed result: `task_resume` reported no active task, and the installed extens
 
 The fixed installed-package English prompt also passed: `task_resume` recommended `task_plan`; `Run tests and update docs` was rejected for broad and compound wording; and recovery returned `retry_with: task_plan` plus `do_not_retry_same_call: true`.
 
+## 0.2.10 Release Dogfood (2026-10-24)
+
+Release candidate gate:
+
+```sh
+PI_SDK_ROOT=/tmp/pi-tasks-sdk-1.3.0/node_modules/@earendil-works/pi-coding-agent \
+  npm run release:check
+```
+
+Observed result: passed strict typecheck, Biome, 94 unit tests, 7 native Pi SDK 1.3.0 tests, build, source/dist import smoke, `npm pack --dry-run`, clean `pi-tasks-0.2.10.tgz` install/import, and a zero-vulnerability audit.
+
+Real Pi 1.3.0 source lifecycle used `openai-codex/gpt-5.6-sol`. One deliberately invalid two-step plan returned both indexed failures in one rejection and named the matched fragments `"Fix"` and `"and"`. A valid task with `criterionIds: []` auto-linked `T1-S1` to `T1-AC1`, recorded decision `D1`, completed an intentional block/unblock transition, rejected incomplete evidence quality, recorded corrected evidence `E2`, deduplicated an identical resubmission, completed at 100%, and retained its criterion, resolved blocker, decision, and evidence across same-session resume and fork replay.
+
+Live Pi TUI `/tasks detail` rendered the completed task, resolved blocker, decision, atomic step, criterion, and evidence. `/quit` exited with code 0.
+
+The fixed English and Traditional Chinese weak-model source prompts passed compound-plan rejection, future-step evidence lock, the 500-character evidence summary budget, and single-tool `task_next` convergence. The Chinese prompt previously asked the model to generate at least 501 repeated characters and could exhaust the external model turn before a tool call; it now supplies the same fixed 576-character over-limit value used by the deterministic English prompt.
+
+Installed-package smoke loaded the release-check consumer's `pi-tasks-0.2.10` tarball. The installed extension returned structured recovery with the exact `"update"` and `"and"` matches for an invalid plan, then separately created task `T1` from a valid atomic step with `criterionIds: []` and generated `T1-S1` / `T1-AC1`.
+
+No npm publication was performed; npm publication remains a manual maintainer action.
+
 ## Package Gates
 
 Also passed across release gates:

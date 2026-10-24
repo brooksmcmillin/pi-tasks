@@ -19,7 +19,7 @@ import {
 } from "./model.ts";
 
 const TERMINAL_STATUSES: TaskStatus[] = ["done", "cancelled"];
-const MIN_PLAN_QUALITY_SCORE = 80;
+const MIN_NON_ATOMIC_PLAN_QUALITY_SCORE = 80;
 const COMPOUND_STEP_PATTERNS = [
 	/(?<![/\\._-])\b(and|then|also|plus|after that)\b(?![/\\_-]|\.[\p{L}\p{N}_-])/iu,
 	/[;&]/,
@@ -551,6 +551,14 @@ function applySnapshot(
 	return state;
 }
 
+interface CreatePlanStepsOptions {
+	parentStepId?: string;
+	parentStatus?: TaskStep["status"];
+	startIndex?: number;
+	depth?: number;
+	idPrefix?: string;
+}
+
 function createPlanSteps(
 	taskId: string,
 	planSteps: TaskStepInput[] | undefined,
@@ -558,13 +566,7 @@ function createPlanSteps(
 	criterionIds: string[],
 	createdAt: string,
 	activate: boolean,
-	options: {
-		parentStepId?: string;
-		parentStatus?: TaskStep["status"];
-		startIndex?: number;
-		depth?: number;
-		idPrefix?: string;
-	} = {},
+	options: CreatePlanStepsOptions = {},
 ): TaskStep[] {
 	const steps =
 		planSteps ??
@@ -581,75 +583,123 @@ function createPlanSteps(
 	if (steps.length === 0) {
 		throw new TaskTransitionError("At least one ordered plan step is required");
 	}
-	return steps.map((step, index): TaskStep => {
-		const text = step.text.trim();
-		const expectedOutput = step.expectedOutput.trim();
-		if (!text) throw new TaskTransitionError("Plan steps cannot be blank");
-		if (!expectedOutput) {
-			throw new TaskTransitionError("Plan step expectedOutput is required");
+
+	const createdSteps: TaskStep[] = [];
+	const validationErrors: string[] = [];
+	for (const [index, step] of steps.entries()) {
+		try {
+			createdSteps.push(
+				createPlanStep(
+					taskId,
+					step,
+					index,
+					criterionIds,
+					createdAt,
+					activate,
+					options,
+				),
+			);
+		} catch (error) {
+			if (!(error instanceof TaskTransitionError)) throw error;
+			const prefix = `Plan step ${index + 1}`;
+			validationErrors.push(
+				error.message.startsWith(prefix)
+					? error.message
+					: `${prefix}: ${error.message}`,
+			);
 		}
-		const linkedCriteria = unique(step.criterionIds ?? criterionIds);
-		for (const criterionId of linkedCriteria) {
-			if (!criterionIds.includes(criterionId)) {
-				throw new TaskTransitionError(
-					`Plan step references unknown criterion ${criterionId}`,
-				);
-			}
-		}
-		const granularityCheck = normalizeGranularityCheck(step);
-		const decompositionStatus =
-			step.decompositionStatus ??
-			(granularityCheck.isAtomic ? "atomic" : "needs_breakdown");
-		const planQuality = assessPlanQuality({
-			text,
-			expectedOutput,
-			criterionIds: linkedCriteria,
-			evidenceRequired: step.evidenceRequired ?? true,
-			allowedActions: step.allowedActions ?? [],
-			decompositionStatus,
-			granularityCheck,
-		});
-		validateGranularityContract(
-			{
-				...step,
-				text,
-				expectedOutput,
-				criterionIds: linkedCriteria,
-				decompositionStatus,
-				granularityCheck,
-				planQuality,
-				allowedActions: step.allowedActions ?? [],
-				evidenceRequired: step.evidenceRequired ?? true,
-			},
-			index,
+	}
+	if (validationErrors.length === 1) {
+		throw new TaskTransitionError(validationErrors.join(""));
+	}
+	if (validationErrors.length > 1) {
+		throw new TaskTransitionError(
+			`Plan validation failed:\n- ${validationErrors.join("\n- ")}`,
 		);
-		const status =
-			index === 0 && (activate || options.parentStatus)
-				? (options.parentStatus ?? "active")
-				: "pending";
-		const idPrefix = options.idPrefix ?? taskId;
-		const stepNumber = (options.startIndex ?? 1) + index;
-		return {
-			id: options.idPrefix
-				? `${idPrefix}.${stepNumber}`
-				: `${taskId}-S${stepNumber}`,
-			taskId,
+	}
+	return createdSteps;
+}
+
+function createPlanStep(
+	taskId: string,
+	step: TaskStepInput,
+	index: number,
+	criterionIds: string[],
+	createdAt: string,
+	activate: boolean,
+	options: CreatePlanStepsOptions,
+): TaskStep {
+	const text = step.text.trim();
+	const expectedOutput = step.expectedOutput.trim();
+	if (!text) throw new TaskTransitionError("Plan steps cannot be blank");
+	if (!expectedOutput) {
+		throw new TaskTransitionError("Plan step expectedOutput is required");
+	}
+	const linkedCriteria = unique(
+		step.criterionIds && step.criterionIds.length > 0
+			? step.criterionIds
+			: criterionIds,
+	);
+	for (const criterionId of linkedCriteria) {
+		if (!criterionIds.includes(criterionId)) {
+			throw new TaskTransitionError(
+				`Plan step references unknown criterion ${criterionId}`,
+			);
+		}
+	}
+	const granularityCheck = normalizeGranularityCheck(step);
+	const decompositionStatus =
+		step.decompositionStatus ??
+		(granularityCheck.isAtomic ? "atomic" : "needs_breakdown");
+	const planQuality = assessPlanQuality({
+		text,
+		expectedOutput,
+		criterionIds: linkedCriteria,
+		evidenceRequired: step.evidenceRequired ?? true,
+		allowedActions: step.allowedActions ?? [],
+		decompositionStatus,
+		granularityCheck,
+	});
+	validateGranularityContract(
+		{
+			...step,
 			text,
 			expectedOutput,
-			status,
+			criterionIds: linkedCriteria,
 			decompositionStatus,
 			granularityCheck,
-			...(options.parentStepId ? { parentStepId: options.parentStepId } : {}),
-			childStepIds: [],
-			depth: options.depth ?? 0,
-			evidenceIds: [],
-			criterionIds: linkedCriteria,
-			evidenceRequired: step.evidenceRequired ?? true,
-			allowedActions: step.allowedActions ?? [],
 			planQuality,
-			...(status === "active" ? { startedAt: createdAt } : {}),
-		};
-	});
+			allowedActions: step.allowedActions ?? [],
+			evidenceRequired: step.evidenceRequired ?? true,
+		},
+		index,
+	);
+	const status =
+		index === 0 && (activate || options.parentStatus)
+			? (options.parentStatus ?? "active")
+			: "pending";
+	const idPrefix = options.idPrefix ?? taskId;
+	const stepNumber = (options.startIndex ?? 1) + index;
+	return {
+		id: options.idPrefix
+			? `${idPrefix}.${stepNumber}`
+			: `${taskId}-S${stepNumber}`,
+		taskId,
+		text,
+		expectedOutput,
+		status,
+		decompositionStatus,
+		granularityCheck,
+		...(options.parentStepId ? { parentStepId: options.parentStepId } : {}),
+		childStepIds: [],
+		depth: options.depth ?? 0,
+		evidenceIds: [],
+		criterionIds: linkedCriteria,
+		evidenceRequired: step.evidenceRequired ?? true,
+		allowedActions: step.allowedActions ?? [],
+		planQuality,
+		...(status === "active" ? { startedAt: createdAt } : {}),
+	};
 }
 
 function assessPlanQuality(step: {
@@ -665,27 +715,57 @@ function assessPlanQuality(step: {
 	if (step.text.length < 8) issues.push("step text is too short");
 	if (step.expectedOutput.length < 12)
 		issues.push("expected output is too short");
-	if (containsVaguePattern(step.text))
-		issues.push("step text uses vague or broad wording");
-	if (containsVaguePattern(step.expectedOutput))
-		issues.push("expected output uses vague or broad wording");
+	const textVagueMatch = findPatternMatch(step.text, VAGUE_PLAN_PATTERNS);
+	if (textVagueMatch) {
+		issues.push(
+			`step text uses vague or broad wording (${JSON.stringify(textVagueMatch)})`,
+		);
+	}
+	const outputVagueMatch = findPatternMatch(
+		step.expectedOutput,
+		VAGUE_PLAN_PATTERNS,
+	);
+	if (outputVagueMatch) {
+		issues.push(
+			`expected output uses vague or broad wording (${JSON.stringify(outputVagueMatch)})`,
+		);
+	}
 	if (step.allowedActions.length === 0)
 		issues.push("allowedActions are required");
 	if (step.allowedActions.length > 3)
 		issues.push("allowedActions are too broad; use at most three");
-	if (step.allowedActions.some((action) => containsVaguePattern(action))) {
-		issues.push("allowedActions contain vague actions");
+	const actionVagueMatch = findPatternMatchInValues(
+		step.allowedActions,
+		VAGUE_PLAN_PATTERNS,
+	);
+	if (actionVagueMatch) {
+		issues.push(
+			`allowedActions contain vague actions (${JSON.stringify(actionVagueMatch)})`,
+		);
 	}
-	if (containsCompoundStepPattern(step.text)) {
-		issues.push("step text appears to contain multiple actions");
+	const textCompoundMatch = findPatternMatch(step.text, COMPOUND_STEP_PATTERNS);
+	if (textCompoundMatch) {
+		issues.push(
+			`step text appears to contain multiple actions (${JSON.stringify(textCompoundMatch)})`,
+		);
 	}
-	if (containsCompoundStepPattern(step.expectedOutput)) {
-		issues.push("expected output appears to contain multiple outputs");
+	const outputCompoundMatch = findPatternMatch(
+		step.expectedOutput,
+		COMPOUND_STEP_PATTERNS,
+	);
+	if (outputCompoundMatch) {
+		issues.push(
+			`expected output appears to contain multiple outputs (${JSON.stringify(outputCompoundMatch)})`,
+		);
 	}
-	if (
-		step.allowedActions.some((action) => containsCompoundStepPattern(action))
-	) {
-		issues.push("allowedActions must each be a single action");
+	const actionCompoundMatch = findPatternMatchInValues(
+		step.allowedActions,
+		COMPOUND_STEP_PATTERNS,
+	);
+	if (actionCompoundMatch) {
+		issues.push(
+			`allowedActions must each be a single action (${JSON.stringify(actionCompoundMatch)})`,
+		);
 	}
 	if (step.criterionIds.length === 0)
 		issues.push("at least one criterion link is required");
@@ -706,12 +786,27 @@ function assessPlanQuality(step: {
 	};
 }
 
-function containsVaguePattern(value: string): boolean {
-	return VAGUE_PLAN_PATTERNS.some((pattern) => pattern.test(value.trim()));
+function findPatternMatch(
+	value: string,
+	patterns: readonly RegExp[],
+): string | undefined {
+	const normalized = value.trim();
+	for (const pattern of patterns) {
+		const match = pattern.exec(normalized);
+		if (match) return match[0];
+	}
+	return undefined;
 }
 
-function containsCompoundStepPattern(value: string): boolean {
-	return COMPOUND_STEP_PATTERNS.some((pattern) => pattern.test(value.trim()));
+function findPatternMatchInValues(
+	values: readonly string[],
+	patterns: readonly RegExp[],
+): string | undefined {
+	for (const value of values) {
+		const match = findPatternMatch(value, patterns);
+		if (match) return match;
+	}
+	return undefined;
 }
 
 function normalizeGranularityCheck(step: TaskStepInput): TaskGranularityCheck {
@@ -754,39 +849,14 @@ function validateGranularityContract(
 			`Plan step ${index + 1} granularityCheck.reason is required`,
 		);
 	}
-	if (step.planQuality.score < MIN_PLAN_QUALITY_SCORE) {
+	const failsQualityGate =
+		step.decompositionStatus === "atomic"
+			? step.planQuality.issues.length > 0
+			: step.planQuality.score < MIN_NON_ATOMIC_PLAN_QUALITY_SCORE;
+	if (failsQualityGate) {
 		throw new TaskTransitionError(
 			`Plan step ${index + 1} failed quality gate: ${step.planQuality.issues.join("; ")}`,
 		);
-	}
-	if (step.decompositionStatus === "atomic") {
-		const check = step.granularityCheck;
-		if (
-			!check.isAtomic ||
-			!check.canBeDoneInOneAgentAction ||
-			!check.hasSingleObservableOutput ||
-			!check.hasSingleVerificationMethod ||
-			!check.hasNoHiddenSubtasks
-		) {
-			throw new TaskTransitionError(
-				`Atomic plan step ${index + 1} failed granularity check`,
-			);
-		}
-		if (step.criterionIds.length === 0) {
-			throw new TaskTransitionError(
-				`Atomic plan step ${index + 1} must link at least one criterion`,
-			);
-		}
-		if (step.allowedActions.length === 0) {
-			throw new TaskTransitionError(
-				`Atomic plan step ${index + 1} must declare allowedActions`,
-			);
-		}
-		if (!step.evidenceRequired) {
-			throw new TaskTransitionError(
-				`Atomic plan step ${index + 1} must require evidence`,
-			);
-		}
 	}
 }
 

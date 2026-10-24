@@ -1,6 +1,6 @@
 {
 	"name": "pi-tasks",
-	"version": "0.2.9",
+	"version": "0.2.10",
 	"description": "Pi-native execution contracts for AI agents — evidence-gated completion, ordered plans, and compaction-safe resume",
 	"type": "module",
 	"main": "dist/index.js",
@@ -58,7 +58,7 @@
 		"@biomejs/biome": "2.3.5",
 		"@types/node": "22.19.19",
 		"typescript": "5.9.3",
-		"vitest": "5.0.0"
+		"vitest": "5.0.5"
 	},
 	"overrides": {
 		"esbuild": "0.28.1"
