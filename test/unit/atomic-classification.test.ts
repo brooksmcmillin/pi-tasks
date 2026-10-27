@@ -77,7 +77,8 @@ describe("current-step atomic classification", () => {
 				decompositionStatus: "atomic" as const,
 				granularityCheck: classification.stepGranularityCheck,
 			};
-			const store = setup();
+			const store =
+				type === "task.created" ? createTaskRuntimeStore() : setup();
 			const event: TaskEvent =
 				type === "task.created"
 					? { ...created, id: "compound", planSteps: [step] }

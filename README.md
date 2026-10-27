@@ -526,6 +526,8 @@ configuration or manual sign-off is required.
 - Decomposition stops at depth 4. A still-non-atomic step then recommends an explicit `task_update` blocker so its remaining scope can be planned as a flat successor; pi-tasks never marks it done or creates the successor automatically.
 - Evidence fields expose the same limits enforced by the reducer: summaries 500 characters, observed output 1,000, and each reference/source/command 300. Retry templates preserve valid values and replace invalid over-limit values with explicit placeholders.
 - `task_update.scope` requires `activity`; `scope_change` and `off_plan` also require `scope_reason`. Missing fields return a targeted `task_update` recovery using the public snake_case parameter names.
+- Empty or omitted `criterionIds` on new and decomposed steps auto-link the available task criteria; non-empty arrays must contain known generated IDs.
+- Atomic plan-quality issues are hard failures. Wording failures name the matched fragment, and one rejection reports every invalid plan step so callers can correct the full plan in one retry.
 - Plan quality still rejects broad or compound actions, but action-like filename segments such as `fixtures/fix.json`, `update.json`, and `then.json` are treated as paths rather than instructions.
 
 ## Completion Gates
