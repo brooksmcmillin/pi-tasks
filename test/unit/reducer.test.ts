@@ -267,7 +267,10 @@ function decompose(): TaskEvent {
 }
 
 function apply(events: TaskEvent[]): TaskState {
-	return replayTaskEvents(events);
+	return events.reduce(
+		(state, event) => reduceTaskState(state, event),
+		createEmptyState(),
+	);
 }
 
 describe("task reducer", () => {
@@ -287,6 +290,50 @@ describe("task reducer", () => {
 				planSteps: [],
 			}),
 		).toThrow("At least one ordered plan step is required");
+	});
+
+	it("auto-links all task criteria when criterionIds is empty", () => {
+		const state = reduceTaskState(createEmptyState(), {
+			...created(),
+			planSteps: [
+				{
+					text: "write reducer",
+					expectedOutput: "Reducer transition is implemented",
+					criterionIds: [],
+					evidenceRequired: true,
+					allowedActions: ["edit reducer", "run unit test"],
+					decompositionStatus: "atomic",
+					granularityCheck: atomicCheck,
+				},
+			],
+		});
+
+		expect(state.tasks.T1.planSteps[0]?.criterionIds).toEqual([
+			"T1-AC1",
+			"T1-AC2",
+		]);
+	});
+
+	it("auto-links parent criteria when decomposed criterionIds is empty", () => {
+		const decomposition = decompose();
+		if (decomposition.type !== "task.steps_decomposed") {
+			throw new Error("Expected a decomposition event");
+		}
+		const state = apply([
+			coarseCreated(),
+			{
+				...decomposition,
+				childSteps: decomposition.childSteps.map((step) => ({
+					...step,
+					criterionIds: [],
+				})),
+			},
+		]);
+
+		expect(state.tasks.T1.planSteps.map((step) => step.criterionIds)).toEqual([
+			["T1-AC1", "T1-AC2"],
+			["T1-AC1", "T1-AC2"],
+		]);
 	});
 
 	it("requires non-atomic steps to be decomposed before completion", () => {
@@ -326,6 +373,90 @@ describe("task reducer", () => {
 			).toThrow("multiple actions");
 		},
 	);
+
+	it("rejects one vague wording issue and names the matched token", () => {
+		expect(() =>
+			apply([
+				{
+					...created(),
+					planSteps: [
+						{
+							text: "Fix ablate --out checkpoint writing in cli.py",
+							expectedOutput: "cli.py writes a sharded checkpoint directory",
+							criterionIds: ["T1-AC1"],
+							evidenceRequired: true,
+							allowedActions: ["edit cli.py"],
+							decompositionStatus: "atomic",
+							granularityCheck: atomicCheck,
+						},
+					],
+				},
+			]),
+		).toThrow('step text uses vague or broad wording ("Fix")');
+	});
+
+	it("rejects one compound output issue and names the matched token", () => {
+		expect(() =>
+			apply([
+				{
+					...created(),
+					planSteps: [
+						{
+							text: "Render checkpoint manifest",
+							expectedOutput: "Checkpoint and index written",
+							criterionIds: ["T1-AC1"],
+							evidenceRequired: true,
+							allowedActions: ["render checkpoint manifest"],
+							decompositionStatus: "atomic",
+							granularityCheck: atomicCheck,
+						},
+					],
+				},
+			]),
+		).toThrow('expected output appears to contain multiple outputs ("and")');
+	});
+
+	it("reports quality failures from every invalid plan step", () => {
+		let caught: unknown;
+		try {
+			apply([
+				{
+					...created(),
+					planSteps: [
+						{
+							text: "Fix ablate --out checkpoint writing in cli.py",
+							expectedOutput: "cli.py writes a sharded checkpoint directory",
+							criterionIds: ["T1-AC1"],
+							evidenceRequired: true,
+							allowedActions: ["edit cli.py"],
+							decompositionStatus: "atomic",
+							granularityCheck: atomicCheck,
+						},
+						{
+							text: "Render checkpoint manifest",
+							expectedOutput: "Checkpoint and index written",
+							criterionIds: ["T1-AC1"],
+							evidenceRequired: true,
+							allowedActions: ["render checkpoint manifest"],
+							decompositionStatus: "atomic",
+							granularityCheck: atomicCheck,
+						},
+					],
+				},
+			]);
+		} catch (error) {
+			caught = error;
+		}
+
+		expect(caught).toBeInstanceOf(TaskTransitionError);
+		const message = (caught as Error).message;
+		expect(message).toContain(
+			'Plan step 1 failed quality gate: step text uses vague or broad wording ("Fix")',
+		);
+		expect(message).toContain(
+			'Plan step 2 failed quality gate: expected output appears to contain multiple outputs ("and")',
+		);
+	});
 
 	it("accepts concrete plan paths whose segments resemble action words", () => {
 		const paths = [

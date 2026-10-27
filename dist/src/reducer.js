@@ -2,7 +2,7 @@ import { validateHandoff } from "./handoff.js";
 import { createEmptyState, isAtMaximumDecompositionDepth, MAX_DECOMPOSITION_DEPTH, MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH, MAX_EVIDENCE_REFERENCE_LENGTH, MAX_EVIDENCE_SUMMARY_LENGTH, } from "./model.js";
 import { classifyMechanicStep, mechanicStepMessage, } from "./support-actions.js";
 const TERMINAL_STATUSES = ["done", "cancelled"];
-const MIN_PLAN_QUALITY_SCORE = 80;
+const MIN_NON_ATOMIC_PLAN_QUALITY_SCORE = 80;
 const COMPOUND_STEP_PATTERNS = [
     /(?<![/\\._-])\b(and|then|also|plus|after that)\b(?![/\\_-]|\.[\p{L}\p{N}_-])/iu,
     /[;&]/,
@@ -42,30 +42,30 @@ export class TaskTransitionError extends Error {
         this.code = code;
     }
 }
-export function reduceTaskState(state, event) {
+export function reduceTaskState(state, event, options = {}) {
     validateEventEnvelope(event);
     const baseState = event.type === "task.snapshot"
         ? applySnapshot(event)
-        : applyEvent(cloneState(state), event);
+        : applyEvent(cloneState(state), event, options.replay ?? false);
     baseState.events = [...state.events, event];
     baseState.lastUpdatedAt = event.createdAt;
     return baseState;
 }
 export function replayTaskEvents(events) {
-    return events.reduce((state, event) => reduceTaskState(state, event), createEmptyState());
+    return events.reduce((state, event) => reduceTaskState(state, event, { replay: true }), createEmptyState());
 }
-function applyEvent(state, event) {
+function applyEvent(state, event, replay) {
     switch (event.type) {
         case "task.created":
-            return createTask(state, event);
+            return createTask(state, event, replay);
         case "task.updated":
-            return updateTask(state, event);
+            return updateTask(state, event, replay);
         case "task.steps_decomposed":
-            return decomposeStep(state, event);
+            return decomposeStep(state, event, replay);
         case "task.reworked":
-            return reworkTask(state, event);
+            return reworkTask(state, event, replay);
         case "task.replanned":
-            return replanTask(state, event);
+            return replanTask(state, event, replay);
         case "task.evidence_added":
             return addEvidence(state, event);
         case "task.step_verified":
@@ -115,7 +115,7 @@ function applyEvent(state, event) {
             return unreachable(event);
     }
 }
-function createTask(state, event) {
+function createTask(state, event, replay) {
     if (state.tasks[event.taskId]) {
         throw new TaskTransitionError(`Task ${event.taskId} already exists`);
     }
@@ -136,7 +136,7 @@ function createTask(state, event) {
             evidenceIds: [],
         };
     });
-    const planSteps = createPlanSteps(event.taskId, event.planSteps, event.initialSteps, acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, event.activate ?? true);
+    const planSteps = createPlanSteps(event.taskId, event.planSteps, event.initialSteps, acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, event.activate ?? true, { replay });
     const task = {
         id: event.taskId,
         title: event.title,
@@ -174,7 +174,7 @@ function createTask(state, event) {
         state.activeTaskId = task.id;
     return state;
 }
-function decomposeStep(state, event) {
+function decomposeStep(state, event, replay) {
     const task = requireTask(state, event.taskId);
     if (!event.reason.trim())
         throw new TaskTransitionError("Decomposition reason is required");
@@ -196,6 +196,7 @@ function decomposeStep(state, event) {
         throw new TaskTransitionError(`Plan step ${parent.id} reached maximum decomposition depth ${MAX_DECOMPOSITION_DEPTH}`);
     }
     const children = createPlanSteps(task.id, event.childSteps, undefined, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, false, {
+        replay,
         parentStepId: parent.id,
         parentStatus: parent.status,
         startIndex: 1,
@@ -231,7 +232,7 @@ function decomposeStep(state, event) {
     task.updatedAt = event.createdAt;
     return state;
 }
-function replanTask(state, event) {
+function replanTask(state, event, replay) {
     const task = requireTask(state, event.taskId);
     if (!event.reason?.trim())
         throw new TaskTransitionError("Replan reason is required");
@@ -253,7 +254,7 @@ function replanTask(state, event) {
         return step;
     });
     validateReworkSteps(event.planSteps);
-    const replacements = createPlanSteps(task.id, event.planSteps, undefined, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, false, { startIndex: nextRootStepNumber(task) });
+    const replacements = createPlanSteps(task.id, event.planSteps, undefined, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, false, { startIndex: nextRootStepNumber(task), replay });
     const covered = new Set(replacements.flatMap((step) => step.criterionIds));
     if (targets.some((step) => step.criterionIds.some((id) => !covered.has(id)))) {
         throw new TaskTransitionError("Replacement steps must cover all replaced criterion links");
@@ -284,7 +285,7 @@ function nextRootStepNumber(task) {
     // Decomposed roots survive in child IDs; retired roots also reserve their IDs.
     return (Math.max(0, ...task.planSteps.map((step) => Number(step.id.slice(`${task.id}-S`.length).split(".")[0]))) + 1);
 }
-function reworkTask(state, event) {
+function reworkTask(state, event, replay) {
     const task = requireTask(state, event.taskId);
     if (typeof event.reason !== "string" || !event.reason.trim()) {
         throw new TaskTransitionError("Rework reason with review findings is required");
@@ -313,7 +314,7 @@ function reworkTask(state, event) {
     const previousCurrent = getCurrentOpenStep(task);
     validateReworkSteps(event.planSteps);
     const nextStepNumber = nextRootStepNumber(task);
-    const steps = createPlanSteps(task.id, event.planSteps, undefined, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, !previousCurrent, { startIndex: nextStepNumber });
+    const steps = createPlanSteps(task.id, event.planSteps, undefined, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, !previousCurrent, { startIndex: nextStepNumber, replay });
     const affectedIds = new Set(steps.flatMap((step) => step.criterionIds));
     for (const criterion of task.acceptanceCriteria) {
         if (!affectedIds.has(criterion.id))
@@ -391,13 +392,13 @@ function validateReworkSteps(steps) {
         }
     }
 }
-function updateTask(state, event) {
+function updateTask(state, event, replay) {
     const task = requireTask(state, event.taskId);
     const previousStatus = task.status;
     if (event.status)
         validateStatusTransition(task, event.status, event);
     if (event.stepGranularityCheck) {
-        classifyCurrentStep(state, task, event);
+        classifyCurrentStep(state, task, event, replay);
     }
     else if (event.stepId || event.stepStatus)
         updatePlanStep(task, event);
@@ -434,7 +435,7 @@ function updateTask(state, event) {
     task.updatedAt = event.createdAt;
     return state;
 }
-function classifyCurrentStep(state, task, event) {
+function classifyCurrentStep(state, task, event, replay) {
     const step = getCurrentOpenStep(task);
     if (state.activeTaskId !== task.id ||
         TERMINAL_STATUSES.includes(task.status) ||
@@ -467,7 +468,7 @@ function classifyCurrentStep(state, task, event) {
         granularityCheck: check,
     };
     candidate.planQuality = assessPlanQuality(candidate);
-    validateGranularityContract(candidate, 0);
+    validateGranularityContract(candidate, 0, replay);
     step.decompositionStatus = candidate.decompositionStatus;
     step.granularityCheck = structuredClone(check);
     step.planQuality = candidate.planQuality;
@@ -695,85 +696,109 @@ function createPlanSteps(taskId, planSteps, initialSteps, criterionIds, createdA
     if (steps.length === 0) {
         throw new TaskTransitionError("At least one ordered plan step is required");
     }
-    return steps.map((step, index) => {
-        const text = step.text.trim();
-        const expectedOutput = step.expectedOutput.trim();
-        if (!text)
-            throw new TaskTransitionError("Plan steps cannot be blank");
-        if (!expectedOutput) {
-            throw new TaskTransitionError("Plan step expectedOutput is required");
+    const createdSteps = [];
+    const validationErrors = [];
+    for (const [index, step] of steps.entries()) {
+        try {
+            createdSteps.push(createPlanStep(taskId, step, index, criterionIds, createdAt, activate, options));
         }
-        const mechanicKind = classifyMechanicStep(text);
-        if (mechanicKind) {
-            throw new TaskTransitionError(mechanicStepMessage(mechanicKind, text));
+        catch (error) {
+            if (!(error instanceof TaskTransitionError))
+                throw error;
+            const prefix = `Plan step ${index + 1}`;
+            validationErrors.push(error.message.startsWith(prefix)
+                ? error.message
+                : `${prefix}: ${error.message}`);
         }
-        if (step.criterionRefs !== undefined && step.criterionIds !== undefined) {
-            throw new TaskTransitionError(`Plan step ${index + 1} must use criterionRefs or criterionIds, not both`);
-        }
-        const linkedCriteria = unique(step.criterionRefs === undefined
-            ? (step.criterionIds ?? criterionIds)
-            : step.criterionRefs.map((reference) => {
-                if (!Number.isInteger(reference) ||
-                    reference < 1 ||
-                    reference > criterionIds.length) {
-                    throw new TaskTransitionError(`Plan step ${index + 1} criterionRefs must be 1-based positions from 1 to ${criterionIds.length}; received ${reference}`);
-                }
-                return criterionIds[reference - 1];
-            }));
-        for (const criterionId of linkedCriteria) {
-            if (!criterionIds.includes(criterionId)) {
-                throw new TaskTransitionError(`Plan step references unknown criterion ${criterionId}`);
+    }
+    if (validationErrors.length === 1) {
+        throw new TaskTransitionError(validationErrors.join(""));
+    }
+    if (validationErrors.length > 1) {
+        throw new TaskTransitionError(`Plan validation failed:\n- ${validationErrors.join("\n- ")}`);
+    }
+    return createdSteps;
+}
+function createPlanStep(taskId, step, index, criterionIds, createdAt, activate, options) {
+    const text = step.text.trim();
+    const expectedOutput = step.expectedOutput.trim();
+    if (!text)
+        throw new TaskTransitionError("Plan steps cannot be blank");
+    if (!expectedOutput) {
+        throw new TaskTransitionError("Plan step expectedOutput is required");
+    }
+    const mechanicKind = classifyMechanicStep(text, !options.replay);
+    if (mechanicKind) {
+        throw new TaskTransitionError(mechanicStepMessage(mechanicKind, text));
+    }
+    if (step.criterionRefs !== undefined && step.criterionIds !== undefined) {
+        throw new TaskTransitionError(`Plan step ${index + 1} must use criterionRefs or criterionIds, not both`);
+    }
+    const linkedCriteria = unique(step.criterionRefs === undefined
+        ? step.criterionIds?.length
+            ? step.criterionIds
+            : criterionIds
+        : step.criterionRefs.map((reference) => {
+            if (!Number.isInteger(reference) ||
+                reference < 1 ||
+                reference > criterionIds.length) {
+                throw new TaskTransitionError(`Plan step ${index + 1} criterionRefs must be 1-based positions from 1 to ${criterionIds.length}; received ${reference}`);
             }
+            return criterionIds[reference - 1];
+        }));
+    for (const criterionId of linkedCriteria) {
+        if (!criterionIds.includes(criterionId)) {
+            throw new TaskTransitionError(`Plan step references unknown criterion ${criterionId}`);
         }
-        const granularityCheck = normalizeGranularityCheck(step);
-        const decompositionStatus = step.decompositionStatus ??
-            (granularityCheck.isAtomic ? "atomic" : "needs_breakdown");
-        const planQuality = assessPlanQuality({
-            text,
-            expectedOutput,
-            criterionIds: linkedCriteria,
-            evidenceRequired: step.evidenceRequired ?? true,
-            allowedActions: step.allowedActions ?? [],
-            decompositionStatus,
-            granularityCheck,
-        });
-        validateGranularityContract({
-            ...step,
-            text,
-            expectedOutput,
-            criterionIds: linkedCriteria,
-            decompositionStatus,
-            granularityCheck,
-            planQuality,
-            allowedActions: step.allowedActions ?? [],
-            evidenceRequired: step.evidenceRequired ?? true,
-        }, index);
-        const status = index === 0 && (activate || options.parentStatus)
-            ? (options.parentStatus ?? "active")
-            : "pending";
-        const idPrefix = options.idPrefix ?? taskId;
-        const stepNumber = (options.startIndex ?? 1) + index;
-        return {
-            id: options.idPrefix
-                ? `${idPrefix}.${stepNumber}`
-                : `${taskId}-S${stepNumber}`,
-            taskId,
-            text,
-            expectedOutput,
-            status,
-            decompositionStatus,
-            granularityCheck,
-            ...(options.parentStepId ? { parentStepId: options.parentStepId } : {}),
-            childStepIds: [],
-            depth: options.depth ?? 0,
-            evidenceIds: [],
-            criterionIds: linkedCriteria,
-            evidenceRequired: step.evidenceRequired ?? true,
-            allowedActions: step.allowedActions ?? [],
-            planQuality,
-            ...(status === "active" ? { startedAt: createdAt } : {}),
-        };
+    }
+    const granularityCheck = normalizeGranularityCheck(step);
+    const decompositionStatus = step.decompositionStatus ??
+        (granularityCheck.isAtomic ? "atomic" : "needs_breakdown");
+    const planQuality = assessPlanQuality({
+        text,
+        expectedOutput,
+        criterionIds: linkedCriteria,
+        evidenceRequired: step.evidenceRequired ?? true,
+        allowedActions: step.allowedActions ?? [],
+        decompositionStatus,
+        granularityCheck,
     });
+    validateGranularityContract({
+        ...step,
+        text,
+        expectedOutput,
+        criterionIds: linkedCriteria,
+        decompositionStatus,
+        granularityCheck,
+        planQuality,
+        allowedActions: step.allowedActions ?? [],
+        evidenceRequired: step.evidenceRequired ?? true,
+    }, index, options.replay);
+    const status = index === 0 && (activate || options.parentStatus)
+        ? (options.parentStatus ?? "active")
+        : "pending";
+    const idPrefix = options.idPrefix ?? taskId;
+    const stepNumber = (options.startIndex ?? 1) + index;
+    return {
+        id: options.idPrefix
+            ? `${idPrefix}.${stepNumber}`
+            : `${taskId}-S${stepNumber}`,
+        taskId,
+        text,
+        expectedOutput,
+        status,
+        decompositionStatus,
+        granularityCheck,
+        ...(options.parentStepId ? { parentStepId: options.parentStepId } : {}),
+        childStepIds: [],
+        depth: options.depth ?? 0,
+        evidenceIds: [],
+        criterionIds: linkedCriteria,
+        evidenceRequired: step.evidenceRequired ?? true,
+        allowedActions: step.allowedActions ?? [],
+        planQuality,
+        ...(status === "active" ? { startedAt: createdAt } : {}),
+    };
 }
 function assessPlanQuality(step) {
     const issues = [];
@@ -782,27 +807,33 @@ function assessPlanQuality(step) {
         issues.push("step text is too short");
     if (step.expectedOutput.length < 12)
         issues.push("expected output is too short");
-    if (!deliverable && containsVaguePattern(step.text))
-        issues.push("step text uses vague or broad wording");
-    if (!deliverable && containsVaguePattern(step.expectedOutput))
-        issues.push("expected output uses vague or broad wording");
+    const textVagueMatch = findPatternMatch(step.text, VAGUE_PLAN_PATTERNS);
+    if (!deliverable && textVagueMatch) {
+        issues.push(`step text uses vague or broad wording (${JSON.stringify(textVagueMatch)})`);
+    }
+    const outputVagueMatch = findPatternMatch(step.expectedOutput, VAGUE_PLAN_PATTERNS);
+    if (!deliverable && outputVagueMatch) {
+        issues.push(`expected output uses vague or broad wording (${JSON.stringify(outputVagueMatch)})`);
+    }
     if (step.allowedActions.length === 0)
         issues.push("allowedActions are required");
     if (step.allowedActions.length > 3)
         issues.push("allowedActions are too broad; use at most three");
-    if (!deliverable &&
-        step.allowedActions.some((action) => containsVaguePattern(action))) {
-        issues.push("allowedActions contain vague actions");
+    const actionVagueMatch = findPatternMatchInValues(step.allowedActions, VAGUE_PLAN_PATTERNS);
+    if (!deliverable && actionVagueMatch) {
+        issues.push(`allowedActions contain vague actions (${JSON.stringify(actionVagueMatch)})`);
     }
-    if (!deliverable && containsCompoundStepPattern(step.text)) {
-        issues.push("step text appears to contain multiple actions");
+    const textCompoundMatch = findPatternMatch(step.text, COMPOUND_STEP_PATTERNS);
+    if (!deliverable && textCompoundMatch) {
+        issues.push(`step text appears to contain multiple actions (${JSON.stringify(textCompoundMatch)}); rejects compound wording`);
     }
-    if (!deliverable && containsCompoundStepPattern(step.expectedOutput)) {
-        issues.push("expected output appears to contain multiple outputs");
+    const outputCompoundMatch = findPatternMatch(step.expectedOutput, COMPOUND_STEP_PATTERNS);
+    if (!deliverable && outputCompoundMatch) {
+        issues.push(`expected output appears to contain multiple outputs (${JSON.stringify(outputCompoundMatch)}); rejects compound wording`);
     }
-    if (!deliverable &&
-        step.allowedActions.some((action) => containsCompoundStepPattern(action))) {
-        issues.push("allowedActions must each be a single action");
+    const actionCompoundMatch = findPatternMatchInValues(step.allowedActions, COMPOUND_STEP_PATTERNS);
+    if (!deliverable && actionCompoundMatch) {
+        issues.push(`allowedActions must each be a single action (${JSON.stringify(actionCompoundMatch)}); rejects compound wording`);
     }
     if (step.criterionIds.length === 0)
         issues.push("at least one criterion link is required");
@@ -821,8 +852,14 @@ function assessPlanQuality(step) {
         issues,
     };
 }
-function containsVaguePattern(value) {
-    return VAGUE_PLAN_PATTERNS.some((pattern) => pattern.test(value.trim()));
+function findPatternMatch(value, patterns) {
+    const normalized = value.trim();
+    for (const pattern of patterns) {
+        const match = pattern.exec(normalized);
+        if (match)
+            return match[0];
+    }
+    return undefined;
 }
 function isBoundedDeliverable(check) {
     return (check?.unit === "deliverable" &&
@@ -839,6 +876,14 @@ export function validateAtomicWording(step) {
 }
 function containsCompoundStepPattern(value) {
     return COMPOUND_STEP_PATTERNS.some((pattern) => pattern.test(value.trim()));
+}
+function findPatternMatchInValues(values, patterns) {
+    for (const value of values) {
+        const match = findPatternMatch(value, patterns);
+        if (match)
+            return match;
+    }
+    return undefined;
 }
 function normalizeGranularityCheck(step) {
     if (step.granularityCheck) {
@@ -869,7 +914,7 @@ function normalizeGranularityCheck(step) {
         hasNoHiddenSubtasks: false,
     };
 }
-function validateGranularityContract(step, index) {
+function validateGranularityContract(step, index, replay = false) {
     if (step.granularityCheck.unit !== undefined &&
         !["action", "deliverable"].includes(step.granularityCheck.unit)) {
         throw new TaskTransitionError("Granularity unit must be action or deliverable");
@@ -881,26 +926,24 @@ function validateGranularityContract(step, index) {
     if (!step.granularityCheck.reason.trim()) {
         throw new TaskTransitionError(`Plan step ${index + 1} granularityCheck.reason is required`);
     }
-    if (step.planQuality.score < MIN_PLAN_QUALITY_SCORE) {
+    const failsQualityGate = !replay && step.decompositionStatus === "atomic"
+        ? step.planQuality.issues.length > 0
+        : step.planQuality.score < MIN_NON_ATOMIC_PLAN_QUALITY_SCORE;
+    if (failsQualityGate) {
         throw new TaskTransitionError(`Plan step ${index + 1} failed quality gate: ${step.planQuality.issues.join("; ")}`);
     }
-    if (step.decompositionStatus === "atomic") {
+    // Replay retains the old wording threshold, never weaker atomic invariants.
+    if (replay && step.decompositionStatus === "atomic") {
         const check = step.granularityCheck;
         if (!check.isAtomic ||
             !check.canBeDoneInOneAgentAction ||
             !check.hasSingleObservableOutput ||
             !check.hasSingleVerificationMethod ||
-            !check.hasNoHiddenSubtasks) {
-            throw new TaskTransitionError(`Atomic plan step ${index + 1} failed granularity check`);
-        }
-        if (step.criterionIds.length === 0) {
-            throw new TaskTransitionError(`Atomic plan step ${index + 1} must link at least one criterion`);
-        }
-        if (step.allowedActions.length === 0) {
-            throw new TaskTransitionError(`Atomic plan step ${index + 1} must declare allowedActions`);
-        }
-        if (!step.evidenceRequired) {
-            throw new TaskTransitionError(`Atomic plan step ${index + 1} must require evidence`);
+            !check.hasNoHiddenSubtasks ||
+            step.criterionIds.length === 0 ||
+            step.allowedActions.length === 0 ||
+            !step.evidenceRequired) {
+            throw new TaskTransitionError(`Atomic plan step ${index + 1} failed replay invariants`);
         }
     }
 }

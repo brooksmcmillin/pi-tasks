@@ -20,6 +20,16 @@
 - `pi-tasks:state` now publishes a version-2 compact delta/resume contract instead of a full task snapshot. The contract contains the active task, current atomic step, unresolved blockers, evidence gaps, and state version.
 - Weak-model resume guidance now recommends the compound verification tool for the successful current-step path while retaining `task_evidence` and `task_update` for failure, backfill, skip, blocker, and scope workflows.
 
+## [0.2.10] - 2026-10-24
+
+### Fixed
+- Treated empty `criterionIds` arrays like omitted arrays during task creation and decomposition, preserving automatic criterion linking instead of rejecting otherwise valid plans.
+- Made every atomic plan-quality issue a hard failure and named the exact vague or compound fragment in rejection messages.
+- Validated every submitted plan step before rejection so one response reports all invalid steps instead of revealing them across repeated full-plan retries.
+
+### Security
+- Updated Vitest to 5.0.5, including patched `@vitest/mocker` and Vite transitive dependencies, so the release audit reports zero vulnerabilities.
+
 ## [0.2.9] - 2026-10-16
 
 ### Fixed

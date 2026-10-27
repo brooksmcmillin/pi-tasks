@@ -4,17 +4,8 @@ import {
 	TASK_EVENT_CUSTOM_TYPE,
 	type TaskEvent,
 	type TaskState,
-	type TaskStepInput,
 } from "./model.ts";
-import {
-	reduceTaskState,
-	TaskTransitionError,
-	validateAtomicWording,
-} from "./reducer.ts";
-import {
-	classifyMechanicStep,
-	mechanicStepMessage,
-} from "./support-actions.ts";
+import { reduceTaskState, TaskTransitionError } from "./reducer.ts";
 
 export interface BranchEntry {
 	type: string;
@@ -48,33 +39,6 @@ export function createTaskRuntimeStore(
 			return replayed;
 		},
 		append(event, appendEntry) {
-			// Tightened authoring rules must not invalidate previously persisted plans.
-			const steps =
-				event.type === "task.created"
-					? (event.planSteps ??
-						event.initialSteps?.map(
-							(text): TaskStepInput => ({
-								text,
-								expectedOutput: `Verified output for: ${text}`,
-							}),
-						))
-					: event.type === "task.steps_decomposed"
-						? event.childSteps
-						: event.type === "task.reworked" || event.type === "task.replanned"
-							? event.planSteps
-							: undefined;
-			for (const step of steps ?? []) {
-				const kind = classifyMechanicStep(step.text, true);
-				if (kind)
-					throw new TaskTransitionError(mechanicStepMessage(kind, step.text));
-				if (
-					step.decompositionStatus === "atomic" ||
-					(step.decompositionStatus === undefined &&
-						step.granularityCheck?.isAtomic)
-				) {
-					validateAtomicWording(step);
-				}
-			}
 			const next = reduceTaskState(state, event);
 			appendEntry(TASK_EVENT_CUSTOM_TYPE, event);
 			state = next;
@@ -96,7 +60,8 @@ export function replayBranchEntries(entries: BranchEntry[]): ReplayResult {
 			continue;
 		}
 		try {
-			state = reduceTaskState(state, entry.data);
+			// New authoring gates must not invalidate previously persisted plans.
+			state = reduceTaskState(state, entry.data, { replay: true });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			malformedEvents.push(`Entry ${entry.id ?? entry.data.id}: ${message}`);

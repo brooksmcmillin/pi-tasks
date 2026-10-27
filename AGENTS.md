@@ -110,6 +110,7 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Replacement steps require ordinary verification. Preserve criterion status, evidence baselines, and failed-evidence gates; repair does not complete work or resolve blockers. Reject terminal tasks and displacement of another active task.
 - Apply tightened inspection-mechanic authoring validation before persistence across creation, decomposition, rework, and replan. Legacy inspection events must remain replayable so they can be repaired.
 - Planning schemas require structured steps with bounded `allowedActions`; argument-error recovery names the corrective tool and exposes missing parameters without pretending an unrelated decomposition fixes the call.
+- New atomic plans reject every quality issue and aggregate invalid step errors before persistence. Preserve bounded-deliverable wording exemptions, selective `criterionRefs`, and legacy replay thresholds; empty `criterionIds` links all available criteria.
 
 ## Routine Context and Atomic Classification
 

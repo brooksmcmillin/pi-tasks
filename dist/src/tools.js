@@ -362,7 +362,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Smart models: preserve the parent objective and criteria; do not add unsolicited features or release gates.",
             "Weak models: make each child one verb, one output, one evidence method, and copy criterionIds only from task_focus/task_resume.",
             "Each child step must include expectedOutput, evidenceRequired, allowedActions, and granularityCheck.",
-            "Omit child step criterionIds unless you are carrying forward known generated IDs from task_focus or task_resume.",
+            "Omit child step criterionIds or pass an empty array unless you are carrying forward known generated IDs from task_focus or task_resume; either form auto-links the parent criteria.",
             "Only mark a child atomic when it truly has one action, one output, one verification method, and no hidden subtasks.",
             "Do not use task_decompose for execution evidence; record execution evidence with task_evidence.",
             "At maximum decomposition depth, do not retry task_decompose; explicitly block the task and carry remaining scope into a flat successor task.",
@@ -985,8 +985,8 @@ function planStepSchema(allowCreationReferences = false) {
             }
             : {}),
         criterionIds: Type.Optional(Type.Array(Type.String({
-            description: "Known persisted criterion IDs for later planning operations. For selective initial task_plan links, use criterionRefs; omitting both fields links all criteria.",
-        }), { minItems: 1 })),
+            description: "Known persisted criterion IDs for later planning operations. For selective initial task_plan links, use criterionRefs; omitting both fields or passing empty criterionIds links all criteria.",
+        }))),
         evidenceRequired: Type.Optional(Type.Boolean({ const: true })),
         allowedActions: Type.Array(Type.String({ minLength: 1 }), {
             minItems: 1,
