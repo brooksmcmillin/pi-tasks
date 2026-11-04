@@ -65,8 +65,8 @@ describe("upstream plan-quality integration", () => {
 				{
 					...event,
 					planSteps: [
-						{ ...step, text: "Fix checkpoint manifest" },
-						{ ...step, expectedOutput: "Checkpoint and index written" },
+						{ ...step, text: "" },
+						{ ...step, expectedOutput: "" },
 						{ ...step, text: "Read src/reducer.ts" },
 					],
 				},
@@ -76,9 +76,9 @@ describe("upstream plan-quality integration", () => {
 			message = String(error);
 		}
 		expect(message).toContain("Plan step 1");
-		expect(message).toContain('("Fix")');
+		expect(message).toContain("cannot be blank");
 		expect(message).toContain("Plan step 2");
-		expect(message).toContain('("and")');
+		expect(message).toContain("expectedOutput is required");
 		expect(message).toContain("Plan step 3");
 		expect(persist).not.toHaveBeenCalled();
 		expect(store.getState()).toEqual(before);
@@ -107,7 +107,9 @@ describe("upstream plan-quality integration", () => {
 		};
 		const store = createTaskRuntimeStore();
 		store.append(coarse, () => {});
-		expect(() => store.append(classified, () => {})).toThrow('("Fix")');
+		expect(() => store.append({ ...classified, version: 2 }, () => {})).toThrow(
+			"require a native semantic assessment",
+		);
 		store.replay(
 			[coarse, classified].map((data) => ({
 				type: "custom",
@@ -151,8 +153,8 @@ describe("upstream plan-quality integration", () => {
 		expect(store.getState().tasks.T1?.planSteps[0]?.text).toBe(
 			"Fix checkpoint manifest",
 		);
-		expect(() => createTaskRuntimeStore().append(legacy, () => {})).toThrow(
-			'("Fix")',
-		);
+		expect(() =>
+			createTaskRuntimeStore().append({ ...legacy, version: 2 }, () => {}),
+		).toThrow("require a native semantic assessment");
 	});
 });

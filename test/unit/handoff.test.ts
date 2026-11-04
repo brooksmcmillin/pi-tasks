@@ -14,6 +14,7 @@ import type {
 	ToolDefinition,
 } from "../../src/pi-types.ts";
 import { type BranchEntry, replayBranchEntries } from "../../src/store.ts";
+import { fakeSemanticRuntime } from "./semantic-fixture.ts";
 
 const lane: OrchestrationHandoff = {
 	taskId: "workaide-task",
@@ -71,6 +72,7 @@ function harness(entries: BranchEntry[] = []) {
 		sendMessage,
 	};
 	const ctx: ExtensionContext = {
+		...fakeSemanticRuntime(),
 		sessionManager: {
 			getBranch: () => entries,
 			getSessionId: () => "parent-session",

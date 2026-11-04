@@ -7,6 +7,7 @@ import type {
 } from "../../src/pi-types.ts";
 import { createTaskRuntimeStore } from "../../src/store.ts";
 import { registerTaskTools } from "../../src/tools.ts";
+import { fakeSemanticRuntime } from "./semantic-fixture.ts";
 
 const check = {
 	unit: "deliverable",
@@ -34,6 +35,7 @@ async function harness() {
 		events: { emit: (name) => publications.push(name) },
 	};
 	const ctx: ExtensionContext = {
+		...fakeSemanticRuntime(),
 		sessionManager: { getBranch: () => [] },
 		ui: { notify: () => {}, setStatus: () => {}, setWidget: () => {} },
 	};

@@ -346,7 +346,10 @@ describe("task.reworked", () => {
 				},
 			],
 		},
-		{ planSteps: [{ ...step, text: "Run tests and update cursor" }] },
+		{
+			version: 2,
+			planSteps: [{ ...step, text: "Run tests and update cursor" }],
+		},
 	])("rejects malformed rework without mutating state: %j", (fields) => {
 		const state = exhausted();
 		expect(() =>

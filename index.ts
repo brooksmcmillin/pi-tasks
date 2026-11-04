@@ -8,6 +8,7 @@ import {
 	pickupOwnsRecovery,
 } from "./src/pickup-ownership.ts";
 import { buildTaskResume } from "./src/render.ts";
+import { createSemanticCapabilityMonitor } from "./src/semantic-capability.ts";
 import {
 	TASK_STATE_EVENT,
 	TASK_TELEMETRY_EVENT,
@@ -92,8 +93,9 @@ export default function (pi: ExtensionAPI) {
 			);
 		}
 	};
+	const semanticMonitor = createSemanticCapabilityMonitor();
 
-	const replay = (
+	const replay = async (
 		ctx: ExtensionContext,
 		reason: Extract<TaskStateEventReason, "session_start" | "session_tree">,
 	) => {
@@ -108,11 +110,12 @@ export default function (pi: ExtensionAPI) {
 				"warning",
 			);
 		}
+		await semanticMonitor.refresh(ctx);
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
 		watchAsync(ctx);
-		replay(ctx, "session_start");
+		await replay(ctx, "session_start");
 	});
 	pi.on("session_tree", async (_event, ctx) => replay(ctx, "session_tree"));
 	pi.on("input", () => {
@@ -168,7 +171,7 @@ export default function (pi: ExtensionAPI) {
 		if (Object.keys(state.tasks).length > 0) {
 			const createdAt = new Date().toISOString();
 			const event: TaskEvent = {
-				version: 1,
+				version: 2,
 				id: `snapshot-${createdAt}`,
 				type: "task.snapshot",
 				taskId: state.activeTaskId ?? "snapshot",
@@ -188,5 +191,5 @@ export default function (pi: ExtensionAPI) {
 
 	const pilot = registerCompactionPilot(pi, store, () => asyncRuns.size > 0);
 	registerTaskTools(pi, store);
-	registerTaskCommands(pi, store);
+	registerTaskCommands(pi, store, semanticMonitor);
 }

@@ -3,6 +3,7 @@ import { registerCompactionPilot } from "./src/compaction-pilot.js";
 import { createContinuationAdvisory } from "./src/continuation.js";
 import { PICKUP_OWNERSHIP_EVENT, pickupOwnsRecovery, } from "./src/pickup-ownership.js";
 import { buildTaskResume } from "./src/render.js";
+import { createSemanticCapabilityMonitor } from "./src/semantic-capability.js";
 import { TASK_STATE_EVENT, TASK_TELEMETRY_EVENT, TASK_WIDGET_ID, } from "./src/state-events.js";
 import { createTaskRuntimeStore, snapshotState } from "./src/store.js";
 import { reconcileTaskTools, registerTaskTools } from "./src/tools.js";
@@ -69,7 +70,8 @@ export default function (pi) {
             }));
         }
     };
-    const replay = (ctx, reason) => {
+    const semanticMonitor = createSemanticCapabilityMonitor();
+    const replay = async (ctx, reason) => {
         continuation.reset();
         pilot.reset();
         const result = store.replay(ctx.sessionManager.getBranch());
@@ -78,10 +80,11 @@ export default function (pi) {
         if (result.malformedEvents.length > 0) {
             ctx.ui.notify(`pi-tasks skipped ${result.malformedEvents.length} malformed event(s)`, "warning");
         }
+        await semanticMonitor.refresh(ctx);
     };
     pi.on("session_start", async (_event, ctx) => {
         watchAsync(ctx);
-        replay(ctx, "session_start");
+        await replay(ctx, "session_start");
     });
     pi.on("session_tree", async (_event, ctx) => replay(ctx, "session_tree"));
     pi.on("input", () => {
@@ -131,7 +134,7 @@ export default function (pi) {
         if (Object.keys(state.tasks).length > 0) {
             const createdAt = new Date().toISOString();
             const event = {
-                version: 1,
+                version: 2,
                 id: `snapshot-${createdAt}`,
                 type: "task.snapshot",
                 taskId: state.activeTaskId ?? "snapshot",
@@ -150,5 +153,5 @@ export default function (pi) {
     });
     const pilot = registerCompactionPilot(pi, store, () => asyncRuns.size > 0);
     registerTaskTools(pi, store);
-    registerTaskCommands(pi, store);
+    registerTaskCommands(pi, store, semanticMonitor);
 }

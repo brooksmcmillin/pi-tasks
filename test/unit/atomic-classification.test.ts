@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { TASK_EVENT_CUSTOM_TYPE, type TaskEvent } from "../../src/model.ts";
+import { taskPlanAssessmentInput } from "../../src/reducer.ts";
 import { buildTaskResume } from "../../src/render.ts";
 import { createTaskRuntimeStore } from "../../src/store.ts";
+import { planAssessment } from "./semantic-fixture.ts";
 
 const created: TaskEvent = {
 	version: 1,
@@ -68,7 +70,7 @@ describe("current-step atomic classification", () => {
 		"task.reworked",
 		"task.steps_decomposed",
 	] as const)(
-		"rejects compound atomic authorship via %s while preserving legacy replay",
+		"requires assessed version 2 authorship via %s while preserving legacy replay",
 		(type) => {
 			const step = {
 				text: "Validate backend configuration and refresh cache",
@@ -109,7 +111,9 @@ describe("current-step atomic classification", () => {
 								};
 			const before = structuredClone(store.getState());
 			const persist = vi.fn();
-			expect(() => store.append(event, persist)).toThrow("compound wording");
+			expect(() => store.append({ ...event, version: 2 }, persist)).toThrow(
+				"require a native semantic assessment",
+			);
 			expect(store.getState()).toEqual(before);
 			expect(persist).not.toHaveBeenCalled();
 			const legacy = createTaskRuntimeStore();
@@ -209,9 +213,18 @@ describe("current-step atomic classification", () => {
 			},
 			() => {},
 		);
-		expect(() => store.append(classification, () => {})).toThrow(
-			"compound wording",
+		const task = store.getState().tasks.T1;
+		if (!task) throw new Error("Missing task fixture");
+		const semanticAssessment = planAssessment(
+			taskPlanAssessmentInput(task, task.planSteps),
+			["needs_breakdown"],
 		);
+		expect(() =>
+			store.append(
+				{ ...classification, version: 2, semanticAssessment },
+				() => {},
+			),
+		).toThrow("requires decomposition");
 	});
 
 	it("rejects classification of an inactive blocked task without resolving blockers", () => {

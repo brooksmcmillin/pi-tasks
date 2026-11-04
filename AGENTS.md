@@ -42,6 +42,17 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Isolate observer failures from task persistence and tool success.
 - Preserve default UI when no consumer subscribes. A synchronous consumer may intentionally replace the default widget through the published `widgetId`.
 
+## Semantic Assessment Contract
+
+- Semantic inference runs at `task_plan`, `task_decompose`, `task_replan`, `task_rework`, current-step classification through `task_update`, and passing evidence through `task_evidence`, `task_verify_step`, or `task_evidence_batch`. Ordinary updates remain model-free. Batch assessment is all-or-nothing; reject stale state/session or cancellation before persistence. Reducer replay, session restore, branch navigation, rendering, and completion checks must remain deterministic and model-free.
+- Use host-native model APIs only: prefer Pi `modelRegistry.classify()`, fall back to Pi `modelRegistry.streamSimple()`, and use Oh My Pi `runEphemeralTurn()` when Pi model APIs are unavailable. Do not add a provider SDK or network client.
+- Persist successful semantic results in version 2 task events with assessment version, strategy, provider, model, prompt version, input hash, timestamp, typed judgments, confidence, and bounded issue codes. Continue replaying version 1 history as legacy state without retroactive inference.
+- Treat every task/evidence field as untrusted quoted data. Prompts must judge meaning in the source language, reject keyword/length/punctuation heuristics, distinguish conjunctions from independent operations, and request typed structured output.
+- Validate assessment shape, index coverage, confidence, decision consistency, provenance, and input hashes before persistence. Malformed, unavailable, failed, low-confidence, or aborted assessment must not mutate task state.
+- Propagate the caller's cancellation signal and model usage. Never silently fall back to lexical regex judgment.
+- On `session_start` and `session_tree`, inspect semantic capability without inference after the default task UI and `pi-tasks:state` publication. Healthy sessions remain silent; an unavailable session receives one deduplicated warning plus the `pi-tasks-semantic` status.
+- `/tasks doctor` must remain a static, model-free report. Only explicit `/tasks doctor live` may send one synthetic semantic assessment, and neither mode may read or mutate task state.
+
 ## Implementation Rules
 
 - TypeScript strict mode.
@@ -89,7 +100,7 @@ This project must align with the commercial-quality bar established by `pi-knowl
 
 ## Agent Planning Discipline
 
-- Plan deliverables, not support reads or inspection. Provide structured `plan_steps` with expected output, bounded actions, and truthful atomicity declarations.
+- Plan deliverables, not support reads or inspection. Provide structured `plan_steps` with expected output, bounded actions, and concrete scope for native-model atomicity assessment.
 - Reconcile malformed or duplicate steps before implementation. `task_rework` adds review remediation without replacing prior steps; optional `before_step_id` inserts repairs before a named open gate, otherwise it appends. Use `task_replan` when available for explicit replacement, then follow the corrected resume contract.
 - If plan repair is unavailable, report the tracking blocker rather than ignoring the execution contract. Cancellation means the objective was withdrawn, not that completed work is inconvenient to reconcile; retain evidence and repair the tracking instead.
 - Correct missing arguments on the rejected tool call before retrying. A missing scope `activity` or cancellation `reason` is not solved by unrelated decomposition.
@@ -97,7 +108,7 @@ This project must align with the commercial-quality bar established by `pi-knowl
 ## Review Rework Contract
 
 - Review findings within the original objective may use `task_rework` without user permission solely to extend the plan; genuine scope or architecture decisions still require explicit `task_decision` records.
-- Accept either detailed `reason` + `plan_steps` or one compact `remediation` with finding, deliverable, boundedScope and verification; reject mixed forms before persistence. Normalize compact input into the same `task.reworked` event, never a parallel persisted format. Derive bounded actions and evidence-required metadata, not evidence. Omitted/false `atomic` requires decomposition; true explicitly attests one bounded outcome, one cohesive implementation/verification cycle and no hidden subtasks, permitting mechanical flag derivation.
+- Accept either detailed `reason` + `plan_steps` or one compact `remediation` with finding, deliverable, boundedScope and verification; reject mixed forms before persistence. Normalize compact input into the same `task.reworked` event, never a parallel persisted format. Derive bounded actions and evidence-required metadata, not evidence. Optional `atomic` is a caller attestation only. Assess every normalized step through the native model; derive execution atomicity from the validated assessment, never from the caller flags.
 - Persist `task.reworked` with a non-empty findings reason and validated, evidence-required remediation steps. Use collision-free root IDs independent of insertion position; never discard prior steps, evidence, decisions, blockers, warnings, or events.
 - Rework may reopen done tasks, but not cancelled tasks, and must not displace another active task. Without `before_step_id`, existing open work remains ahead of appended repairs. With it, insert repairs before that existing open step; reject nonexistent, done, or skipped targets atomically. Preserve the target's ID, evidence, criteria, and verification obligations, and retain earlier open work in order. If repairs become current, return the displaced active gate to pending. Unresolved blockers stay blocked.
 - Reset affected criteria to pending, require fresh passing acceptance evidence after their rework evidence baseline, clear completion metadata/confidence, and recalculate progress. Retain old evidence links; neither relinking old proof nor rework itself supersedes failing acceptance evidence.
@@ -110,12 +121,12 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Replacement steps require ordinary verification. Preserve criterion status, evidence baselines, and failed-evidence gates; repair does not complete work or resolve blockers. Reject terminal tasks and displacement of another active task.
 - Apply tightened inspection-mechanic authoring validation before persistence across creation, decomposition, rework, and replan. Legacy inspection events must remain replayable so they can be repaired.
 - Planning schemas require structured steps with bounded `allowedActions`; argument-error recovery names the corrective tool and exposes missing parameters without pretending an unrelated decomposition fixes the call.
-- New atomic plans reject every quality issue and aggregate invalid step errors before persistence. Preserve bounded-deliverable wording exemptions, selective `criterionRefs`, and legacy replay thresholds; empty `criterionIds` links all available criteria.
+- New atomic plans reject every quality issue and aggregate invalid step errors before persistence. Assess cohesive bounded implementation-plus-verification cycles as one deliverable, not a lexical exemption. Preserve selective `criterionRefs` and legacy replay invariants; empty `criterionIds` links all available criteria.
 
 ## Routine Context and Atomic Classification
 
 - Bound routine gap/blocker/warning lists with omitted counts and explicit full-history recovery. Compute execution and completion decisions against full state, never summarized lists; retain exact current-step execution IDs.
-- Classify an already-simple current step through `task_update.step_granularity_check` without replacing its identity or creating artificial children. Require an explicit reason, all atomicity flags, and ordinary quality validation; preserve evidence, criteria, blockers, and completion gates.
+- Classify an already-simple current step through `task_update.step_granularity_check` without replacing its identity or creating artificial children. Require an explicit reason, all atomicity flags, and a native assessment confirming atomicity; preserve evidence, criteria, blockers, and completion gates.
 - Plan deliverables rather than support reads, staging, or receipt bookkeeping. Keep mechanics within the deliverable's allowed execution. Decompose genuinely compound work; classification is not verification or authority to bypass an evidence gate.
 
 ## Passive Telemetry Contract
@@ -148,7 +159,7 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - A non-atomic step at decomposition depth 4 must direct every guidance surface to an explicit `task_update` blocker; never recommend another decomposition, mark the step done, or create a successor automatically.
 - Evidence schemas and reducer validation must share the 500-character summary, 1,000-character observed-output, and 300-character reference/source/command limits. Rejected command, test, and dogfood evidence retries must preserve valid submitted values and use explicit caller-replacement placeholders for missing or over-limit values.
 - Supplying `task_update.scope` requires non-empty `activity`; `scope_change` and `off_plan` also require `scope_reason`. Those reducer rejections must recover with a corrected snake_case `task_update`, not the task's unrelated next action.
-- Plan-quality wording guards must ignore action-like words inside path tokens while retaining broad-action and compound-action detection, including action words followed by sentence punctuation.
+- Native semantic assessment recovery must preserve deterministic structural gates and return a targeted retry when no model boundary succeeds; rejected assessment calls must not persist events or consume IDs.
 
 
 ## Verification Rules

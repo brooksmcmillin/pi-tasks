@@ -36,7 +36,7 @@ by the package. See [reporting, fixture exercise and rollback](docs/compaction-r
 
 ## What makes it different
 
-Every other task tool for AI agents is just a todo list. pi-tasks enforces three hard contracts no competitor offers:
+pi-tasks focuses on three enforced execution contracts:
 
 | Contract | What it means |
 | ---------- | --------------- |
@@ -53,40 +53,110 @@ Different tools solve different parts of the agentic workflow. Pick based on wha
 | Tool | Focus | Strengths | Trade-offs |
 | ------ | ------- | ----------- | ------------ |
 | **Claude Code Tasks** (built-in) | Cross-session coordination | Shared task lists, dependency tracking, zero setup | No completion verification, no step-level contracts |
-| **rpiv-pi** (9.4K/mo, 413★) | Structured workflows | 6 end-to-end flows, 12 subagents, code-review loops | Workflow-oriented; task visibility via separate rpiv-todo |
-| **@tintinweb/pi-tasks** (3.2K/mo, 113★) | Task tracking & subagents | Dependency DAG, auto-cascade, file/session/project scoping | Tracks progress; completion is self-reported |
-| **Microsoft hve-core** (1,183★) | RPI workflow for Copilot | Research→Plan→Implement→Review, custom agents | Copilot-native; not designed for Pi |
+| **[rpiv-pi](https://github.com/juicesharp/rpiv-mono/tree/main/packages/rpiv-pi)** | Structured workflows | 4 pipelines, 30 skills, 15 subagents, detached reviewable stages | Workflow-oriented; task visibility comes from sibling rpiv-todo |
+| **[@tintinweb/pi-tasks](https://github.com/tintinweb/pi-tasks)** | Task tracking & subagents | Dependency DAG, auto-cascade, file/session/project scoping | Tracks progress; completion is self-reported |
+| **[Microsoft hve-core](https://github.com/microsoft/hve-core)** | RPI workflow for Copilot | Research→Plan→Implement→Review, custom agents | Copilot-native; not designed for Pi |
 | **pi-tasks** (this project) | Execution contracts | Evidence-gated completion, atomic decomposition, compaction-safe resume | Narrower scope; no subagent orchestration (yet) |
 
 **pi-tasks is for you if** your core problem is agents claiming "done" without proof, plans drifting mid-execution, or context compaction losing progress. If you need workflow orchestration or multi-agent coordination, the tools above may be a better fit — or complement pi-tasks.
 
 ## Install
 
+### npm package
+
+For Pi:
+
 ```sh
 pi install npm:pi-tasks
 ```
 
-For Oh My Pi (`omp`):
+For Oh My Pi:
 
 ```sh
-omp install pi-tasks
+omp plugin install npm:pi-tasks
 ```
 
-Equivalent explicit plugin command:
+`omp install pi-tasks` is an equivalent shorthand. OMP's `--scope project`
+applies to marketplace references such as `name@marketplace`; npm package
+specifications remain user-scoped.
+
+### Local checkout
+
+Build before registering a checkout so its tracked `dist/` matches the source:
 
 ```sh
-omp plugin install pi-tasks
-```
+cd /path/to/pi-tasks
+npm ci
+npm run typecheck
+npm test
+npm run build
 
-Oh My Pi's `--scope project` flag is for marketplace refs such as
-`name@marketplace`; it is ignored for npm package specs like `pi-tasks`.
-
-For local development:
-
-```sh
+# Register with the host you use:
 pi install ./
-omp plugin install ./
+omp plugin link "$(pwd)"
 ```
+
+Use either the npm package or the local checkout for a host, not both. Check
+Pi with `pi list` and OMP with `omp plugin list --json` when switching sources.
+
+## Upgrade
+
+### npm-installed package
+
+Update only pi-tasks in Pi:
+
+```sh
+pi update npm:pi-tasks
+pi list
+```
+
+Use `pi update --extensions` instead when every installed Pi extension should
+be updated.
+
+Update only pi-tasks in OMP:
+
+```sh
+omp plugin upgrade pi-tasks
+omp plugin list --json
+omp plugin doctor
+```
+
+Bare `omp plugin upgrade` and `omp update --plugins --check` report marketplace
+plugin status; they do not confirm that this npm plugin was upgraded.
+
+Install the unversioned Pi source (`npm:pi-tasks`) to follow the npm `latest`
+tag. Pi preserves explicitly versioned sources such as
+`npm:pi-tasks@<version>`. To remove a pin:
+
+1. Run `pi list`.
+2. Pass the exact pinned source shown there to `pi remove`.
+3. Run `pi install npm:pi-tasks`.
+
+### Local checkout
+
+A linked checkout is updated from Git, not from the npm registry. Finish,
+commit, or stash local edits before pulling. Exit Pi and OMP processes that use
+the checkout before replacing dependencies or build output.
+
+```sh
+cd /path/to/pi-tasks
+git status --short
+git pull --ff-only  # only when the checkout is clean and follows a remote branch
+npm ci
+npm run typecheck
+npm test
+npm run build
+```
+
+When actively developing local changes, skip `git pull --ff-only` and build the
+current tree. The manifest loads `dist/index.js`, so source edits are inactive
+until the build succeeds. The local registration only needs to be repeated when
+its path or host settings change.
+
+Pi and OMP load extension modules once per process. Start a new host process
+after a successful registry upgrade or local build. Then use `pi list` to
+confirm Pi's selected source, or `omp plugin list --json` to confirm OMP's
+installed version and path.
 
 ## How it works
 
@@ -136,6 +206,48 @@ Because Oh My Pi renders model-facing tool guidance from `description` and
 their critical guidance into descriptions. Lazily activated controls keep only
 compact descriptions so native Pi can add them without active-only prompt
 metadata.
+
+### Native semantic assessment
+
+Planning, decomposition, replan/rework, current-step classification, and passing
+evidence (including batch and verify-step tools) use the host's native model
+boundary to judge meaning in the source language. pi-tasks prefers
+Pi classifier models, falls back to Pi's structured `modelRegistry.streamSimple()`,
+and uses Oh My Pi's `runEphemeralTurn()` when Pi model APIs are unavailable. It
+does not ship a provider SDK or call an external model endpoint directly.
+
+The assessor handles English, Traditional and Simplified Chinese, Japanese,
+Korean, and mixed technical text under one language-neutral policy. It judges
+whether operations are independently executable or verifiable; a conjunction,
+filename, keyword, or text length is never sufficient by itself. Task and
+evidence fields are quoted as untrusted data, and typed model output is validated
+before persistence.
+
+Successful results are stored in version 2 task events with their input hash,
+model provenance, prompt version, confidence, and decision. Replay, resume,
+branch navigation, rendering, and completion remain deterministic and never
+re-run inference. Existing version 1 sessions continue to replay as legacy
+history.
+
+Semantic calls consume model tokens and can add latency. Pi classifier/chat calls
+send only the assessment payload. Oh My Pi ephemeral turns may include the
+current conversation snapshot according to the host's side-turn contract; use
+the same data-handling policy as the active OMP conversation. If all native
+boundaries are unavailable or return invalid output, the mutation fails closed
+with a retry instead of reverting to regex heuristics.
+
+On `session_start` and `session_tree`, pi-tasks performs a static capability
+preflight. It inspects Pi classifier metadata and the presence of Pi chat or OMP
+ephemeral APIs without sending a model request. Healthy sessions stay silent. If
+no native assessor is available, a deduplicated warning and
+`pi-tasks-semantic` status direct the user to `/tasks doctor` before a protected
+mutation can fail.
+
+`/tasks doctor` displays the three-strategy capability matrix without inference.
+`/tasks doctor live` is an explicit opt-in synthetic assessment that reports the
+actual strategy, provider, model, latency, and token usage when the host returns
+it. The probe does not read or mutate task state. Under Oh My Pi, the host may
+still include the current conversation snapshot under its side-turn contract.
 
 ## Agent Tools
 
@@ -244,10 +356,9 @@ deliverable, owned scope/exclusions, and verification procedure:
 }
 ```
 
-`atomic: true` explicitly attests one bounded observable outcome, one cohesive
-implementation/verification cycle, and no hidden subtasks. It is not an automatic
-semantic judgment: omit it (or use `false`) for compound or unchecked work, which
-remains `needs_breakdown` and requires `task_decompose` before execution. Separate
+`atomic: true` is an optional caller attestation, not an authority to execute.
+The native model assesses every normalized remediation step and determines
+`atomic` versus `needs_breakdown` independently of the attestation. Separate
 unrelated outcomes into detailed steps rather than asserting atomicity.
 
 Normalization derives only the ordinary evidence-required deliverable step,
@@ -267,12 +378,14 @@ PI_SDK_ROOT=/path/to/pi-coding-agent npm run test:native -- -t 'compact remediat
 ```
 
 The local fixture benchmark compares serialized UTF-8 input bytes and actual
-validation/tool attempts (four-action rejection, compound-wording rejection,
+validation/tool attempts (four-action rejection, missing-output rejection,
 then valid detailed input versus one valid compact call). Equivalent criteria,
 scope, verification and evidence/atomicity obligations are asserted. Closed-target
 rejection remains one call for either format. This is a controlled recovery
 comparison, not model performance, elapsed time, or a claim that all 19 historical
-rework calls were unnecessary.
+rework calls were unnecessary. With native-model granularity, the current fixture's
+compact form is 745 bytes versus 744 bytes for detailed input; it is not a byte-size
+reduction. The example still exercises fewer controlled recovery attempts.
 
 ## Repairing a mistaken plan
 
@@ -288,8 +401,7 @@ open steps with the actual deliverable:
   "plan_steps": [{
     "text": "Rename the Grafana token setting",
     "expectedOutput": "Settings bind the deployed environment variable",
-    "allowedActions": ["edit"],
-    "decompositionStatus": "needs_breakdown"
+    "allowedActions": ["edit"]
   }]
 }
 ```
@@ -317,7 +429,8 @@ prints the required parameters.
 
 An unclassified step is not necessarily compound. Use `task_update` with its
 current `step_id` and `step_granularity_check` (a concrete reason and all five
-atomicity flags true) to classify it in place. Its ID, criteria, evidence links,
+atomicity flags true) to request native-model classification in place. The request
+fails if the model does not assess it as atomic. Its ID, criteria, evidence links,
 and completion requirements remain unchanged. Classification does not perform
 or verify the work, and cannot be bundled with status/evidence updates.
 
@@ -329,37 +442,22 @@ use `task_decompose`; do not assert atomicity just to avoid the gate.
 ## Cohesive deliverables and batch evidence
 
 An atomic step may represent one independently verifiable outcome rather than one
-mechanical edit. Opt in with `granularityCheck.unit: "deliverable"`, a
-`boundedScope` and `verificationPlan` (12–500 characters each), and all five
-flags true. In this mode the legacy `canBeDoneInOneAgentAction` and
-`hasSingleVerificationMethod` flags mean one bounded implementation cycle and
-one bounded verification procedure, which may include multiple edits and checks.
-For example:
+mechanical edit. Describe its bounded scope and focused verification in the step;
+the native assessor treats a cohesive implementation-plus-test cycle as one unit,
+without granting unrelated deliverables an atomic exemption. For example:
 
 ```json
 {
   "text": "Implement parser aliases and focused regression tests",
   "expectedOutput": "Parser alias normalization preserves existing inputs",
   "allowedActions": ["edit parser and tests", "run focused parser tests"],
-  "decompositionStatus": "atomic",
-  "granularityCheck": {
-    "unit": "deliverable",
-    "boundedScope": "Parser alias normalization only; excludes transport and UI",
-    "verificationPlan": "Run focused parser tests covering aliases and existing inputs",
-    "reason": "One parser behavior with bounded implementation and verification",
-    "isAtomic": true,
-    "canBeDoneInOneAgentAction": true,
-    "hasSingleObservableOutput": true,
-    "hasSingleVerificationMethod": true,
-    "hasNoHiddenSubtasks": true
-  }
+  "evidenceRequired": true
 }
 ```
 
-These declarations are a scoped execution contract, not a semantic proof from
-wording. Independent outcomes still require decomposition. Omitted `unit` or
-`unit: "action"` preserves legacy wording validation and persisted plan replay.
-The same check can classify the current step through `task_update`.
+These fields describe the execution contract, not proof of atomicity or completion.
+Independent outcomes still require decomposition. Legacy persisted granularity
+remains replayable; new authoring uses persisted native-model assessments.
 
 `task_evidence_batch` accepts one task and 1–16 ordered entries within 32,000
 serialized characters. Each entry uses the `task_evidence` fields (without
@@ -527,8 +625,9 @@ configuration or manual sign-off is required.
 - Evidence fields expose the same limits enforced by the reducer: summaries 500 characters, observed output 1,000, and each reference/source/command 300. Retry templates preserve valid values and replace invalid over-limit values with explicit placeholders.
 - `task_update.scope` requires `activity`; `scope_change` and `off_plan` also require `scope_reason`. Missing fields return a targeted `task_update` recovery using the public snake_case parameter names.
 - Empty or omitted `criterionIds` on new and decomposed steps auto-link the available task criteria; non-empty arrays must contain known generated IDs.
-- Atomic plan-quality issues are hard failures. Wording failures name the matched fragment, and one rejection reports every invalid plan step so callers can correct the full plan in one retry.
-- Plan quality still rejects broad or compound actions, but action-like filename segments such as `fixtures/fix.json`, `update.json`, and `then.json` are treated as paths rather than instructions.
+- Plan, decomposition, replan, and rework quality is assessed through the native Pi/OMP model boundary. Plan schemas do not accept caller-supplied granularity scores; bounded `allowedActions` remain required guidance.
+- Current-step classification also requires a native assessment; caller flags cannot override the model. Passing evidence uses the same assessment boundary through `task_evidence`, `task_verify_step`, and `task_evidence_batch`.
+- Assessment failures are fail-closed and retryable. Rejected calls persist nothing, consume no task/evidence IDs, and never fall back to keyword regexes.
 
 ## Completion Gates
 
@@ -702,10 +801,10 @@ full-state recovery delivery, including payload size.
 - Typed task, acceptance criterion, evidence, decision, blocker, and event model
 - Pure reducer with transition validation and evidence-before-completion enforcement
 - Ordered plan steps; agents must complete or skip the current step before advancing
-- Step-level contracts with expected output, linked criteria, required evidence, and allowed actions
-- Plan quality gate rejects vague, unverifiable, or over-broad atomic steps
-- Stricter atomic scoring rejects compound wording (`and`, `then`, `並且`, `然後`)
-- Recursive decomposition gate for non-atomic steps, with explicit blocker recovery at depth 4
+- Step-level contracts with expected output, linked criteria, required evidence, and optional allowed actions
+- Native-model plan quality assessment distinguishes one semantic operation from independently executable or verifiable work across supported source languages
+- Persisted version 2 semantic provenance keeps session replay deterministic and model-free while retaining version 1 history compatibility
+- Recursive decomposition gate for model-assessed non-atomic steps, with explicit blocker recovery at depth 4
 - Step-scoped evidence through `task_evidence.step_ids`
 - Current-step evidence lock unless explicit `override_reason` is supplied
 - Evidence quality gate: traceable, reproducible, with artifact references
@@ -720,15 +819,16 @@ full-state recovery delivery, including payload size.
 - Compaction snapshot hook via `session_before_compact`
 - Compact status bar and above-editor widget
 - Oh My Pi-compatible extension manifest, with critical entrypoint guidance preserved in descriptions for hosts that ignore custom `promptSnippet`/`promptGuidelines` fields
+- Inference-free startup semantic capability preflight, deduplicated unavailable warning, and `/tasks doctor` diagnostics
 
 ### Verification
 
 Local verification suite:
 
 - `PI_SDK_ROOT=/path/to/@earendil-works/pi-coding-agent npm run release:check` (typecheck + lint + unit/native tests + build parity + tracked-checkout import smoke + pack + audit)
-- Fork dogfood passed on 2026-06-18, 2026-06-19, 2026-06-20, and 2026-06-23; upstream reports its latest dogfood on 2026-10-14.
+- Fork dogfood passed on 2026-06-18, 2026-06-19, 2026-06-20, and 2026-06-23; upstream reports Pi 1.4.0 and Oh My Pi 18.14.1 dogfood on 2026-10-31. These historical results do not certify this integration.
 
-Dogfood coverage includes: task lifecycle, evidence enforcement and bounded retry recovery, ordered step rejection, path-token plan quality, maximum-depth blocker recovery, targeted scope recovery, recursive decomposition, compaction-safe resume, duplicate evidence detection, decision/blocker rendering, forked-session replay, live `/tasks detail`, clean `/quit`, tarball install, and English/Traditional Chinese weak-model smoke.
+Dogfood coverage includes: native Pi chat and OMP ephemeral semantic assessment, inference-free healthy startup, static and live `/tasks doctor`, English and Traditional Chinese task creation, task updates, same-session resume, Pi fork replay, `/tasks`, clean `/quit`, and installed-tarball smoke.
 
 ## Documentation
 

@@ -17,6 +17,7 @@ import {
 } from "../../src/render.ts";
 import { createTaskRuntimeStore } from "../../src/store.ts";
 import { registerTaskTools } from "../../src/tools.ts";
+import { fakeSemanticRuntime } from "./semantic-fixture.ts";
 
 function harness() {
 	const tools = new Map<string, ToolDefinition<Record<string, unknown>>>();
@@ -29,6 +30,7 @@ function harness() {
 		appendEntry: (_type, data) => entries.push(data as TaskEvent),
 	};
 	const ctx: ExtensionContext = {
+		...fakeSemanticRuntime(),
 		sessionManager: {
 			getBranch: () =>
 				entries.map((data) => ({
