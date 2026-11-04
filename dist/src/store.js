@@ -2,11 +2,16 @@ import { createEmptyState, TASK_EVENT_CUSTOM_TYPE, } from "./model.js";
 import { reduceTaskState, TaskTransitionError } from "./reducer.js";
 export function createTaskRuntimeStore(initialState = createEmptyState()) {
     let state = initialState;
+    let replayVersion = 0;
     return {
         getState() {
             return state;
         },
+        getReplayVersion() {
+            return replayVersion;
+        },
         replay(branchEntries) {
+            replayVersion += 1;
             const replayed = replayBranchEntries(branchEntries);
             state = replayed.state;
             return replayed;
@@ -51,7 +56,7 @@ function isTaskEvent(value) {
     if (!value || typeof value !== "object")
         return false;
     const maybe = value;
-    return (maybe.version === 1 &&
+    return ((maybe.version === 1 || maybe.version === 2) &&
         typeof maybe.id === "string" &&
         typeof maybe.type === "string");
 }

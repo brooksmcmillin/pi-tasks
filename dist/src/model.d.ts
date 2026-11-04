@@ -12,6 +12,50 @@ export declare const MAX_EVIDENCE_REFERENCE_LENGTH = 300;
 export type VerificationLevel = "not_verified" | "static_read" | "unit_test" | "integration_test" | "e2e_smoke" | "release_grade_e2e" | "pi_dogfood" | "external_unverified";
 export type EvidenceType = "test" | "command" | "review" | "file" | "commit" | "dogfood" | "user_acceptance" | "external" | "note";
 export type EvidenceRole = "acceptance" | "diagnostic";
+export declare const SEMANTIC_ASSESSMENT_VERSION = 1;
+export type SemanticAssessmentStrategy = "pi_classifier" | "pi_chat" | "omp_ephemeral";
+export interface SemanticAssessmentProvenance {
+    version: typeof SEMANTIC_ASSESSMENT_VERSION;
+    strategy: SemanticAssessmentStrategy;
+    provider: string;
+    model: string;
+    promptVersion: string;
+    inputHash: string;
+    assessedAt: string;
+}
+export interface SemanticBooleanJudgment {
+    value: boolean;
+    confidence: number;
+}
+export interface SemanticChoiceJudgment<TChoice extends "one" | "multiple" | "unclear"> {
+    value: TChoice;
+    confidence: number;
+}
+export type PlanSemanticDecision = "atomic" | "needs_breakdown" | "rejected";
+export interface StepSemanticAssessment {
+    index: number;
+    inputHash: string;
+    decision: PlanSemanticDecision;
+    specific: SemanticBooleanJudgment;
+    actionCount: SemanticChoiceJudgment<"one" | "multiple" | "unclear">;
+    outputCount: SemanticChoiceJudgment<"one" | "multiple" | "unclear">;
+    verificationCount: SemanticChoiceJudgment<"one" | "multiple" | "unclear">;
+    hiddenSubtasks: SemanticBooleanJudgment;
+    confidence: number;
+    issues: string[];
+}
+export interface PlanSemanticAssessment {
+    provenance: SemanticAssessmentProvenance;
+    steps: StepSemanticAssessment[];
+}
+export type EvidenceSemanticDecision = "supported" | "unsupported" | "uncertain";
+export interface EvidenceSemanticAssessment {
+    provenance: SemanticAssessmentProvenance;
+    inputHash: string;
+    decision: EvidenceSemanticDecision;
+    confidence: number;
+    issues: string[];
+}
 export interface TaskEvidence {
     id: string;
     taskId: string;
@@ -25,6 +69,7 @@ export interface TaskEvidence {
     supersedesEvidenceIds?: string[];
     supersessionReason?: string;
     createdAt: string;
+    semanticAssessment?: EvidenceSemanticAssessment;
 }
 export interface EvidenceQuality {
     source: string;
@@ -80,6 +125,7 @@ export interface TaskStep {
     evidenceRequired: boolean;
     allowedActions: string[];
     planQuality: PlanQuality;
+    semanticAssessment?: StepSemanticAssessment;
     note?: string;
     startedAt?: string;
     completedAt?: string;
@@ -180,7 +226,7 @@ export interface TaskState {
     warnings: string[];
 }
 export interface TaskEventBase {
-    version: 1;
+    version: 1 | 2;
     id: string;
     type: string;
     taskId: string;
@@ -200,6 +246,7 @@ export interface TaskCreatedEvent extends TaskEventBase {
     dependencies?: string[];
     linkedFiles?: string[];
     activate?: boolean;
+    semanticAssessment?: PlanSemanticAssessment;
 }
 export interface TaskUpdatedEvent extends TaskEventBase {
     type: "task.updated";
@@ -211,6 +258,7 @@ export interface TaskUpdatedEvent extends TaskEventBase {
     stepStatus?: TaskStepStatus;
     stepEvidenceIds?: string[];
     stepGranularityCheck?: TaskGranularityCheck;
+    semanticAssessment?: PlanSemanticAssessment;
     activity?: string;
     scope?: "within_step" | "scope_change" | "off_plan";
     scopeReason?: string;
@@ -224,30 +272,35 @@ export interface TaskStepsDecomposedEvent extends TaskEventBase {
     parentStepId: string;
     childSteps: TaskStepInput[];
     reason: string;
+    semanticAssessment?: PlanSemanticAssessment;
 }
 export interface TaskReplannedEvent extends TaskEventBase {
     type: "task.replanned";
     reason: string;
     stepIds: string[];
     planSteps: TaskStepInput[];
+    semanticAssessment?: PlanSemanticAssessment;
 }
 export interface TaskReworkedEvent extends TaskEventBase {
     type: "task.reworked";
     reason: string;
     planSteps: TaskStepInput[];
+    semanticAssessment?: PlanSemanticAssessment;
     beforeStepId?: string;
 }
 export interface TaskEvidenceAddedEvent extends TaskEventBase {
     type: "task.evidence_added";
-    evidence: Omit<TaskEvidence, "taskId" | "createdAt" | "quality"> & {
+    evidence: Omit<TaskEvidence, "taskId" | "createdAt" | "quality" | "semanticAssessment"> & {
         quality?: EvidenceQuality;
     };
+    semanticAssessment?: EvidenceSemanticAssessment;
     criterionIds?: string[];
     stepIds?: string[];
     overrideReason?: string;
 }
 export interface TaskStepVerifiedEvent extends TaskEventBase {
     type: "task.step_verified";
+    semanticAssessment?: EvidenceSemanticAssessment;
     stepId: string;
     evidence: Omit<TaskEvidence, "taskId" | "createdAt" | "quality"> & {
         quality?: EvidenceQuality;

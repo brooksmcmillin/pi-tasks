@@ -11,6 +11,8 @@ import type {
 	ExtensionContext,
 	ToolDefinition,
 } from "../../src/pi-types.ts";
+import { SEMANTIC_CAPABILITY_STATUS_ID } from "../../src/semantic-capability.ts";
+import { fakeSemanticRuntime } from "./semantic-fixture.ts";
 
 const createEvent: TaskEvent = {
 	version: 1,
@@ -69,11 +71,19 @@ const mutationPlanParams: Record<string, unknown> = {
 
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<void> | void;
 
-function createHarness(initialEvents: TaskEvent[] = []) {
+function createHarness(
+	initialEvents: TaskEvent[] = [],
+	semanticRuntime: Partial<ExtensionContext> = fakeSemanticRuntime(),
+) {
 	const branchEvents = [...initialEvents];
 	const emitted: TaskStateEvent[] = [];
 	const telemetry: unknown[] = [];
 	const operations: string[] = [];
+	const notifications: Array<{
+		message: string;
+		type?: "info" | "warning" | "error";
+	}> = [];
+	const statuses = new Map<string, string | undefined>();
 	const subscribers: Array<(value: unknown) => void> = [];
 	const handlers = new Map<string, Handler>();
 	const tools = new Map<string, ToolDefinition<Record<string, unknown>>>();
@@ -113,14 +123,20 @@ function createHarness(initialEvents: TaskEvent[] = []) {
 				})),
 		},
 		ui: {
-			notify: () => {},
-			setStatus: () => operations.push("status"),
+			notify: (message, type) => notifications.push({ message, type }),
+			setStatus: (key, text) => {
+				operations.push(
+					key === SEMANTIC_CAPABILITY_STATUS_ID ? "semantic-status" : "status",
+				);
+				statuses.set(key, text);
+			},
 			setWidget: (key, content) => {
 				expect(key).toBe(TASK_WIDGET_ID);
 				operations.push("widget");
 				ui.widget = content;
 			},
 		},
+		...semanticRuntime,
 	};
 
 	taskExtension(pi);
@@ -135,6 +151,8 @@ function createHarness(initialEvents: TaskEvent[] = []) {
 		tools,
 		ui,
 		branchEvents,
+		notifications,
+		statuses,
 	};
 }
 
@@ -184,7 +202,12 @@ describe("task state event hook", () => {
 		]);
 
 		await handlers.get("session_start")?.({}, ctx);
-		expect(operations).toEqual(["status", "widget", "event"]);
+		expect(operations).toEqual([
+			"status",
+			"widget",
+			"event",
+			"semantic-status",
+		]);
 		expect(emitted[0]).toMatchObject({
 			version: 2,
 			reason: "session_start",
@@ -216,6 +239,22 @@ describe("task state event hook", () => {
 		},
 	);
 
+	it("warns once when startup and tree replay lack a native semantic strategy", async () => {
+		const { ctx, handlers, notifications, statuses } = createHarness([], {});
+
+		await handlers.get("session_start")?.({}, ctx);
+		await handlers.get("session_tree")?.({}, ctx);
+
+		expect(notifications).toEqual([
+			expect.objectContaining({
+				message: expect.stringContaining("Run /tasks doctor"),
+				type: "warning",
+			}),
+		]);
+		expect(statuses.get(SEMANTIC_CAPABILITY_STATUS_ID)).toBe(
+			"semantic unavailable · /tasks doctor",
+		);
+	});
 	it("publishes each successful task mutation", async () => {
 		const { ctx, emitted, handlers, operations, tools } = createHarness();
 		await handlers.get("session_start")?.({}, ctx);

@@ -13,6 +13,7 @@ import type {
 } from "../../src/pi-types.ts";
 import { createTaskRuntimeStore } from "../../src/store.ts";
 import { registerTaskTools } from "../../src/tools.ts";
+import { fakeSemanticRuntime } from "./semantic-fixture.ts";
 
 interface ToolSchema {
 	type?: string;
@@ -21,6 +22,7 @@ interface ToolSchema {
 	maxLength?: number;
 	properties?: Record<string, ToolSchema>;
 	items?: ToolSchema;
+	additionalProperties?: boolean;
 }
 
 class FixedIds {
@@ -37,7 +39,12 @@ type ReceiverBoundPi = ExtensionAPI & {
 	};
 };
 
-function createHarness(options: { dynamicTools?: boolean } = {}) {
+function createHarness(
+	options: {
+		dynamicTools?: boolean;
+		semanticRuntime?: Pick<ExtensionContext, "modelRegistry" | "model">;
+	} = {},
+) {
 	const tools = new Map<string, ToolDefinition<Record<string, unknown>>>();
 	const entries: TaskEvent[] = [];
 	const publications: string[] = [];
@@ -90,6 +97,7 @@ function createHarness(options: { dynamicTools?: boolean } = {}) {
 				ui.widget = lines;
 			},
 		},
+		...(options.semanticRuntime ?? fakeSemanticRuntime()),
 	};
 	const store = createTaskRuntimeStore();
 	registerTaskTools(pi, store, new FixedIds());
@@ -627,7 +635,7 @@ describe("registered task tools", () => {
 		const before = structuredClone(store.getState().tasks.T1);
 		const rework = requireTool(tools, "task_rework");
 		expect(rework.description).toContain(
-			"atomic=true is an explicit attestation",
+			"caller flags cannot override its atomicity decision",
 		);
 		const result = await execute(
 			rework,
@@ -666,7 +674,8 @@ describe("registered task tools", () => {
 			evidenceIds: [],
 			criterionIds: ["T1-AC1"],
 			decompositionStatus: "atomic",
-			granularityCheck: { unit: "deliverable", isAtomic: true },
+			granularityCheck: { isAtomic: true },
+			semanticAssessment: { decision: "atomic" },
 		});
 		expect(task?.planSteps[1]?.allowedActions).toHaveLength(2);
 		expect(entries.at(-1)).toMatchObject({
@@ -821,6 +830,21 @@ describe("registered task tools", () => {
 		expect(evidence.description).toContain(
 			"Use task_evidence for tests, commands, reviews, files, dogfood, or explicit user acceptance.",
 		);
+	});
+
+	it("removes caller-authored semantic judgments from plan schemas", () => {
+		const { tools } = createHarness();
+		for (const [toolName, collectionName] of [
+			["task_plan", "plan_steps"],
+			["task_decompose", "child_steps"],
+		] as const) {
+			const tool = requireTool(tools, toolName);
+			const schema = tool.parameters as ToolSchema;
+			const stepSchema = schema.properties?.[collectionName]?.items;
+			expect(stepSchema?.properties).not.toHaveProperty("granularityCheck");
+			expect(stepSchema?.properties).not.toHaveProperty("decompositionStatus");
+			expect(stepSchema?.additionalProperties).toBe(false);
+		}
 	});
 
 	it("keeps lazy control descriptions compact when native tool activation is available", () => {
@@ -1060,15 +1084,6 @@ describe("registered task tools", () => {
 						criterionIds: ["T1-AC1"],
 						evidenceRequired: true,
 						allowedActions: ["task_evidence"],
-						decompositionStatus: "atomic",
-						granularityCheck: {
-							isAtomic: true,
-							reason: "Single evidence recording call",
-							canBeDoneInOneAgentAction: true,
-							hasSingleObservableOutput: true,
-							hasSingleVerificationMethod: true,
-							hasNoHiddenSubtasks: true,
-						},
 					},
 				],
 				activate: true,
@@ -1137,16 +1152,6 @@ describe("registered task tools", () => {
 							text: `Record ${type} evidence`,
 							expectedOutput: `${type} retry template preserves its command`,
 							allowedActions: ["task_evidence"],
-							decompositionStatus: "atomic",
-							granularityCheck: {
-								isAtomic: true,
-								reason:
-									"One rejected evidence call produces one retry template",
-								canBeDoneInOneAgentAction: true,
-								hasSingleObservableOutput: true,
-								hasSingleVerificationMethod: true,
-								hasNoHiddenSubtasks: true,
-							},
 						},
 					],
 				},
@@ -1203,16 +1208,6 @@ describe("registered task tools", () => {
 						text: "Record bounded evidence",
 						expectedOutput: "Rejected evidence returns bounded retry fields",
 						allowedActions: ["task_evidence"],
-						decompositionStatus: "atomic",
-						granularityCheck: {
-							isAtomic: true,
-							reason:
-								"One rejected evidence call produces one bounded template",
-							canBeDoneInOneAgentAction: true,
-							hasSingleObservableOutput: true,
-							hasSingleVerificationMethod: true,
-							hasNoHiddenSubtasks: true,
-						},
 					},
 				],
 			},
@@ -1291,15 +1286,6 @@ describe("registered task tools", () => {
 						text: "Verify the current fixture checksum",
 						expectedOutput: "One fixture inspection record",
 						allowedActions: ["Read current fixture"],
-						decompositionStatus: "atomic",
-						granularityCheck: {
-							isAtomic: true,
-							reason: "One fixture read produces one inspection record",
-							canBeDoneInOneAgentAction: true,
-							hasSingleObservableOutput: true,
-							hasSingleVerificationMethod: true,
-							hasNoHiddenSubtasks: true,
-						},
 					},
 				],
 			},
@@ -1439,15 +1425,6 @@ describe("registered task tools", () => {
 						criterionIds: ["T1-AC1"],
 						evidenceRequired: true,
 						allowedActions: ["task_plan"],
-						decompositionStatus: "atomic",
-						granularityCheck: {
-							isAtomic: true,
-							reason: "Single tool call records one task event",
-							canBeDoneInOneAgentAction: true,
-							hasSingleObservableOutput: true,
-							hasSingleVerificationMethod: true,
-							hasNoHiddenSubtasks: true,
-						},
 					},
 				],
 				activate: true,
@@ -1492,15 +1469,6 @@ describe("registered task tools", () => {
 						text: "Do the thing",
 						expectedOutput: "Something happens",
 						evidenceRequired: true,
-						decompositionStatus: "atomic",
-						granularityCheck: {
-							isAtomic: true,
-							reason: "Too vague on purpose",
-							canBeDoneInOneAgentAction: true,
-							hasSingleObservableOutput: true,
-							hasSingleVerificationMethod: true,
-							hasNoHiddenSubtasks: true,
-						},
 					},
 				],
 				activate: true,
@@ -1522,15 +1490,6 @@ describe("registered task tools", () => {
 						expectedOutput: "Valid plan evidence is ready",
 						evidenceRequired: true,
 						allowedActions: ["task_evidence"],
-						decompositionStatus: "atomic",
-						granularityCheck: {
-							isAtomic: true,
-							reason: "Single evidence recording action",
-							canBeDoneInOneAgentAction: true,
-							hasSingleObservableOutput: true,
-							hasSingleVerificationMethod: true,
-							hasNoHiddenSubtasks: true,
-						},
 					},
 				],
 				activate: true,
@@ -1659,6 +1618,54 @@ describe("registered task tools", () => {
 		expect(store.getState().activeTaskId).toBe("T1");
 	});
 
+	it("allocates unique task IDs after concurrent semantic assessments finish", async () => {
+		const fixture = fakeSemanticRuntime();
+		const classify = fixture.modelRegistry?.classify;
+		if (!classify) throw new Error("Expected classifier fixture");
+		const releases: Array<() => void> = [];
+		const { tools, ctx, store } = createHarness({
+			semanticRuntime: {
+				model: fixture.model,
+				modelRegistry: {
+					...fixture.modelRegistry,
+					classify: async (model, classifierContext, options) => {
+						const gate = Promise.withResolvers<void>();
+						releases.push(gate.resolve);
+						await gate.promise;
+						return classify(model, classifierContext, options);
+					},
+				},
+			},
+		});
+		const plan = requireTool(tools, "task_plan");
+		const params = (title: string) => ({
+			title,
+			objective: `Create ${title}`,
+			acceptance_criteria: [`${title} is persisted`],
+			plan_steps: [
+				{
+					text: `Record ${title}`,
+					expectedOutput: `${title} event is persisted`,
+					evidenceRequired: true,
+				},
+			],
+			activate: true,
+		});
+
+		const first = execute(plan, params("Concurrent A"), ctx);
+		const second = execute(plan, params("Concurrent B"), ctx);
+		await Promise.resolve();
+		expect(releases).toHaveLength(2);
+		releases[1]?.();
+		const secondResult = await second;
+		releases[0]?.();
+		const firstResult = await first;
+
+		expect(secondResult.content[0]?.text).toContain("Created task T1");
+		expect(firstResult.content[0]?.text).toContain("Created task T2");
+		expect(Object.keys(store.getState().tasks).sort()).toEqual(["T1", "T2"]);
+	});
+
 	it("create, update, evidence, complete, and replay through custom entries", async () => {
 		const { tools, entries, ctx, store, ui } = createHarness();
 		const plan = requireTool(tools, "task_plan");
@@ -1682,15 +1689,6 @@ describe("registered task tools", () => {
 						criterionIds: ["T1-AC1"],
 						evidenceRequired: true,
 						allowedActions: ["run unit harness"],
-						decompositionStatus: "atomic",
-						granularityCheck: {
-							isAtomic: true,
-							reason: "Single tool harness assertion",
-							canBeDoneInOneAgentAction: true,
-							hasSingleObservableOutput: true,
-							hasSingleVerificationMethod: true,
-							hasNoHiddenSubtasks: true,
-						},
 					},
 				],
 				activate: true,
@@ -1925,14 +1923,6 @@ describe("registered task tools", () => {
 						criterionIds: ["T1-AC1"],
 						evidenceRequired: true,
 						allowedActions: ["inspect", "build", "test"],
-						granularityCheck: {
-							isAtomic: false,
-							reason: "Contains multiple hidden verification subtasks",
-							canBeDoneInOneAgentAction: false,
-							hasSingleObservableOutput: false,
-							hasSingleVerificationMethod: false,
-							hasNoHiddenSubtasks: false,
-						},
 					},
 				],
 			},
@@ -1960,15 +1950,6 @@ describe("registered task tools", () => {
 						criterionIds: ["T1-AC1"],
 						evidenceRequired: true,
 						allowedActions: ["npm pack --dry-run"],
-						decompositionStatus: "atomic",
-						granularityCheck: {
-							isAtomic: true,
-							reason: "Single packaging command with one output",
-							canBeDoneInOneAgentAction: true,
-							hasSingleObservableOutput: true,
-							hasSingleVerificationMethod: true,
-							hasNoHiddenSubtasks: true,
-						},
 					},
 					{
 						text: "Record package dry-run evidence",
@@ -1976,15 +1957,6 @@ describe("registered task tools", () => {
 						criterionIds: ["T1-AC1"],
 						evidenceRequired: true,
 						allowedActions: ["task_evidence"],
-						decompositionStatus: "atomic",
-						granularityCheck: {
-							isAtomic: true,
-							reason: "Single evidence recording action",
-							canBeDoneInOneAgentAction: true,
-							hasSingleObservableOutput: true,
-							hasSingleVerificationMethod: true,
-							hasNoHiddenSubtasks: true,
-						},
 					},
 				],
 			},
@@ -1993,6 +1965,185 @@ describe("registered task tools", () => {
 		expect(store.getState().tasks.T1?.planSteps[0]?.id).toBe("T1-S1.1");
 		expect(store.getState().tasks.T1?.planSteps[0]?.status).toBe("active");
 		expect(store.getState().tasks.T1?.currentStep).toBe("Run package dry-run");
+	});
+
+	it("does not consume evidence IDs when state changes during assessment", async () => {
+		const fixture = fakeSemanticRuntime();
+		const classify = fixture.modelRegistry?.classify;
+		if (!classify) throw new Error("Expected classifier fixture");
+		const started = Promise.withResolvers<void>();
+		const gate = Promise.withResolvers<void>();
+		let evidenceCalls = 0;
+		const { tools, ctx } = createHarness({
+			semanticRuntime: {
+				model: fixture.model,
+				modelRegistry: {
+					...fixture.modelRegistry,
+					classify: async (model, classifierContext, options) => {
+						if ("passing_evidence_supported" in classifierContext.questions) {
+							evidenceCalls += 1;
+							if (evidenceCalls === 1) {
+								started.resolve();
+								await gate.promise;
+							}
+						}
+						return classify(model, classifierContext, options);
+					},
+				},
+			},
+		});
+		const plan = requireTool(tools, "task_plan");
+		const update = requireTool(tools, "task_update");
+		const evidence = requireTool(tools, "task_evidence");
+		await execute(
+			plan,
+			{
+				title: "Stale evidence",
+				objective: "Reject semantic evidence for a closed step",
+				acceptance_criteria: ["Only current-step evidence is persisted"],
+				plan_steps: [
+					{
+						text: "Certify the first fixture digest",
+						expectedOutput: "The first fixture inspection is recorded",
+						evidenceRequired: true,
+					},
+					{
+						text: "Certify the second fixture digest",
+						expectedOutput: "The second fixture inspection is recorded",
+						evidenceRequired: true,
+					},
+				],
+			},
+			ctx,
+		);
+		const evidenceParams = (stepId: string, fixture: string) => ({
+			task_id: "T1",
+			type: "test",
+			level: "integration_test",
+			summary: `${fixture} inspection returned PASS`,
+			passed: "true",
+			references: [fixture],
+			criterion_ids: ["T1-AC1"],
+			step_ids: [stepId],
+			quality: {
+				source: "semantic fixture",
+				reproducible: true,
+				verifier: "tool",
+				command: `inspect ${fixture}`,
+				artifactRefs: [fixture],
+				observedOutput: `${fixture} inspection returned PASS`,
+			},
+		});
+		const staleEvidence = execute(
+			evidence,
+			evidenceParams("T1-S1", "fixture-one"),
+			ctx,
+		);
+		await started.promise;
+		await execute(
+			update,
+			{
+				task_id: "T1",
+				step_id: "T1-S1",
+				step_status: "skipped",
+				note: "Simulate concurrent step closure",
+			},
+			ctx,
+		);
+		gate.resolve();
+		const rejected = await staleEvidence;
+		expect(rejected.isError).toBe(true);
+		expect(rejected.content[0]?.text).toContain("current step T1-S2");
+
+		const accepted = await execute(
+			evidence,
+			evidenceParams("T1-S2", "fixture-two"),
+			ctx,
+		);
+		expect(accepted.content[0]?.text).toContain("Recorded evidence E1");
+	});
+
+	it("rejects a stale decomposition assessment when the parent changes in flight", async () => {
+		const fixture = fakeSemanticRuntime();
+		const classify = fixture.modelRegistry?.classify;
+		if (!classify) throw new Error("Expected classifier fixture");
+		let calls = 0;
+		const gate = Promise.withResolvers<void>();
+		const { tools, ctx, store } = createHarness({
+			semanticRuntime: {
+				model: fixture.model,
+				modelRegistry: {
+					...fixture.modelRegistry,
+					classify: async (model, classifierContext, options) => {
+						calls += 1;
+						if (calls === 2) await gate.promise;
+						return classify(model, classifierContext, options);
+					},
+				},
+			},
+		});
+		const plan = requireTool(tools, "task_plan");
+		const decompose = requireTool(tools, "task_decompose");
+		const update = requireTool(tools, "task_update");
+		await execute(
+			plan,
+			{
+				title: "Stale decomposition",
+				objective: "Reject semantic results for a changed parent",
+				acceptance_criteria: ["No stale child steps are persisted"],
+				plan_steps: [
+					{
+						text: "Implement release workflow",
+						expectedOutput: "Release workflow is verified",
+						evidenceRequired: true,
+					},
+				],
+			},
+			ctx,
+		);
+
+		const pending = execute(
+			decompose,
+			{
+				task_id: "T1",
+				step_id: "T1-S1",
+				reason: "Split independent operations",
+				child_steps: [
+					{
+						text: "Run package dry-run",
+						expectedOutput: "Package dry-run succeeds",
+						evidenceRequired: true,
+					},
+					{
+						text: "Record package result",
+						expectedOutput: "Package evidence is recorded",
+						evidenceRequired: true,
+					},
+				],
+			},
+			ctx,
+		);
+		await Promise.resolve();
+		const changed = await execute(
+			update,
+			{
+				task_id: "T1",
+				step_id: "T1-S1",
+				step_status: "skipped",
+				note: "Concurrent operator skipped the parent",
+			},
+			ctx,
+		);
+		expect(changed.isError).not.toBe(true);
+		gate.resolve();
+		const rejected = await pending;
+
+		expect(rejected.isError).toBe(true);
+		expect(rejected.content[0]?.text).toContain(
+			"changed while semantic assessment was running",
+		);
+		expect(store.getState().tasks.T1?.planSteps).toHaveLength(1);
+		expect(store.getState().tasks.T1?.planSteps[0]?.status).toBe("skipped");
 	});
 
 	it("recovers explicitly when a non-atomic step reaches maximum decomposition depth", async () => {
@@ -2008,7 +2159,6 @@ describe("registered task tools", () => {
 			text: "Verify the synthetic fixture checksum",
 			allowedActions: ["Validate fixture checksum"],
 			expectedOutput: "A synthetic inspection record",
-			decompositionStatus: "deferred",
 		};
 
 		await execute(
@@ -2178,15 +2328,6 @@ describe("registered task tools", () => {
 						criterionIds: ["T1-AC1"],
 						evidenceRequired: true,
 						allowedActions: ["task_checkpoint"],
-						decompositionStatus: "atomic",
-						granularityCheck: {
-							isAtomic: true,
-							reason: "Single checkpoint action",
-							canBeDoneInOneAgentAction: true,
-							hasSingleObservableOutput: true,
-							hasSingleVerificationMethod: true,
-							hasNoHiddenSubtasks: true,
-						},
 					},
 				],
 			},

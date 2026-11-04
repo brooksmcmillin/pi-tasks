@@ -17,6 +17,7 @@ export interface BranchEntry {
 
 export interface TaskRuntimeStore {
 	getState(): TaskState;
+	getReplayVersion(): number;
 	replay(branchEntries: BranchEntry[]): ReplayResult;
 	append(
 		event: TaskEvent,
@@ -28,12 +29,17 @@ export function createTaskRuntimeStore(
 	initialState: TaskState = createEmptyState(),
 ): TaskRuntimeStore {
 	let state = initialState;
+	let replayVersion = 0;
 
 	return {
 		getState() {
 			return state;
 		},
+		getReplayVersion() {
+			return replayVersion;
+		},
 		replay(branchEntries) {
+			replayVersion += 1;
 			const replayed = replayBranchEntries(branchEntries);
 			state = replayed.state;
 			return replayed;
@@ -82,7 +88,7 @@ function isTaskEvent(value: unknown): value is TaskEvent {
 	if (!value || typeof value !== "object") return false;
 	const maybe = value as Partial<TaskEvent>;
 	return (
-		maybe.version === 1 &&
+		(maybe.version === 1 || maybe.version === 2) &&
 		typeof maybe.id === "string" &&
 		typeof maybe.type === "string"
 	);

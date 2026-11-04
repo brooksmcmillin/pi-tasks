@@ -14,6 +14,7 @@ import type {
 	ToolDefinition,
 } from "../../src/pi-types.ts";
 import { replayBranchEntries } from "../../src/store.ts";
+import { fakeSemanticRuntime } from "./semantic-fixture.ts";
 
 const created: TaskEvent = {
 	version: 1,
@@ -95,6 +96,7 @@ function harness() {
 		},
 	};
 	const ctx: ExtensionContext = {
+		...fakeSemanticRuntime(),
 		sessionManager: {
 			getBranch: () => entries,
 			getSessionId: () => "session-1",

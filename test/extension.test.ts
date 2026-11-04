@@ -139,6 +139,51 @@ async function waitForPersistedTaskEvent(
 	}
 }
 
+function legacyCreatedEvent() {
+	return {
+		version: 1,
+		id: "native-task-created",
+		type: "task.created",
+		taskId: "T1",
+		createdAt: "2026-10-30T00:00:00.000Z",
+		source: "tool",
+		title: "Native persistence slice",
+		objective: "Persist and restore a task without a model call during replay",
+		acceptanceCriteria: ["The persisted task state restores"],
+		planSteps: [
+			{
+				text: "Persist task state",
+				expectedOutput: "One pi-tasks custom event",
+				criterionIds: ["T1-AC1"],
+				evidenceRequired: true,
+				allowedActions: ["task_update", "task_evidence"],
+				decompositionStatus: "atomic",
+				granularityCheck: {
+					isAtomic: true,
+					reason: "Legacy version 1 event fixture",
+					canBeDoneInOneAgentAction: true,
+					hasSingleObservableOutput: true,
+					hasSingleVerificationMethod: true,
+					hasNoHiddenSubtasks: true,
+				},
+			},
+		],
+		activate: true,
+	};
+}
+
+function seedLegacyTask(sessionManager: {
+	appendMessage(message: unknown): string;
+	appendCustomEntry(customType: string, data?: unknown): string;
+}): void {
+	sessionManager.appendMessage({
+		role: "user",
+		content: "Seed native replay fixture",
+		timestamp: Date.now(),
+	});
+	sessionManager.appendCustomEntry("pi-tasks:event", legacyCreatedEvent());
+}
+
 function appendNativeToolCall(sessionManager: {
 	appendMessage(message: unknown): string;
 }): void {
@@ -171,7 +216,7 @@ function appendNativeToolCall(sessionManager: {
 function validPlan() {
 	return {
 		title: "Native persistence slice",
-		objective: "Persist and restore a task without a model call",
+		objective: "Persist and restore a task using an offline semantic transport",
 		acceptance_criteria: ["The persisted task state restores"],
 		plan_steps: [
 			{
@@ -180,15 +225,6 @@ function validPlan() {
 				criterionIds: ["T1-AC1"],
 				evidenceRequired: true,
 				allowedActions: ["task_plan"],
-				decompositionStatus: "atomic",
-				granularityCheck: {
-					isAtomic: true,
-					reason: "One tool call writes one custom event",
-					canBeDoneInOneAgentAction: true,
-					hasSingleObservableOutput: true,
-					hasSingleVerificationMethod: true,
-					hasNoHiddenSubtasks: true,
-				},
 			},
 		],
 	};
@@ -207,6 +243,7 @@ async function createNativeSession(
 		queuedSettlement?: boolean;
 		pickupOrder?: "first" | "last";
 		noTools?: "all" | "builtin";
+		seedTask?: boolean;
 	} = {},
 ) {
 	const base =
@@ -221,6 +258,7 @@ async function createNativeSession(
 	]);
 	const events: TaskStateEvent[] = [];
 	const extensionPaths = [
+		join(taskRoot, "test/fixtures/native-semantic-runtime.ts"),
 		join(taskRoot, options.compiled ? "dist/index.js" : "index.ts"),
 	];
 	if (options.telemetry)
@@ -288,6 +326,9 @@ async function createNativeSession(
 	const sessionManager = options.sessionFile
 		? sdk.SessionManager.open(options.sessionFile, sessionDir)
 		: sdk.SessionManager.create(cwd, sessionDir);
+	if (options.seedTask) {
+		seedLegacyTask(sessionManager);
+	}
 	const result = await sdk.createAgentSession({
 		cwd,
 		agentDir,
@@ -1061,7 +1102,7 @@ describe("native Pi settlement advisories", () => {
 });
 
 describe("compact remediation native validation and local benchmark", () => {
-	it("replays observed action-limit/wording/closed-target fixtures with measured recovery calls", async () => {
+	it("replays observed action-limit/structural/closed-target fixtures with measured recovery calls", async () => {
 		const ai = await import(
 			pathToFileURL(join(sdkRoot, "..", "pi-ai", "dist/index.js")).href
 		);
@@ -1087,6 +1128,16 @@ describe("compact remediation native validation and local benchmark", () => {
 			);
 			const tool = requireTool(h.session, "task_rework");
 			const initialCount = h.sessionManager.getEntries().length;
+			const semanticDetailed = {
+				...detailedRemediation,
+				plan_steps: detailedRemediation.plan_steps.map(
+					({
+						granularityCheck: _check,
+						decompositionStatus: _status,
+						...step
+					}) => step,
+				),
+			};
 			let detailedCalls = 0;
 			const checked = async (input: unknown) => {
 				const args = ai.validateToolArguments(tool, {
@@ -1104,22 +1155,16 @@ describe("compact remediation native validation and local benchmark", () => {
 			expect(h.sessionManager.getEntries()).toHaveLength(initialCount);
 			detailedCalls++;
 			const wording = await checked({
-				...detailedRemediation,
+				...semanticDetailed,
 				plan_steps: [
-					{
-						...detailedRemediation.plan_steps[0],
-						granularityCheck: {
-							...detailedRemediation.plan_steps[0].granularityCheck,
-							unit: "action",
-						},
-					},
+					{ ...semanticDetailed.plan_steps[0], expectedOutput: " " },
 				],
 			});
 			expect(wording.isError).toBe(true);
-			expect(wording.content[0]?.text).toMatch(/rejects compound wording/);
+			expect(wording.content[0]?.text).toMatch(/expectedOutput is required/);
 			expect(h.sessionManager.getEntries()).toHaveLength(initialCount);
 			detailedCalls++;
-			expect((await checked(detailedRemediation)).isError).not.toBe(true);
+			expect((await checked(semanticDetailed)).isError).not.toBe(true);
 			const compactCalls = 1;
 			expect((await checked(compactRemediation)).isError).not.toBe(true);
 			const readme = await readFile(join(taskRoot, "README.md"), "utf8");
@@ -1163,13 +1208,15 @@ describe("compact remediation native validation and local benchmark", () => {
 				expect(compact?.granularityCheck?.[field]).toEqual(
 					detailed?.granularityCheck?.[field],
 				);
-			const detailedBytes = Buffer.byteLength(
-				JSON.stringify(detailedRemediation),
-			);
+			const detailedBytes = Buffer.byteLength(JSON.stringify(semanticDetailed));
 			const compactBytes = Buffer.byteLength(
 				JSON.stringify(compactRemediation),
 			);
-			expect(compactBytes).toBeLessThan(detailedBytes);
+			// Removing caller granularity from detailed input eliminates the old size advantage.
+			expect({ detailedBytes, compactBytes }).toEqual({
+				detailedBytes: 744,
+				compactBytes: 745,
+			});
 			expect(compactCalls).toBeLessThan(detailedCalls);
 			console.info(
 				JSON.stringify({
@@ -1200,14 +1247,6 @@ describe("native Pi dynamic task tools", () => {
 				text: "Implement storage fields and focused regression tests",
 				expectedOutput: "Storage model and migration fields match",
 				allowedActions: ["edit model and tests", "run focused tests"],
-				granularityCheck: {
-					...step.granularityCheck,
-					unit: "deliverable",
-					boundedScope:
-						"Storage field consistency only; excludes API transport",
-					verificationPlan:
-						"Run focused consistency checks for storage model and migration",
-				},
 			});
 			expect(
 				(
@@ -1321,7 +1360,7 @@ describe("native Pi dynamic task tools", () => {
 		}
 	});
 
-	it("runs the persistent plan-to-event-to-new-session restore slice before broader cases", async () => {
+	it("replays a persisted legacy task through branch navigation and a new session", async () => {
 		const first = await createNativeSession();
 		try {
 			expect(activeTaskTools(first.session)).toEqual([
@@ -1329,28 +1368,7 @@ describe("native Pi dynamic task tools", () => {
 				"task_resume",
 			]);
 			const fresh = toolSurface(first.session);
-			expect(first.session.systemPrompt).toContain(
-				"Use task_plan for multi-step work before implementation when no suitable active task exists.",
-			);
-
-			appendNativeToolCall(first.sessionManager);
-			const created = await requireTool(first.session, "task_plan").execute(
-				"native-plan",
-				validPlan(),
-				undefined,
-				undefined,
-			);
-			expect(created.content[0]?.text).toContain("Created task T1");
-			expect(
-				first.sessionManager
-					.getEntries()
-					.some(
-						(entry: { type: string; customType?: string }) =>
-							entry.type === "custom" && entry.customType === "pi-tasks:event",
-					),
-			).toBe(true);
-			expect(activeTaskTools(first.session)).toContain("task_update");
-			expect(new Set(activeTaskTools(first.session))).toEqual(taskToolNames);
+			seedLegacyTask(first.sessionManager);
 			const taskEntry = first.sessionManager.getEntries().at(-1);
 			const precedingEntry = first.sessionManager.getEntries().at(-2);
 			assert.ok(taskEntry);
@@ -1466,14 +1484,8 @@ describe("native Pi dynamic task tools", () => {
 	});
 
 	it("enforces task_evidence text limits through the native Pi validator", async () => {
-		const active = await createNativeSession();
+		const active = await createNativeSession({ seedTask: true });
 		try {
-			await requireTool(active.session, "task_plan").execute(
-				"native-evidence-plan",
-				validPlan(),
-				undefined,
-				undefined,
-			);
 			const evidence = requireTool(active.session, "task_evidence");
 			const argumentsAtBoundary = {
 				task_id: "T1",
@@ -1517,15 +1529,8 @@ describe("native Pi dynamic task tools", () => {
 	});
 
 	it("returns a native-valid evidence retry and restores the corrected evidence", async () => {
-		const active = await createNativeSession();
+		const active = await createNativeSession({ seedTask: true });
 		try {
-			appendNativeToolCall(active.sessionManager);
-			await requireTool(active.session, "task_plan").execute(
-				"native-evidence-retry-plan",
-				validPlan(),
-				undefined,
-				undefined,
-			);
 			const evidence = requireTool(active.session, "task_evidence");
 			const persistedBefore = active.sessionManager
 				.getEntries()
@@ -1580,6 +1585,7 @@ describe("native Pi dynamic task tools", () => {
 			const correctedParams = {
 				...(retryExample as Record<string, unknown>),
 				level: "unit_test",
+				passed: "false",
 			};
 			expect(
 				piAi.validateToolArguments(evidence, {
@@ -1620,15 +1626,8 @@ describe("native Pi dynamic task tools", () => {
 	});
 
 	it("persists only corrected native scope updates after targeted recovery", async () => {
-		const active = await createNativeSession();
+		const active = await createNativeSession({ seedTask: true });
 		try {
-			appendNativeToolCall(active.sessionManager);
-			await requireTool(active.session, "task_plan").execute(
-				"native-scope-plan",
-				validPlan(),
-				undefined,
-				undefined,
-			);
 			const update = requireTool(active.session, "task_update");
 			const persistedBefore = active.sessionManager
 				.getEntries()
@@ -1689,16 +1688,11 @@ describe("native Pi dynamic task tools", () => {
 	});
 
 	it("keeps foreign task_notes outside pi-tasks reconciliation", async () => {
-		const active = await createNativeSession({ foreignTaskNotes: true });
+		const active = await createNativeSession({
+			foreignTaskNotes: true,
+			seedTask: true,
+		});
 		try {
-			expect(isToolActive(active.session, "task_notes")).toBe(true);
-			appendNativeToolCall(active.sessionManager);
-			await requireTool(active.session, "task_plan").execute(
-				"foreign-active-plan",
-				validPlan(),
-				undefined,
-				undefined,
-			);
 			expect(isToolActive(active.session, "task_notes")).toBe(true);
 			await requireTool(active.session, "task_resume").execute(
 				"foreign-active-resume",
@@ -1718,15 +1712,9 @@ describe("native Pi dynamic task tools", () => {
 		const inactive = await createNativeSession({
 			foreignTaskNotes: true,
 			tools: ["read", "task_plan", "task_resume"],
+			seedTask: true,
 		});
 		try {
-			expect(isToolActive(inactive.session, "task_notes")).toBe(false);
-			await requireTool(inactive.session, "task_plan").execute(
-				"foreign-inactive-plan",
-				validPlan(),
-				undefined,
-				undefined,
-			);
 			expect(isToolActive(inactive.session, "task_notes")).toBe(false);
 			await requireTool(inactive.session, "task_resume").execute(
 				"foreign-inactive-resume",
@@ -1747,15 +1735,9 @@ describe("native Pi dynamic task tools", () => {
 	it("preserves allowlists, exclusions, noTools, and unrelated active tools", async () => {
 		const planOnly = await createNativeSession({
 			tools: ["read", "task_plan"],
+			seedTask: true,
 		});
 		try {
-			expect(activeTaskTools(planOnly.session)).toEqual(["task_plan"]);
-			await requireTool(planOnly.session, "task_plan").execute(
-				"plan-only",
-				validPlan(),
-				undefined,
-				undefined,
-			);
 			expect(activeTaskTools(planOnly.session)).toEqual(["task_plan"]);
 			expect(
 				planOnly.session.agent.state.tools.some(
@@ -1769,14 +1751,9 @@ describe("native Pi dynamic task tools", () => {
 		const excluded = await createNativeSession({
 			tools: ["read", "task_plan", "task_resume", "task_update"],
 			excludeTools: ["task_update"],
+			seedTask: true,
 		});
 		try {
-			await requireTool(excluded.session, "task_plan").execute(
-				"excluded",
-				validPlan(),
-				undefined,
-				undefined,
-			);
 			expect(activeTaskTools(excluded.session)).toEqual([
 				"task_plan",
 				"task_resume",
@@ -1821,15 +1798,8 @@ describe("native Pi dynamic task tools", () => {
 			rejected.session.dispose();
 		}
 
-		const first = await createNativeSession();
+		const first = await createNativeSession({ seedTask: true });
 		try {
-			appendNativeToolCall(first.sessionManager);
-			await requireTool(first.session, "task_plan").execute(
-				"blocked-plan",
-				validPlan(),
-				undefined,
-				undefined,
-			);
 			const blocked = await requireTool(first.session, "task_update").execute(
 				"blocked-update",
 				{

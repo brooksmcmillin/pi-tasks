@@ -14,6 +14,7 @@ import {
 } from "../../src/pickup-ownership.ts";
 import { historicalFinals } from "../fixtures/infra-task-continuation/historical.ts";
 import pickupExtension from "../fixtures/infra-task-continuation/state.ts";
+import { fakeSemanticRuntime } from "./semantic-fixture.ts";
 
 it("keeps the pinned producer fixtures unchanged", () => {
 	for (const [file, digest] of Object.entries({
@@ -102,6 +103,7 @@ function harness(
 		},
 	};
 	const ctx: ExtensionContext = {
+		...fakeSemanticRuntime(),
 		sessionManager: { getBranch: () => branch, getSessionId: () => "session" },
 		hasPendingMessages: () => false,
 		ui: { notify() {}, setStatus() {}, setWidget() {} },

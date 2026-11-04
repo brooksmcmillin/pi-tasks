@@ -8,6 +8,7 @@ export interface BranchEntry {
 }
 export interface TaskRuntimeStore {
     getState(): TaskState;
+    getReplayVersion(): number;
     replay(branchEntries: BranchEntry[]): ReplayResult;
     append(event: TaskEvent, appendEntry: (customType: string, data: TaskEvent) => void): TaskState;
 }

@@ -242,50 +242,53 @@ export interface TaskBlocker {
 
 ```ts
 export interface TaskStep {
- id: string;
- taskId: string;
- text: string;
- expectedOutput: string;
- status: "pending" | "active" | "done" | "skipped";
- decompositionStatus:
-  | "needs_breakdown"
-  | "breaking_down"
-  | "atomic"
-  | "deferred";
- granularityCheck: {
-  isAtomic: boolean;
-  reason: string;
-  canBeDoneInOneAgentAction: boolean;
-  hasSingleObservableOutput: boolean;
-  hasSingleVerificationMethod: boolean;
-  hasNoHiddenSubtasks: boolean;
- };
- parentStepId?: string;
- childStepIds: string[];
- depth: number;
- evidenceIds: string[];
- criterionIds: string[];
- evidenceRequired: boolean;
- allowedActions: string[];
- planQuality: {
-  score: number;
-  issues: string[];
- };
- note?: string;
- startedAt?: string;
- completedAt?: string;
+	id: string;
+	taskId: string;
+	text: string;
+	expectedOutput: string;
+	status: "pending" | "active" | "done" | "skipped";
+	decompositionStatus:
+		| "needs_breakdown"
+		| "breaking_down"
+		| "atomic"
+		| "deferred";
+	semanticAssessment?: StepSemanticAssessment;
+	granularityCheck: {
+		isAtomic: boolean;
+		reason: string;
+		canBeDoneInOneAgentAction: boolean;
+		hasSingleObservableOutput: boolean;
+		hasSingleVerificationMethod: boolean;
+		hasNoHiddenSubtasks: boolean;
+	};
+	parentStepId?: string;
+	childStepIds: string[];
+	depth: number;
+	evidenceIds: string[];
+	criterionIds: string[];
+	evidenceRequired: boolean;
+	allowedActions: string[];
+	planQuality: {
+		score: number;
+		issues: string[];
+	};
+	note?: string;
+	startedAt?: string;
+	completedAt?: string;
 }
 ```
 
 Rules:
 
 - `initial_steps` become ordered task steps with IDs such as `T1-S1`.
-- Structured `plan_steps` should provide expected output, linked criteria, evidence requirement, and allowed actions.
-- During initial `task_plan` creation, use `criterionRefs` with 1-based positions in `acceptance_criteria` for selective links without predicting generated IDs. Omit both reference fields to preserve the legacy behavior of linking all criteria; `criterionIds` remains for known persisted IDs in later planning operations. Legacy reducer inputs with an empty `criterionIds` array also link all criteria.
-- Structured `plan_steps` should also include a granularity check. A step is executable only when it is `atomic`.
-- Atomic steps must not bundle obvious sequential work. Every atomic plan-quality issue is a hard failure, including compound wording such as `and`, `then`, `also`, `並且`, `然後`, `接著`, `以及`, or `同時` in step text, expected output, or allowed actions. Wording failures include the exact matched fragment.
-- Action-like words adjacent to path punctuation are excluded from vague/compound matching, so filenames such as `fixtures/fix.json`, `update.json`, and `then.json` do not change an otherwise concrete step's quality score. The same words used as instructions, including before sentence punctuation, remain guarded.
-- Plan creation and decomposition validate every submitted step before rejecting the event and report all invalid step numbers in one error without persisting partial state.
+- During initial `task_plan` creation, use `criterionRefs` with 1-based positions in `acceptance_criteria` for selective links without predicting generated IDs. Omit both reference fields to preserve all-criteria linking; `criterionIds` remains for known persisted IDs.
+- Structured `plan_steps` must provide expected output and an evidence requirement. bounded `allowedActions` is required guidance; callers do not submit granularity scores.
+- During new task creation, agents should omit `plan_steps.criterionIds` or pass an empty array unless generated criterion IDs are already known. Both forms link the step to all task criteria after IDs such as `T1-AC1` are generated; a non-empty array must contain only known IDs.
+- Before persistence, `task_plan` and `task_decompose` submit all candidate steps in one native-model semantic assessment. The model judges specificity, independent action count, independently observable output count, independent verification-method count, and hidden subtasks in the source language.
+- A conjunction, keyword, filename, punctuation, or text length does not determine atomicity. Multiple actions are independently executable operations that could be ordered, omitted, or verified separately.
+- High-confidence specific work with one action, output, and verification method and no hidden subtasks becomes `atomic`; valid multi-operation work becomes `needs_breakdown`; unclear, non-specific, or low-confidence work is rejected without persistence.
+- Every successful version 2 creation/decomposition event stores the typed assessment and provenance. Reducer replay validates the stored input hashes and decisions but never invokes a model. Version 1 history remains readable without retroactive inference.
+- Plan creation and decomposition validate every submitted step before rejecting an event and report all invalid step numbers in one error without persisting partial state.
 - The first step is active when the task is activated.
 - Agents must complete or skip the current open step before advancing.
 - Non-atomic steps must be recursively decomposed with `task_decompose` before they can be marked `done`. At maximum depth 4, every next-action surface instead directs the agent to block the task explicitly and carry remaining scope/evidence references into a manually planned flat successor.
@@ -294,7 +297,48 @@ Rules:
 - Decomposition replaces a parent step with ordered child steps such as `T1-S1.1` and preserves parent traceability through `parentStepId`.
 - Step evidence should be linked with `task_evidence.step_ids`; criterion-only evidence is auto-linked to a step only when exactly one step matches the criterion.
 - Step evidence is locked to the current open step. Attaching evidence to another step requires an explicit override reason.
-- Plan quality gate rejects steps with vague wording, weak expected output, broad allowed actions, missing criterion links, or non-evidence-gated atomic work.
+- Structural gates reject weak expected output, unknown criterion links, missing evidence requirements, or too many allowed actions independently of semantic assessment.
+
+### 5.7.1 Semantic Assessment Provenance
+
+Version 2 semantic assessments persist:
+
+- assessment schema version and prompt version;
+- native strategy: `pi_classifier`, `pi_chat`, or `omp_ephemeral`;
+- provider and model identifiers;
+- canonical input hash and assessment timestamp;
+- typed boolean/count judgments, confidence, bounded issues, and the derived decision.
+
+Inference runs during plan/decomposition, replan/rework, current-step classification,
+and passing evidence through the standalone, verify-step, or batch tools. Ordinary
+updates remain model-free. Awaited fork mutations reject stale state/session or
+cancellation; batches persist only after every assessment and structural gate pass. Session replay, restore, fork navigation, reducer
+transitions, rendering, and completion are deterministic. Inputs are untrusted
+quoted data; outputs must pass strict shape, index, confidence, decision,
+provenance, and hash validation. No provider SDK or lexical fallback is used.
+
+### 5.7.2 Semantic Capability Diagnostics
+
+`session_start` and `session_tree` run a static semantic capability inspection
+after the default widget refresh and `pi-tasks:state` publication. The inspector:
+
+- calls only Pi classifier metadata discovery; it never invokes `classify()`,
+  `streamSimple()`, or `runEphemeralTurn()`;
+- reports `ready` when a native strategy is available, `degraded` when a
+  fallback is available despite a discovery error, and `unavailable` when no
+  strategy is usable;
+- prefers `pi_classifier`, then `pi_chat`, then `omp_ephemeral`, matching the
+  mutation-time assessor;
+- keeps healthy startup silent and clears stale semantic status;
+- sets the separate `pi-tasks-semantic` status and emits one warning per
+  unchanged outage when unavailable.
+
+`/tasks doctor` renders this static matrix without inference. `/tasks doctor
+live` explicitly invokes the production semantic boundary with one fixed,
+synthetic plan payload and reports strategy/provider/model, duration, optional
+usage, or a typed failure. Neither mode reads task branch entries, appends
+events, allocates IDs, or mutates runtime task state. The live OMP host boundary
+may include the current conversation according to OMP's side-turn contract.
 
 ### 5.8 Task
 
@@ -448,14 +492,15 @@ Optional parameters:
 
 Behavior:
 
-- creates task event,
-- assigns the next task ID from successfully persisted tasks so rejected plan attempts do not create invisible ID gaps,
+- assesses all candidate steps in one host-native model call before persistence,
+- prefers Pi `modelRegistry.classify()`, then Pi `modelRegistry.streamSimple()`, then Oh My Pi `runEphemeralTurn()`,
+- creates a version 2 task event containing the validated semantic assessment,
+- assigns the next task ID only after assessment succeeds, so rejected or aborted calls do not create invisible ID gaps,
 - converts `initial_steps` or structured `plan_steps` to ordered plan steps,
 - rejects task creation without at least one ordered plan step,
-- treats steps without an atomic granularity check as requiring breakdown before execution,
-- optionally activates it,
-- if activating, deactivates previous active task by moving it to `pending` unless explicit parallel support exists,
-- returns task summary and next action.
+- derives atomic, needs-breakdown, or rejected status from the persisted assessment,
+- optionally activates the task and deactivates a previous active task by moving it to `pending`,
+- returns task summary, next action, and native model usage when supplied by the host.
 
 ### 8.2 `task_next`
 
@@ -558,10 +603,11 @@ Parameters:
 
 Behavior:
 
-- appends a decomposition event,
+- assesses all child steps in one host-native model call before appending a version 2 decomposition event,
 - requires at least two child steps,
-- validates each child step's expected output, criteria links, evidence requirement, allowed actions, and granularity check,
+- validates each child step's expected output, criteria links, evidence requirement, optional allowed actions, and stored semantic decision,
 - rejects decomposition beyond maximum depth 4,
+- rechecks the parent fingerprint after the asynchronous model call and rejects stale assessment if the step changed,
 - at the limit, preserves the unfinished step and returns an explicit blocker path instead of another decomposition or automatic successor creation,
 - replaces a below-limit parent step with ordered child steps such as `T1-S1.1`,
 - keeps the first child in the parent's current status so focus can continue.
@@ -580,10 +626,9 @@ Compact input normalizes to one ordinary deliverable step: text/expectedOutput
 from deliverable, reason from finding, two actions bounded by scope/verification,
 evidenceRequired=true, and optional existing criterion links. `atomic=true`
 explicitly attests one bounded outcome, one cohesive implementation/verification
-cycle and no hidden subtasks; only this declaration derives the five true
-flags. Otherwise all flags remain false and the step needs decomposition.
-The normalization does not infer semantic atomicity from wording or invent
-acceptance evidence. The existing reducer validates links, quality, status and
+cycle and no hidden subtasks. These normalized caller flags are not execution
+authority: the native assessor determines atomicity for every new remediation.
+Normalization does not infer semantic atomicity or invent acceptance evidence. The existing reducer validates links, quality, status and
 gates; only the normalized detailed event persists, so replay needs no migration.
 Optional `before_step_id` persists as `beforeStepId` on `task.reworked` and inserts
 repairs before that named open step (including decomposed children). Reject
@@ -705,9 +750,12 @@ Parameters:
 Behavior:
 
 - appends evidence with `role` defaulting to `acceptance`,
-- links evidence to explicit step IDs when provided,
 - preserves diagnostic links without changing criterion status,
-- rejects low-quality evidence that lacks traceability, reproducibility, required artifact references, or observed output for test/command/dogfood evidence,
+- validates deterministic evidence quality, text budgets, traceability, reproducibility, required artifacts, and observed output before any model call,
+- for `passed: true`, assesses whether the complete record contains a concrete observed result supporting the claim; commands, references, optimistic wording, and future expectations alone are not proof,
+- persists a validated semantic decision in the version 2 evidence event and returns native model usage when available,
+- rejects unsupported, uncertain, malformed, unavailable, failed, or aborted passing assessments without persistence; non-passing evidence does not require semantic inference,
+- links evidence to explicit step IDs when provided,
 - exposes and enforces limits of 500 characters for `summary`, 1,000 for `quality.observedOutput`, and 300 for each reference, artifact reference, source, or command,
 - returns command/test/dogfood retry templates that preserve valid supplied values and replace missing or over-limit values with explicit caller-supplied placeholders rather than truncation,
 - rejects evidence linked to a non-current step unless `override_reason` is supplied,
@@ -1040,16 +1088,19 @@ The goal can be marked complete only when:
 
 ## 20. Current Implementation Status
 
-As of 2026-10-14, the repo contains the implemented product for:
+As of 2026-10-31, the repo contains the implemented product for:
 
-- typed model and event contracts in `src/model.ts`,
-- pure reducer and transition validation in `src/reducer.ts`,
+- typed version 1/2 model and event contracts in `src/model.ts`,
+- pure, model-free reducer replay and transition validation in `src/reducer.ts`,
+- host-native semantic assessment through Pi classifier/chat APIs and Oh My Pi ephemeral turns,
+- inference-free startup semantic capability diagnostics with deduplicated unavailable UX and explicit static/live `/tasks doctor` modes,
+- persisted model provenance, prompt version, input hashes, confidence, and decisions for plan, decomposition, and passing evidence,
 - ordered plan-step enforcement for `initial_steps`, `task_update`, and completion gating,
-- structured step contracts with expected output, criterion links, evidence requirement, and allowed actions,
-- plan quality and evidence quality gates for weak-model resistance,
+- structured step contracts with expected output, criterion links, evidence requirement, and optional allowed actions,
+- language-neutral plan quality and passing-evidence support gates,
+- multilingual semantic regression coverage across English, Traditional/Simplified Chinese, Japanese, Korean, and mixed technical text,
 - `task_next` one-step weak-model guidance,
 - structured rejection recovery details with retry tool and minimum params,
-- stricter atomic step scoring for compound wording without path-token false positives,
 - current-step evidence locking and schema-visible evidence text budgets,
 - recursive decomposition through depth 4 with a consistent explicit blocker recovery at the cap,
 - `task_focus` current-step guidance before action,
@@ -1059,11 +1110,11 @@ As of 2026-10-14, the repo contains the implemented product for:
 - branch custom-entry replay in `src/store.ts`,
 - tool registration in `src/tools.ts`,
 - token-efficient tool result rendering that returns compact resume guidance by default,
-- `/tasks` command registration in `src/commands.ts`, with compact default output and explicit `/tasks detail` expansion,
+- `/tasks` command registration in `src/commands.ts`, with compact default output, explicit `/tasks detail` expansion, and semantic `doctor` modes,
 - compact status/widget formatting in `src/render.ts` and `src/widget.ts`,
 - startup-light extension registration in `index.ts`,
 - compiled npm runtime in `dist/`,
-- unit tests in `test/unit/`.
+- unit and native extension tests in `test/`.
 
 Verified locally:
 
@@ -1077,23 +1128,21 @@ Verified locally:
 - tarball install and `import("pi-tasks")`,
 - `npm audit --audit-level=low` using an isolated npm cache.
 
-Verified with real Pi dogfood:
+Verified with real Pi 1.4.0 and Oh My Pi 18.14.1 dogfood:
 
-- task creation, ordered step update, evidence rejection, evidence attachment, completion, and listing,
-- structured `plan_steps`, current-step focus, step-level evidence requirement, and scope drift rejection/warning,
-- non-atomic step rejection and decomposition into atomic child steps,
-- compaction-safe resume and checkpoint behavior through simulated snapshot replay,
-- adversarial rejection of out-of-order step update, premature completion, duplicate evidence, and skip-without-reason,
-- same-session resume from persisted `pi-tasks:event` custom entries,
-- blocked task display with blocker source, reason, unblock condition, resolved blocker audit trail, and explicit user decision,
-- live TTY `/tasks` command output and clean `/quit`,
-- forked-session replay of copied custom entries,
-- installed-package Pi smoke through `node_modules/pi-tasks/dist/index.js`.
-- rejected `task_plan` ID regression: an invalid plan is rejected, then the first successful task in that session is still `T1`.
+- healthy startup remained silent in both hosts;
+- static `/tasks doctor` reported Pi chat and OMP ephemeral readiness without inference;
+- live `/tasks doctor live` passed through Pi chat and OMP `runEphemeralTurn()` with native strategy/provider/model provenance and unchanged task state;
+- Pi chat and OMP ephemeral task creation persisted version 2 strategy/provider/model provenance;
+- task updates and `/tasks` rendered in both hosts;
+- same-session resume restored active task custom entries in both hosts;
+- Pi fork replay restored the active task;
+- both interactive TUIs exited cleanly through `/quit`;
+- clean installed-package Pi smoke passed through `node_modules/pi-tasks/dist/index.js`.
 
 Remaining runtime coverage:
 
-- none known for the 0.2.8 release scope.
+- none known for the 0.3.1 release scope.
 
 ## 21. Documentation Completeness Assessment
 
