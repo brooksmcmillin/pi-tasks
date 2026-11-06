@@ -156,6 +156,9 @@ This project must align with the commercial-quality bar established by `pi-knowl
 
 ## Runtime Recovery Contracts
 
+- Recovery argument scaffolds must match the named registered public tool schema, including nested fields and required arguments. Never expose reducer-owned planning assessment fields. Rejection retries target the rejected operation rather than borrowing an unrelated active task's next action.
+- Scaffolds require caller replacement with real scope and observations; schema validity is not semantic acceptance or evidence. Preserve native assessment, evidence, blocker and completion gates. Test generated payloads against registered schemas, not only direct `execute()` calls that bypass host validation.
+
 - A non-atomic step at decomposition depth 4 must direct every guidance surface to an explicit `task_update` blocker; never recommend another decomposition, mark the step done, or create a successor automatically.
 - Evidence schemas and reducer validation must share the 500-character summary, 1,000-character observed-output, and 300-character reference/source/command limits. Rejected command, test, and dogfood evidence retries must preserve valid submitted values and use explicit caller-replacement placeholders for missing or over-limit values.
 - Supplying `task_update.scope` requires non-empty `activity`; `scope_change` and `off_plan` also require `scope_reason`. Those reducer rejections must recover with a corrected snake_case `task_update`, not the task's unrelated next action.

@@ -713,7 +713,8 @@ function getMinimumParams(
 		return {
 			task_id: task.id,
 			step_id: step.id,
-			child_steps: ["<2+ atomic child steps>"],
+			reason: "<why this step needs decomposition>",
+			child_steps: [recoveryPlanStep(), recoveryPlanStep()],
 		};
 	}
 	if (
@@ -735,6 +736,8 @@ function getMinimumParams(
 	if (recommendedTool === "task_evidence") {
 		return {
 			task_id: task.id,
+			...recoveryEvidenceFields(),
+			passed: "unknown",
 			step_ids: step ? [step.id] : [],
 			criterion_ids:
 				step?.criterionIds ??
@@ -752,6 +755,7 @@ function getMinimumParams(
 		return {
 			task_id: task.id,
 			step_id: step.id,
+			...recoveryEvidenceFields(),
 			criterion_ids: step.criterionIds,
 			references: ["<artifact path or command>"],
 		};
@@ -778,54 +782,45 @@ function getMinimumParams(
 	if (recommendedTool === "task_complete") {
 		return {
 			task_id: task.id,
+			summary: "<verified completion summary>",
 			evidence_ids: task.evidence.map((evidence) => evidence.id),
 		};
 	}
 	return { task_id: task.id };
 }
 
-/**
- * Build a copyable, schema-valid scaffold for the no-active-task recovery
- * branch. The previous shape `{ plan_steps: ["<atomic step contract>"] }` was
- * not accepted by the task_plan schema (plan_steps is `TaskStepInput[]`, not
- * `string[]`) and could not be resubmitted as-is, so the recovery was useless.
- *
- * The scaffold below passes the reducer's quality gate and granularity
- * contract so an agent can copy it verbatim, edit the placeholders, and
- * resubmit. It deliberately:
- *   - uses `decompositionStatus: "needs_breakdown"` to avoid the
- *     atomic-only criterion link requirement (criterionIds are
- *     server-generated, never guessed by the scaffold);
- *   - includes `activate: true` so a successful submit immediately becomes
- *     the active task;
- *   - includes a complete granularityCheck with `isAtomic: false` so the
- *     schema is satisfied and the agent replaces it with a verified atomic
- *     contract during task planning (typically via task_decompose).
- */
-function getTaskPlanRecoveryParams(): Record<string, unknown> {
+// These are public argument scaffolds, not assessed plans or verification evidence.
+export function recoveryPlanStep(): Record<string, unknown> {
+	return {
+		text: "<bounded deliverable requiring implementation>",
+		expectedOutput: "<observable result and focused verification>",
+		allowedActions: ["<bounded implementation and verification actions>"],
+		evidenceRequired: true,
+	};
+}
+
+function recoveryEvidenceFields(): Record<string, unknown> {
+	return {
+		type: "note",
+		level: "not_verified",
+		summary: "<replace with observed verification summary>",
+		quality: {
+			source: "<evidence source>",
+			reproducible: false,
+			verifier: "agent",
+			command: "<actual command or verification action>",
+			artifactRefs: ["<existing artifact or command reference>"],
+			observedOutput: "<actual observed output; do not invent evidence>",
+		},
+	};
+}
+
+export function getTaskPlanRecoveryParams(): Record<string, unknown> {
 	return {
 		title: "<short task title>",
 		objective: "<bounded objective>",
 		acceptance_criteria: ["<verifiable criterion>"],
-		plan_steps: [
-			{
-				text: "Replace with the bounded step text (>= 8 chars, no vague wording)",
-				expectedOutput:
-					"Replace with the verifiable single observable output (>= 12 chars)",
-				allowedActions: ["task_decompose"],
-				evidenceRequired: true,
-				decompositionStatus: "needs_breakdown",
-				granularityCheck: {
-					isAtomic: false,
-					reason:
-						"Scaffold from task_plan rejection; refine with task_decompose before claiming atomicity.",
-					canBeDoneInOneAgentAction: false,
-					hasSingleObservableOutput: false,
-					hasSingleVerificationMethod: false,
-					hasNoHiddenSubtasks: false,
-				},
-			},
-		],
+		plan_steps: [recoveryPlanStep()],
 		activate: true,
 	};
 }
