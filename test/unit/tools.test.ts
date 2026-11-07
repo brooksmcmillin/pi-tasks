@@ -11,8 +11,10 @@ import type {
 	ExtensionContext,
 	ToolDefinition,
 } from "../../src/pi-types.ts";
+import { buildTaskResume } from "../../src/render.ts";
 import { createTaskRuntimeStore } from "../../src/store.ts";
 import { registerTaskTools } from "../../src/tools.ts";
+import { assertSchema } from "./assert-schema.ts";
 import { fakeSemanticRuntime } from "./semantic-fixture.ts";
 
 interface ToolSchema {
@@ -122,6 +124,129 @@ function requireTool(
 }
 
 describe("registered task tools", () => {
+	it("validates recovery scaffolds against registered public schemas across resume modes", async () => {
+		const { tools, ctx, store } = createHarness();
+		const check = (state = store.getState()) => {
+			const resume = buildTaskResume(state);
+			if (!resume.recommendedTool) throw new Error("Missing recommended tool");
+			assertSchema(
+				requireTool(tools, resume.recommendedTool).parameters,
+				resume.minimumParams,
+			);
+			return resume.recommendedTool;
+		};
+		expect(check()).toBe("task_plan");
+		await execute(
+			requireTool(tools, "task_plan"),
+			{
+				title: "Recovery contracts",
+				objective: "Validate recovery tool arguments",
+				acceptance_criteria: ["Recovery uses public argument shapes"],
+				plan_steps: [
+					{
+						text: "Validate recovery payloads",
+						expectedOutput: "Passing schema regression report",
+						allowedActions: ["bash"],
+					},
+				],
+			},
+			ctx,
+		);
+		expect(check()).toBe("task_verify_step");
+		const evidence = await execute(
+			requireTool(tools, "task_evidence"),
+			{
+				task_id: "T1",
+				type: "test",
+				level: "unit_test",
+				passed: "true",
+				summary: "Schema regression checks passed",
+				references: ["fixture.log"],
+				criterion_ids: ["T1-AC1"],
+				step_ids: ["T1-S1"],
+				quality: {
+					source: "fixture",
+					reproducible: true,
+					verifier: "tool",
+					command: "npm test",
+					artifactRefs: ["fixture.log"],
+					observedOutput: "All schema regression checks passed",
+				},
+			},
+			ctx,
+		);
+		expect(evidence.isError).not.toBe(true);
+		const state = structuredClone(store.getState());
+		const task = state.tasks.T1;
+		const step = task?.planSteps[0];
+		if (!task || !step) throw new Error("Missing planned fixture");
+		step.decompositionStatus = "needs_breakdown";
+		expect(check(state)).toBe("task_decompose");
+		step.status = "done";
+		task.acceptanceCriteria.forEach((criterion) => {
+			criterion.status = "pending";
+		});
+		expect(check(state)).toBe("task_evidence");
+		task.acceptanceCriteria.forEach((criterion) => {
+			criterion.status = "satisfied";
+		});
+		step.evidenceRequired = false;
+		expect(check(state)).toBe("task_complete");
+		task.status = "blocked";
+		expect(check(state)).toBe("task_update");
+	});
+
+	it.each(["task_plan", "task_decompose", "task_replan", "task_rework"])(
+		"keeps %s rejection recovery schema-valid with an existing active task",
+		async (name) => {
+			const { tools, ctx, store, entries } = createHarness();
+			const plan = {
+				title: "Recovery contracts",
+				objective: "Validate public recovery arguments",
+				acceptance_criteria: ["Recovery preserves the active task"],
+				plan_steps: [
+					{
+						text: "Validate recovery payloads",
+						expectedOutput: "Passing schema regression report",
+						allowedActions: ["bash"],
+					},
+				],
+			};
+			await execute(requireTool(tools, "task_plan"), plan, ctx);
+			const before = structuredClone(store.getState());
+			const count = entries.length;
+			const args =
+				name === "task_plan"
+					? { ...plan, acceptance_criteria: [] }
+					: name === "task_decompose"
+						? {
+								task_id: "T1",
+								step_id: "T1-S1",
+								reason: "",
+								child_steps: [...plan.plan_steps, ...plan.plan_steps],
+							}
+						: {
+								task_id: "T1",
+								step_ids: ["T1-S1"],
+								reason: "",
+								plan_steps: plan.plan_steps,
+							};
+			const rejected = await execute(requireTool(tools, name), args, ctx);
+			expect(rejected.isError).toBe(true);
+			const recovery = rejected.details as {
+				retry_with: string;
+				minimum_params: Record<string, unknown>;
+			};
+			expect(recovery.retry_with).toBe(name);
+			assertSchema(
+				requireTool(tools, name).parameters,
+				recovery.minimum_params,
+			);
+			expect(store.getState()).toEqual(before);
+			expect(entries).toHaveLength(count);
+		},
+	);
+
 	it("classifies a simple current step through task_update without replacing its ID", async () => {
 		const { tools, ctx, store, entries } = createHarness();
 		await execute(
@@ -230,8 +355,13 @@ describe("registered task tools", () => {
 				ctx,
 			);
 			const recovery = result.details as {
+				retry_with: string;
+				minimum_params: Record<string, unknown>;
 				retry_example: Record<string, unknown>;
 			};
+			expect(recovery.retry_with).toBe(name);
+			assertSchema(tool.parameters, recovery.minimum_params);
+			assertSchema(tool.parameters, recovery.retry_example);
 			expect(result.content[0]?.text).toContain(
 				"do not rerun successful verification",
 			);
@@ -1548,9 +1678,8 @@ describe("registered task tools", () => {
 		expect(Array.isArray(minimumParams?.acceptance_criteria)).toBe(true);
 		expect(minimumParams?.activate).toBe(true);
 
-		// plan_steps must be an array of objects, each with a complete
-		// granularityCheck. The previous shape (array of strings) failed the
-		// schema at resubmit time.
+		assertSchema(plan.parameters, minimumParams);
+		// Public planning inputs must not expose reducer-owned assessment fields.
 		const planSteps = minimumParams?.plan_steps as Array<
 			Record<string, unknown>
 		>;
@@ -1566,20 +1695,8 @@ describe("registered task tools", () => {
 			const allowed = step.allowedActions as string[];
 			expect(allowed.length).toBeGreaterThan(0);
 			expect(allowed.length).toBeLessThanOrEqual(3);
-			expect([
-				"atomic",
-				"needs_breakdown",
-				"breaking_down",
-				"deferred",
-			]).toContain(step.decompositionStatus);
-			const check = step.granularityCheck as Record<string, unknown>;
-			expect(typeof check.isAtomic).toBe("boolean");
-			expect(typeof check.reason).toBe("string");
-			expect((check.reason as string).length).toBeGreaterThan(0);
-			expect(typeof check.canBeDoneInOneAgentAction).toBe("boolean");
-			expect(typeof check.hasSingleObservableOutput).toBe("boolean");
-			expect(typeof check.hasSingleVerificationMethod).toBe("boolean");
-			expect(typeof check.hasNoHiddenSubtasks).toBe("boolean");
+			expect(step).not.toHaveProperty("decompositionStatus");
+			expect(step).not.toHaveProperty("granularityCheck");
 		}
 
 		// End-to-end proof: the recovery scaffold, when filled in with real
@@ -1597,21 +1714,13 @@ describe("registered task tools", () => {
 				{
 					text: "Submit the revised recovery plan",
 					expectedOutput: "Recovery plan creates task T1",
-					criterionIds: ["T1-AC1"],
+					criterionRefs: [1],
 					evidenceRequired: true,
 					allowedActions: ["task_evidence"],
-					decompositionStatus: "atomic" as const,
-					granularityCheck: {
-						isAtomic: true,
-						reason: "Single plan submission",
-						canBeDoneInOneAgentAction: true,
-						hasSingleObservableOutput: true,
-						hasSingleVerificationMethod: true,
-						hasNoHiddenSubtasks: true,
-					},
 				},
 			],
 		};
+		assertSchema(plan.parameters, realParams);
 		const created = await execute(plan, realParams, ctx);
 		expect(created.content[0]?.text).toContain("Created task");
 		expect(store.getState().tasks.T1?.id).toBe("T1");

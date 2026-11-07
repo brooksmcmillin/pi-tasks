@@ -64,6 +64,8 @@ import {
 	formatTaskNext,
 	formatTaskReceipt,
 	formatTaskResume,
+	getTaskPlanRecoveryParams,
+	recoveryPlanStep,
 } from "./render.ts";
 import { Type } from "./schema.ts";
 import {
@@ -2084,40 +2086,48 @@ function buildRejectionRecovery(
 		retry_with:
 			event?.type === "task.evidence_batch"
 				? "task_evidence_batch"
-				: updateRepair
-					? "task_update"
-					: (authoringTool ??
-						(event?.type === "task.reworked"
-							? "task_rework"
-							: (resume.recommendedTool ??
-								resume.nextAllowedActions[0] ??
-								"task_resume"))),
+				: event?.type === "task.evidence_added"
+					? "task_evidence"
+					: event?.type === "task.step_verified"
+						? "task_verify_step"
+						: updateRepair
+							? "task_update"
+							: (authoringTool ??
+								(event?.type === "task.reworked"
+									? "task_rework"
+									: (resume.recommendedTool ??
+										resume.nextAllowedActions[0] ??
+										"task_resume"))),
 		minimum_params:
 			updateRepair ??
-			(event?.type === "task.replanned"
-				? {
-						task_id: event.taskId,
-						step_ids: event.stepIds,
-						reason: "<why these planning steps are mistaken>",
-						plan_steps:
-							"<non-empty replacement steps covering the replaced criteria>",
-					}
-				: event?.type === "task.reworked"
+			retryExample ??
+			(event?.type === "task.created"
+				? getTaskPlanRecoveryParams()
+				: event?.type === "task.steps_decomposed" &&
+						authoringTool === "task_decompose"
 					? {
 							task_id: event.taskId,
-							reason: "<review findings requiring remediation>",
-							plan_steps: [
-								{
-									text: "Describe the bounded remediation step",
-									expectedOutput:
-										"Observed regression result for the review finding",
-									allowedActions: ["task_decompose"],
-									evidenceRequired: true,
-									decompositionStatus: "needs_breakdown",
-								},
-							],
+							step_id: event.parentStepId,
+							reason: "<why this step needs decomposition>",
+							child_steps: [recoveryPlanStep(), recoveryPlanStep()],
 						}
-					: (resume.minimumParams ?? {})),
+					: event?.type === "task.replanned"
+						? {
+								task_id: event.taskId,
+								step_ids: event.stepIds,
+								reason: "<why these planning steps are mistaken>",
+								plan_steps: [recoveryPlanStep()],
+							}
+						: event?.type === "task.reworked"
+							? {
+									task_id: event.taskId,
+									reason: "<review findings requiring remediation>",
+									...(event.beforeStepId
+										? { before_step_id: event.beforeStepId }
+										: {}),
+									plan_steps: [recoveryPlanStep()],
+								}
+							: (resume.minimumParams ?? {})),
 		correct_rejected_call_first: updateRepair !== undefined,
 		do_not_retry_same_call: true,
 		...(retryExample
