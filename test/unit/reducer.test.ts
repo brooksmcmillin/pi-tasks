@@ -438,7 +438,9 @@ describe("task reducer", () => {
 					semanticAssessment: planAssessment(input, ["rejected"]),
 				},
 			]),
-		).toThrow("failed semantic assessment");
+		).toThrow(
+			/failed semantic assessment:.*Name the target and one observable result.*separate steps for candidate capture.*Do not split individual reads.*resubmit for native assessment/,
+		);
 	});
 
 	it("rejects a semantic assessment copied to changed plan input", () => {
