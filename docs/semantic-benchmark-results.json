@@ -1,6 +1,6 @@
 {
 	"hostVersion": "1.5.0",
-	"note": "One baseline and two candidate revisions evaluated; final comparison retains baseline and final typed-diagnosis candidate. No case was reworded or retried within an evaluation. These small local results do not establish population accuracy.",
+	"note": "One baseline and three candidate source revisions evaluated; this final comparison retains baseline and the latest context-preservation/index-validation candidate. No case was reworded or retried within an evaluation. These small local results do not establish population accuracy.",
 	"baseline": {
 		"observedAt": "2026-11-07T23:30:27.129Z",
 		"promptVersion": "2026-11-04.v2",
@@ -533,9 +533,9 @@
 		]
 	},
 	"candidate": {
-		"observedAt": "2026-11-07T23:48:02.965Z",
+		"observedAt": "2026-11-08T00:32:45.866Z",
 		"promptVersion": "2026-11-07.v3",
-		"assessorSourceSha256": "aeedfcb7feea029802d04426d6dbc8a7b44432409bbca22d051ba0d4c6835a38",
+		"assessorSourceSha256": "1136219efe52f746f50bbf4f7491f5059fc0cf8af675f735f8aa68b83558c93e",
 		"corpusSha256": "eca068b1afa218aaa15a55ec65676f6ed8d4fe6a13b194005049dc90d2dd77fe",
 		"model": {
 			"provider": "openai-codex",
@@ -551,8 +551,9 @@
 				"id": "batch-prose",
 				"expected": "atomic",
 				"agreed": true,
-				"elapsedMs": 3653,
+				"elapsedMs": 3525,
 				"assessment": {
+					"descriptiveContextVersion": 1,
 					"provenance": {
 						"version": 1,
 						"strategy": "pi_chat",
@@ -560,7 +561,7 @@
 						"model": "gpt-6.1-sol",
 						"promptVersion": "2026-11-07.v3",
 						"inputHash": "9c1e7eae32084fd07653e5aac8e94e1765ca5af6c08b53a6b5e8b48f4ba08dba",
-						"assessedAt": "2026-11-07T23:47:29.864Z"
+						"assessedAt": "2026-11-08T00:32:09.286Z"
 					},
 					"steps": [
 						{
@@ -569,7 +570,7 @@
 							"decision": "atomic",
 							"specific": {
 								"value": true,
-								"confidence": 0.97
+								"confidence": 0.98
 							},
 							"actionCount": {
 								"value": "one",
@@ -587,7 +588,7 @@
 								"value": false,
 								"confidence": 0.99
 							},
-							"confidence": 0.97,
+							"confidence": 0.98,
 							"issues": [],
 							"diagnosis": {
 								"independentOutcomes": [],
@@ -618,8 +619,9 @@
 				"id": "batch-command",
 				"expected": "atomic",
 				"agreed": true,
-				"elapsedMs": 4620,
+				"elapsedMs": 3485,
 				"assessment": {
+					"descriptiveContextVersion": 1,
 					"provenance": {
 						"version": 1,
 						"strategy": "pi_chat",
@@ -627,7 +629,7 @@
 						"model": "gpt-6.1-sol",
 						"promptVersion": "2026-11-07.v3",
 						"inputHash": "734a1fc2f1738f599d18184a91e48d0a2b4e7298e4090c6edba3241104202592",
-						"assessedAt": "2026-11-07T23:47:33.500Z"
+						"assessedAt": "2026-11-08T00:32:12.801Z"
 					},
 					"steps": [
 						{
@@ -685,8 +687,9 @@
 				"id": "bounded-report",
 				"expected": "atomic",
 				"agreed": true,
-				"elapsedMs": 3443,
+				"elapsedMs": 3741,
 				"assessment": {
+					"descriptiveContextVersion": 1,
 					"provenance": {
 						"version": 1,
 						"strategy": "pi_chat",
@@ -694,7 +697,7 @@
 						"model": "gpt-6.1-sol",
 						"promptVersion": "2026-11-07.v3",
 						"inputHash": "1a4c92a750d4c4b4a38ab2c56ef09a4ca9d161a0b82522753053556fde6d07ce",
-						"assessedAt": "2026-11-07T23:47:38.121Z"
+						"assessedAt": "2026-11-08T00:32:16.288Z"
 					},
 					"steps": [
 						{
@@ -703,7 +706,7 @@
 							"decision": "atomic",
 							"specific": {
 								"value": true,
-								"confidence": 0.95
+								"confidence": 0.97
 							},
 							"actionCount": {
 								"value": "one",
@@ -721,7 +724,7 @@
 								"value": false,
 								"confidence": 0.99
 							},
-							"confidence": 0.95,
+							"confidence": 0.97,
 							"issues": [],
 							"diagnosis": {
 								"independentOutcomes": [],
@@ -752,8 +755,9 @@
 				"id": "focused-repair",
 				"expected": "atomic",
 				"agreed": true,
-				"elapsedMs": 4352,
+				"elapsedMs": 3768,
 				"assessment": {
+					"descriptiveContextVersion": 1,
 					"provenance": {
 						"version": 1,
 						"strategy": "pi_chat",
@@ -761,7 +765,7 @@
 						"model": "gpt-6.1-sol",
 						"promptVersion": "2026-11-07.v3",
 						"inputHash": "ef01963d0f74ad244a6e1bff96331a8699e0fe9a542e2215c391a4c24e5abd6b",
-						"assessedAt": "2026-11-07T23:47:41.565Z"
+						"assessedAt": "2026-11-08T00:32:20.028Z"
 					},
 					"steps": [
 						{
@@ -770,7 +774,7 @@
 							"decision": "atomic",
 							"specific": {
 								"value": true,
-								"confidence": 0.99
+								"confidence": 0.98
 							},
 							"actionCount": {
 								"value": "one",
@@ -788,7 +792,7 @@
 								"value": false,
 								"confidence": 0.99
 							},
-							"confidence": 0.99,
+							"confidence": 0.98,
 							"issues": [],
 							"diagnosis": {
 								"independentOutcomes": [],
@@ -819,8 +823,9 @@
 				"id": "independent-products",
 				"expected": "needs_breakdown",
 				"agreed": true,
-				"elapsedMs": 4022,
+				"elapsedMs": 4280,
 				"assessment": {
+					"descriptiveContextVersion": 1,
 					"provenance": {
 						"version": 1,
 						"strategy": "pi_chat",
@@ -828,7 +833,7 @@
 						"model": "gpt-6.1-sol",
 						"promptVersion": "2026-11-07.v3",
 						"inputHash": "a3cb25314f437ab7d3a06235c218032ecc5910155f3c523ce305d01f5256a60c",
-						"assessedAt": "2026-11-07T23:47:45.915Z"
+						"assessedAt": "2026-11-08T00:32:23.795Z"
 					},
 					"steps": [
 						{
@@ -837,7 +842,7 @@
 							"decision": "needs_breakdown",
 							"specific": {
 								"value": true,
-								"confidence": 0.98
+								"confidence": 0.97
 							},
 							"actionCount": {
 								"value": "multiple",
@@ -852,42 +857,42 @@
 								"confidence": 1
 							},
 							"hiddenSubtasks": {
-								"value": true,
-								"confidence": 0.98
+								"value": false,
+								"confidence": 0.96
 							},
-							"confidence": 0.98,
+							"confidence": 0.96,
 							"issues": [
 								"step contains multiple independent actions",
 								"step contains multiple independently observable outputs",
 								"step requires multiple independent verification methods",
-								"step contains hidden subtasks",
-								"Independent outcomes: OAuth refresh support that refreshes expired sessions, verified independently.; A separately deployable billing dashboard that charts invoices, verified independently.",
-								"Smallest correction: Split into two steps: implement and verify OAuth refresh support; build and verify the billing dashboard."
+								"Independent outcomes: OAuth refresh support that refreshes expired sessions.; Separately deployable billing dashboard that charts invoices.; Independent verification of OAuth refresh behavior and billing charts.",
+								"Smallest correction: Split into an OAuth refresh implementation-and-verification step and a billing dashboard implementation-and-verification step."
 							],
 							"diagnosis": {
 								"independentOutcomes": [
-									"OAuth refresh support that refreshes expired sessions, verified independently.",
-									"A separately deployable billing dashboard that charts invoices, verified independently."
+									"OAuth refresh support that refreshes expired sessions.",
+									"Separately deployable billing dashboard that charts invoices.",
+									"Independent verification of OAuth refresh behavior and billing charts."
 								],
 								"missingContext": [],
-								"correction": "Split into two steps: implement and verify OAuth refresh support; build and verify the billing dashboard."
+								"correction": "Split into an OAuth refresh implementation-and-verification step and a billing dashboard implementation-and-verification step."
 							}
 						}
 					]
 				},
 				"usage": {
 					"input": 1187,
-					"output": 133,
+					"output": 138,
 					"cacheRead": 0,
 					"cacheWrite": 0,
 					"reasoning": 0,
-					"totalTokens": 1320,
+					"totalTokens": 1325,
 					"cost": {
 						"input": 0.002374,
-						"output": 0.00133,
+						"output": 0.0013800000000000002,
 						"cacheRead": 0,
 						"cacheWrite": 0,
-						"total": 0.003704,
+						"total": 0.003754,
 						"totalFromProvider": false
 					}
 				}
@@ -896,8 +901,9 @@
 				"id": "publish-and-implement",
 				"expected": "needs_breakdown",
 				"agreed": false,
-				"elapsedMs": 5508,
+				"elapsedMs": 6073,
 				"assessment": {
+					"descriptiveContextVersion": 1,
 					"provenance": {
 						"version": 1,
 						"strategy": "pi_chat",
@@ -905,7 +911,7 @@
 						"model": "gpt-6.1-sol",
 						"promptVersion": "2026-11-07.v3",
 						"inputHash": "4141494fcaa88b831fa818892f9a2fd8e511afc2722eef95c6080a4afbd0fbc9",
-						"assessedAt": "2026-11-07T23:47:49.938Z"
+						"assessedAt": "2026-11-08T00:32:28.077Z"
 					},
 					"steps": [
 						{
@@ -926,7 +932,7 @@
 							},
 							"verificationCount": {
 								"value": "multiple",
-								"confidence": 0.98
+								"confidence": 0.99
 							},
 							"hiddenSubtasks": {
 								"value": true,
@@ -939,39 +945,39 @@
 								"step contains multiple independently observable outputs",
 								"step requires multiple independent verification methods",
 								"step contains hidden subtasks",
-								"Independent outcomes: Published graph with eight reviewed tasks and only reviewed dependency edges confirmed by readback.; Working OAuth renewal with independent repair verification.; Working scheduler recovery with independent repair verification.; Working metrics export with independent repair verification.",
-								"Missing context: The eight reviewed tasks and reviewed dependency edges are not supplied or located.; OAuth, scheduler and metrics repair targets, required behavior and verification criteria are unspecified.",
-								"Smallest correction: Separate graph publication/readback from the three independently tested repairs. Identify the reviewed graph source and provide bounded targets, intended behavior and verification criteria for each repair."
+								"Independent outcomes: Published graph containing the eight reviewed tasks and only reviewed dependency edges, verified by readback.; Working OAuth renewal with independent repair verification.; Working scheduler recovery with independent repair verification.; Working metrics export with independent repair verification.",
+								"Missing context: The eight reviewed task definitions and approved dependency edges are not supplied or located.; OAuth, scheduler and metrics repair targets, required behavior and verification criteria are unspecified.",
+								"Smallest correction: Separate graph publication with readback from the three independently implemented and tested repairs. Supply the reviewed graph reference and bounded targets, intended behavior and verification criteria for each repair."
 							],
 							"diagnosis": {
 								"independentOutcomes": [
-									"Published graph with eight reviewed tasks and only reviewed dependency edges confirmed by readback.",
+									"Published graph containing the eight reviewed tasks and only reviewed dependency edges, verified by readback.",
 									"Working OAuth renewal with independent repair verification.",
 									"Working scheduler recovery with independent repair verification.",
 									"Working metrics export with independent repair verification."
 								],
 								"missingContext": [
-									"The eight reviewed tasks and reviewed dependency edges are not supplied or located.",
+									"The eight reviewed task definitions and approved dependency edges are not supplied or located.",
 									"OAuth, scheduler and metrics repair targets, required behavior and verification criteria are unspecified."
 								],
-								"correction": "Separate graph publication/readback from the three independently tested repairs. Identify the reviewed graph source and provide bounded targets, intended behavior and verification criteria for each repair."
+								"correction": "Separate graph publication with readback from the three independently implemented and tested repairs. Supply the reviewed graph reference and bounded targets, intended behavior and verification criteria for each repair."
 							}
 						}
 					]
 				},
 				"usage": {
 					"input": 1205,
-					"output": 196,
+					"output": 201,
 					"cacheRead": 0,
 					"cacheWrite": 0,
 					"reasoning": 0,
-					"totalTokens": 1401,
+					"totalTokens": 1406,
 					"cost": {
 						"input": 0.00241,
-						"output": 0.0019600000000000004,
+						"output": 0.00201,
 						"cacheRead": 0,
 						"cacheWrite": 0,
-						"total": 0.004370000000000001,
+						"total": 0.00442,
 						"totalFromProvider": false
 					}
 				}
@@ -980,8 +986,9 @@
 				"id": "missing-boundary",
 				"expected": "rejected",
 				"agreed": true,
-				"elapsedMs": 4391,
+				"elapsedMs": 5086,
 				"assessment": {
+					"descriptiveContextVersion": 1,
 					"provenance": {
 						"version": 1,
 						"strategy": "pi_chat",
@@ -989,7 +996,7 @@
 						"model": "gpt-6.1-sol",
 						"promptVersion": "2026-11-07.v3",
 						"inputHash": "fcc4c30b5d3827f21350a9540b3b11734ff5e16f0487cae8aaefc0c2a31873e4",
-						"assessedAt": "2026-11-07T23:47:55.446Z"
+						"assessedAt": "2026-11-08T00:32:34.148Z"
 					},
 					"steps": [
 						{
@@ -1014,25 +1021,25 @@
 							},
 							"hiddenSubtasks": {
 								"value": false,
-								"confidence": 0.65
+								"confidence": 0.6
 							},
-							"confidence": 0.65,
+							"confidence": 0.6,
 							"issues": [
 								"step description is not specific enough",
 								"independent action count is unclear",
 								"observable output count is unclear",
 								"verification method count is unclear",
-								"semantic assessment confidence 0.65 is below 0.70",
-								"Missing context: No target or bounded list of 'remaining issues' is identified.; 'Everything is done' and 'It is better' specify no observable result or verification criteria.",
-								"Smallest correction: Identify the affected target and bounded issue scope, and state the expected observable result and how to verify it."
+								"semantic assessment confidence 0.60 is below 0.70",
+								"Missing context: The target and scope of 'remaining issues' are unspecified.; 'Everything is done' and 'It is better' provide no observable success criteria or verification procedure.",
+								"Smallest correction: Identify the affected target and bounded issue, describe the intended observable result, and specify how to verify it."
 							],
 							"diagnosis": {
 								"independentOutcomes": [],
 								"missingContext": [
-									"No target or bounded list of 'remaining issues' is identified.",
-									"'Everything is done' and 'It is better' specify no observable result or verification criteria."
+									"The target and scope of 'remaining issues' are unspecified.",
+									"'Everything is done' and 'It is better' provide no observable success criteria or verification procedure."
 								],
-								"correction": "Identify the affected target and bounded issue scope, and state the expected observable result and how to verify it."
+								"correction": "Identify the affected target and bounded issue, describe the intended observable result, and specify how to verify it."
 							}
 						}
 					]
@@ -1058,8 +1065,9 @@
 				"id": "mixed-language-batch",
 				"expected": "atomic",
 				"agreed": true,
-				"elapsedMs": 3130,
+				"elapsedMs": 6633,
 				"assessment": {
+					"descriptiveContextVersion": 1,
 					"provenance": {
 						"version": 1,
 						"strategy": "pi_chat",
@@ -1067,7 +1075,7 @@
 						"model": "gpt-6.1-sol",
 						"promptVersion": "2026-11-07.v3",
 						"inputHash": "0bd578dab0f707e0287460cf68178980e5ea05343968840ca62c2e596592fa6b",
-						"assessedAt": "2026-11-07T23:47:59.837Z"
+						"assessedAt": "2026-11-08T00:32:39.234Z"
 					},
 					"steps": [
 						{

@@ -24,7 +24,7 @@ import {
 import { createTaskRuntimeStore } from "../../src/store.ts";
 import { registerTaskTools } from "../../src/tools.ts";
 import { assertSchema } from "./assert-schema.ts";
-import { fakeSemanticRuntime } from "./semantic-fixture.ts";
+import { fakeSemanticRuntime, fakeUsage } from "./semantic-fixture.ts";
 
 interface ToolSchema {
 	type?: string;
@@ -235,11 +235,48 @@ describe("registered task tools", () => {
 					...(name === "task_decompose" ? [expect.any(Object)] : []),
 				],
 			});
-			if (name === "task_update")
+			if (name === "task_update") {
 				expect(
 					(last.steps as { granularityCheck: { reason: string } }[])[0]
 						?.granularityCheck.reason,
 				).toContain("New clarification");
+				const materialized =
+					store.getState().tasks.T1?.planSteps[0]?.granularityCheck;
+				expect(materialized).toMatchObject({
+					unit: "deliverable",
+					boundedScope: check.boundedScope,
+					verificationPlan: check.verificationPlan,
+					reason: "New clarification distinct from the stored derived flags",
+					isAtomic: true,
+				});
+				expect(buildTaskResume(store.getState()).resumeInstruction).toContain(
+					check.boundedScope,
+				);
+				expect(buildTaskResume(store.getState()).resumeInstruction).toContain(
+					check.verificationPlan,
+				);
+				const decompose = await execute(
+					requireTool(tools, "task_decompose"),
+					{
+						task_id: "T1",
+						step_id: "T1-S1",
+						reason: "Separate independently reviewed publication outcomes",
+						child_steps: [
+							step,
+							{
+								...step,
+								text: "Review graph edge invariants",
+								expectedOutput: "Graph invariant review report",
+							},
+						],
+					},
+					ctx,
+				);
+				expect(decompose.isError).not.toBe(true);
+				expect(requests.at(-1)?.context).toMatchObject({
+					parentStep: { granularityCheck: materialized },
+				});
+			}
 			if (name === "task_decompose")
 				expect(last.context).toMatchObject({
 					reason: args.reason,
@@ -252,55 +289,64 @@ describe("registered task tools", () => {
 				restored.replay(ctx.sessionManager.getBranch()).malformedEvents,
 			).toEqual([]);
 			expect(restored.getState()).toEqual(store.getState());
-			expect(entries.length).toBe(name === "task_plan" ? 1 : 2);
-			let historical = createEmptyState();
-			const legacyEntries = structuredClone(entries);
-			for (const event of legacyEntries) {
-				if (
-					event.type !== "task.created" &&
-					event.type !== "task.updated" &&
-					event.type !== "task.steps_decomposed" &&
-					event.type !== "task.reworked"
-				)
-					throw new Error("Unexpected fixture event");
-				const task = historical.tasks[event.taskId];
-				const input =
-					event.type === "task.created"
-						? {
-								title: event.title,
-								objective: event.objective,
-								acceptanceCriteria: event.acceptanceCriteria,
-								steps: event.planSteps ?? [],
-							}
-						: task
-							? taskMutationAssessmentInput(task, event)
-							: undefined;
-				const assessment = event.semanticAssessment;
-				if (!input || !assessment)
-					throw new Error("Missing historical assessment fixture");
-				assessment.provenance.promptVersion = "2026-11-04.v2";
-				assessment.provenance.inputHash = hashPlanAssessmentInput(
-					input,
-					"2026-11-04.v2",
-				);
-				assessment.steps.forEach((step, index) => {
-					const source = input.steps[index];
-					if (!source) throw new Error("Missing historical step");
-					step.inputHash = hashStepSemanticInput(source, "2026-11-04.v2");
-				});
-				historical = reduceTaskState(historical, event);
+			expect(entries.length).toBe(
+				name === "task_plan" ? 1 : name === "task_update" ? 3 : 2,
+			);
+			for (const promptVersion of ["2026-11-04.v2", "2026-11-07.v3"]) {
+				let historical = createEmptyState();
+				const legacyEntries = structuredClone(entries);
+				for (const event of legacyEntries) {
+					if (
+						event.type !== "task.created" &&
+						event.type !== "task.updated" &&
+						event.type !== "task.steps_decomposed" &&
+						event.type !== "task.reworked"
+					)
+						throw new Error("Unexpected fixture event");
+					const task = historical.tasks[event.taskId];
+					const input =
+						event.type === "task.created"
+							? {
+									title: event.title,
+									objective: event.objective,
+									acceptanceCriteria: event.acceptanceCriteria,
+									steps: event.planSteps ?? [],
+								}
+							: task
+								? taskMutationAssessmentInput(task, event)
+								: undefined;
+					const assessment = event.semanticAssessment;
+					if (!input || !assessment)
+						throw new Error("Missing historical assessment fixture");
+					delete assessment.descriptiveContextVersion;
+					assessment.provenance.promptVersion = promptVersion;
+					assessment.provenance.inputHash = hashPlanAssessmentInput(
+						input,
+						promptVersion,
+					);
+					assessment.steps.forEach((step, index) => {
+						const source = input.steps[index];
+						if (!source) throw new Error("Missing historical step");
+						step.inputHash = hashStepSemanticInput(source, promptVersion);
+					});
+					historical = reduceTaskState(historical, event);
+					if (event.type === "task.updated")
+						expect(
+							historical.tasks.T1?.planSteps[0]?.granularityCheck.unit,
+						).toBeUndefined();
+				}
+				const legacy = createTaskRuntimeStore();
+				expect(
+					legacy.replay(
+						legacyEntries.map((data) => ({
+							type: "custom",
+							customType: TASK_EVENT_CUSTOM_TYPE,
+							data,
+						})),
+					).malformedEvents,
+				).toEqual([]);
+				expect(legacy.getState()).toEqual(historical);
 			}
-			const legacy = createTaskRuntimeStore();
-			expect(
-				legacy.replay(
-					legacyEntries.map((data) => ({
-						type: "custom",
-						customType: TASK_EVENT_CUSTOM_TYPE,
-						data,
-					})),
-				).malformedEvents,
-			).toEqual([]);
-			expect(legacy.getState()).toEqual(historical);
 		},
 	);
 
@@ -462,6 +508,97 @@ describe("registered task tools", () => {
 			expect(publications.length).toBe(published);
 		},
 	);
+
+	it("does not mutate registered state when cancellation occurs during diagnostic chat", async () => {
+		const controller = new AbortController();
+		const runtime = fakeSemanticRuntime();
+		const registry = runtime.modelRegistry;
+		const classify = registry?.classify;
+		if (!registry || !classify) throw new Error("Missing semantic fixture");
+		let compound = false;
+		let diagnosticCalls = 0;
+		registry.classify = async (model, request, options) => {
+			const result = await classify(model, request, options);
+			if (compound)
+				for (const answer of Object.values(result.answers)) {
+					if (answer.type === "choice") {
+						answer.choice = "multiple";
+						answer.probabilities = {
+							one: 0.025,
+							multiple: 0.95,
+							unclear: 0.025,
+						};
+					}
+				}
+			return result;
+		};
+		registry.streamSimple = () => ({
+			result: async () => {
+				diagnosticCalls++;
+				controller.abort();
+				return {
+					content: [],
+					provider: "test",
+					model: "diagnosis",
+					usage: fakeUsage,
+					stopReason: "toolUse",
+					timestamp: Date.now(),
+				};
+			},
+		});
+		const { tools, ctx, store, entries, publications } = createHarness({
+			semanticRuntime: runtime,
+		});
+		await execute(
+			requireTool(tools, "task_plan"),
+			{
+				title: "Graph publication",
+				objective: "Publish only one graph",
+				acceptance_criteria: ["Graph matches reviewed batch"],
+				plan_steps: [
+					{
+						text: "Publish reviewed repair graph",
+						expectedOutput:
+							"One graph matching reviewed task identities and edges",
+						allowedActions: [
+							"Publish reviewed batch",
+							"Compare graph readback",
+						],
+					},
+				],
+			},
+			ctx,
+		);
+		const before = structuredClone(store.getState());
+		const eventCount = entries.length;
+		const publicationCount = publications.length;
+		compound = true;
+		const result = await requireTool(tools, "task_update").execute(
+			"diagnostic-abort",
+			{
+				task_id: "T1",
+				step_id: "T1-S1",
+				step_granularity_check: {
+					isAtomic: true,
+					reason: "One graph",
+					canBeDoneInOneAgentAction: true,
+					hasSingleObservableOutput: true,
+					hasSingleVerificationMethod: true,
+					hasNoHiddenSubtasks: true,
+				},
+			},
+			controller.signal,
+			undefined,
+			ctx,
+		);
+		expect(result.isError).toBe(true);
+		expect(result.content[0]?.text).toContain("aborted");
+		expect(result.usage?.totalTokens).toBe(fakeUsage.totalTokens * 2);
+		expect(diagnosticCalls).toBe(1);
+		expect(store.getState()).toEqual(before);
+		expect(entries).toHaveLength(eventCount);
+		expect(publications).toHaveLength(publicationCount);
+	});
 
 	it("validates recovery scaffolds against registered public schemas across resume modes", async () => {
 		const { tools, ctx, store } = createHarness();

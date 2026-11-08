@@ -501,11 +501,12 @@ function buildPlanAssessment(input, rawSteps, assessmentProvenance) {
         throw new Error(`Semantic assessor returned ${rawSteps.length} steps for ${input.steps.length} inputs`);
     }
     return {
+        descriptiveContextVersion: 1,
         provenance: assessmentProvenance,
-        steps: rawSteps.map((raw, index) => finalizeStepAssessment(raw, input.steps[index], index)),
+        steps: rawSteps.map((raw, index) => finalizeStepAssessment(raw, input.steps[index], index, assessmentProvenance.strategy !== "pi_classifier")),
     };
 }
-function finalizeStepAssessment(raw, step, index) {
+function finalizeStepAssessment(raw, step, index, requireNonAtomicDiagnosis = false) {
     if (!step || raw.index !== index) {
         throw new Error(`Semantic assessor returned an invalid step index ${raw.index}`);
     }
@@ -556,6 +557,9 @@ function finalizeStepAssessment(raw, step, index) {
         : atomic
             ? "atomic"
             : "needs_breakdown";
+    if (requireNonAtomicDiagnosis && decision !== "atomic" && !raw.diagnosis) {
+        throw new Error("Non-atomic native assessment is missing a concrete diagnosis and correction");
+    }
     issues.push(...planDiagnosisIssues(raw.diagnosis, decision));
     return {
         index,
@@ -758,7 +762,11 @@ function parsePlanResponse(payload, stepCount) {
         }
         seen.add(step.index);
     }
-    return steps.sort((left, right) => left.index - right.index);
+    steps.sort((left, right) => left.index - right.index);
+    if (steps.some((step, index) => step.index !== index)) {
+        throw new Error("Model plan step indexes must cover the complete zero-based input array");
+    }
+    return steps;
 }
 function parseRawPlanStep(value) {
     const object = requireObject(value, "plan step assessment");

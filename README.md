@@ -225,7 +225,10 @@ before persistence.
 
 Classification uses the complete target, scope, output and bounded verification
 context, including new current-step clarification and decomposition's parent
-scope. A bounded batch with readback, one multi-source investigation report, or
+scope. Successful classification retains descriptive scope and verification in
+resume and subsequent decomposition, separately from model-derived count flags;
+old assessments retain their historical replay behavior. A bounded batch with
+readback, one multi-source investigation report, or
 a focused repair with regression checks can be one deliverable without exact
 command phrasing. A script wrapping unrelated products still needs decomposition.
 Non-atomic chat/OMP assessments name independent outcomes or missing context and

@@ -751,7 +751,14 @@ function classifyCurrentStep(
 	const candidate = {
 		...step,
 		decompositionStatus: "atomic" as const,
-		granularityCheck: assessment ? semanticGranularityCheck(assessment) : check,
+		granularityCheck: assessment
+			? semanticGranularityCheck(
+					assessment,
+					event.semanticAssessment?.descriptiveContextVersion === 1
+						? check
+						: undefined,
+				)
+			: check,
 	};
 	candidate.planQuality = legacyPlanQuality(candidate);
 	validateGranularityContract(candidate, 0, replay);
@@ -1068,6 +1075,7 @@ function applySnapshot(
 }
 
 interface CreatePlanStepsOptions {
+	preserveDescriptiveContext?: boolean;
 	replay?: boolean;
 	parentStepId?: string;
 	parentStatus?: TaskStep["status"];
@@ -1117,6 +1125,12 @@ function validatePlanSemanticAssessment(
 		return;
 	}
 	validateSemanticProvenance(assessment.provenance, "Semantic assessment");
+	if (
+		assessment.descriptiveContextVersion !== undefined &&
+		assessment.descriptiveContextVersion !== 1
+	) {
+		throw new TaskTransitionError("Unsupported descriptive context version");
+	}
 	if (!Array.isArray(assessment.steps)) {
 		throw new TaskTransitionError("Semantic assessment steps are invalid");
 	}
@@ -1283,7 +1297,11 @@ function createPlanSteps(
 					createdAt,
 					activate,
 					semanticAssessment?.steps[index],
-					options,
+					{
+						...options,
+						preserveDescriptiveContext:
+							semanticAssessment?.descriptiveContextVersion === 1,
+					},
 				),
 			);
 		} catch (error) {
@@ -1363,7 +1381,10 @@ function createPlanStep(
 		);
 	}
 	const granularityCheck = semanticAssessment
-		? semanticGranularityCheck(semanticAssessment)
+		? semanticGranularityCheck(
+				semanticAssessment,
+				options.preserveDescriptiveContext ? step.granularityCheck : undefined,
+			)
 		: normalizeGranularityCheck(step);
 	const decompositionStatus = semanticAssessment
 		? semanticAssessment.decision === "atomic"
@@ -1439,13 +1460,22 @@ function createPlanStep(
 
 function semanticGranularityCheck(
 	assessment: StepSemanticAssessment,
+	context?: TaskGranularityCheck,
 ): TaskGranularityCheck {
 	return {
+		...(context?.unit !== undefined ? { unit: context.unit } : {}),
+		...(context?.boundedScope !== undefined
+			? { boundedScope: context.boundedScope.trim() }
+			: {}),
+		...(context?.verificationPlan !== undefined
+			? { verificationPlan: context.verificationPlan.trim() }
+			: {}),
 		isAtomic: assessment.decision === "atomic",
 		reason:
-			assessment.issues.length > 0
+			context?.reason.trim() ||
+			(assessment.issues.length > 0
 				? assessment.issues.join("; ")
-				: "Native semantic assessment found one action, one output, one verification method, and no hidden subtasks",
+				: "Native semantic assessment found one action, one output, one verification method, and no hidden subtasks"),
 		canBeDoneInOneAgentAction: assessment.actionCount.value === "one",
 		hasSingleObservableOutput: assessment.outputCount.value === "one",
 		hasSingleVerificationMethod: assessment.verificationCount.value === "one",

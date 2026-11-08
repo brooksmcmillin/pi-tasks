@@ -51,6 +51,7 @@ export interface StepSemanticAssessment {
     diagnosis?: PlanSemanticDiagnosis;
 }
 export interface PlanSemanticAssessment {
+    descriptiveContextVersion?: 1;
     provenance: SemanticAssessmentProvenance;
     steps: StepSemanticAssessment[];
 }

@@ -12,7 +12,7 @@ import { buildTaskResume, formatTaskFocus } from "../../src/render.ts";
 import { assessPlanSemantics } from "../../src/semantic-assessment.ts";
 import { createTaskRuntimeStore } from "../../src/store.ts";
 import { deliverableCases } from "../fixtures/semantic-deliverables.ts";
-import { fakeUsage } from "./semantic-fixture.ts";
+import { fakeSemanticRuntime, fakeUsage } from "./semantic-fixture.ts";
 
 const diagnosis = {
 	independentOutcomes: [
@@ -65,6 +65,44 @@ function fixture() {
 }
 
 describe("semantic rejection diagnosis", () => {
+	it.each(["chat", "omp"] as const)(
+		"requires diagnosis only for new non-atomic %s outputs",
+		async (adapter) => {
+			const { diagnosis: _diagnosis, ...counts } = raw;
+			const runtime = (step: unknown) =>
+				ctx(
+					adapter === "chat"
+						? {
+								modelRegistry: {
+									streamSimple: () => ({ result: async () => message(step) }),
+								},
+							}
+						: {
+								runEphemeralTurn: async () => ({
+									replyText: JSON.stringify({ steps: [step] }),
+								}),
+							},
+				);
+			await expect(
+				assessPlanSemantics(runtime(counts), fixture()),
+			).rejects.toMatchObject({ code: "provider_error" });
+			const atomic = {
+				...counts,
+				actionCount: { value: "one", confidence: 0.95 },
+				outputCount: { value: "one", confidence: 0.95 },
+				verificationCount: { value: "one", confidence: 0.95 },
+			};
+			expect(
+				(await assessPlanSemantics(runtime(atomic), fixture())).assessment
+					.steps[0]?.decision,
+			).toBe("atomic");
+			expect(
+				(await assessPlanSemantics(runtime(raw), fixture())).assessment.steps[0]
+					?.decision,
+			).toBe("needs_breakdown");
+		},
+	);
+
 	it("returns concrete outcomes and smallest correction with native chat judgment", async () => {
 		const run = await assessPlanSemantics(
 			ctx({
@@ -207,6 +245,76 @@ describe("semantic rejection diagnosis", () => {
 					? fakeUsage.totalTokens * 2
 					: fakeUsage.totalTokens,
 			);
+		},
+	);
+
+	it.each([
+		{ indexes: [1], count: 1, valid: false },
+		{ indexes: [1, 2], count: 2, valid: false },
+		{ indexes: [0, 0], count: 2, valid: false },
+		{ indexes: [-1], count: 1, valid: false },
+		{ indexes: [0.5], count: 1, valid: false },
+		{ indexes: [0], count: 2, valid: false },
+		{ indexes: [0, 2], count: 2, valid: false },
+		{ indexes: [1, 0], count: 2, valid: true },
+		{ indexes: [0], count: 1, valid: true },
+	])(
+		"maps optional diagnosis only for complete index coverage: $indexes",
+		async ({ indexes, count, valid }) => {
+			const runtime = fakeSemanticRuntime();
+			const registry = runtime.modelRegistry;
+			const classify = registry?.classify;
+			if (!registry || !classify) throw new Error("Missing classifier fixture");
+			registry.classify = async (model, request, options) => {
+				const result = await classify(model, request, options);
+				for (const answer of Object.values(result.answers))
+					if (answer.type === "choice") answer.choice = "multiple";
+				return result;
+			};
+			registry.streamSimple = () => ({
+				result: async () => ({
+					...message(raw),
+					content: [
+						{
+							type: "toolCall",
+							name: "submit_plan_semantic_assessment",
+							arguments: {
+								steps: indexes.map((index) => ({
+									...raw,
+									index,
+									diagnosis: {
+										independentOutcomes: [
+											`Outcome ${index} A`,
+											`Outcome ${index} B`,
+										],
+										missingContext: [],
+										correction: `Split the independent outcomes of input ${index}`,
+									},
+								})),
+							},
+						},
+					],
+				}),
+			});
+			const input = fixture();
+			const source = input.steps[0];
+			if (!source) throw new Error("Missing source step");
+			input.steps = Array.from({ length: count }, (_, index) => ({
+				...source,
+				text: `Deliver independent product pair ${index}`,
+			}));
+			const run = await assessPlanSemantics(ctx(runtime), input);
+			expect(run.assessment.provenance.strategy).toBe("pi_classifier");
+			for (const [index, step] of run.assessment.steps.entries()) {
+				expect(step.index).toBe(index);
+				expect(step.decision).toBe("needs_breakdown");
+				expect(step.actionCount.value).toBe("multiple");
+				if (valid)
+					expect(step.diagnosis?.correction).toBe(
+						`Split the independent outcomes of input ${index}`,
+					);
+				else expect(step.diagnosis).toBeUndefined();
+			}
 		},
 	);
 

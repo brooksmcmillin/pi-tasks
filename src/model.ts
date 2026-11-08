@@ -97,6 +97,8 @@ export interface StepSemanticAssessment {
 }
 
 export interface PlanSemanticAssessment {
+	// Omission retains historical count-only materialization during replay.
+	descriptiveContextVersion?: 1;
 	provenance: SemanticAssessmentProvenance;
 	steps: StepSemanticAssessment[];
 }
