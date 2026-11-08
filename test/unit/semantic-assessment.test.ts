@@ -340,6 +340,63 @@ describe("native semantic assessment", () => {
 		expect(result.assessment.provenance.strategy).toBe("omp_ephemeral");
 	});
 
+	it.each(["pi_chat", "omp_ephemeral"])(
+		"handles supported null diagnosis on %s without accepting malformed rejection details",
+		async (strategy) => {
+			for (const [decision, diagnosis, valid] of [
+				["supported", null, true],
+				["unsupported", null, false],
+				[
+					"unsupported",
+					{
+						claim: "Implementation is repaired",
+						missingObservation: "No successful execution was observed",
+					},
+					true,
+				],
+				[
+					"unsupported",
+					{ claim: "", missingObservation: "Missing result" },
+					false,
+				],
+			] as const) {
+				const payload = {
+					decision,
+					confidence: 0.95,
+					issues: decision === "supported" ? [] : ["missing_observation"],
+					diagnosis,
+				};
+				const ctx = context(
+					strategy === "pi_chat"
+						? {
+								model: { id: "test-chat", provider: "test-provider" },
+								modelRegistry: {
+									streamSimple: () => ({
+										result: async () =>
+											assistantMessage(
+												"submit_evidence_semantic_assessment",
+												payload,
+											),
+									}),
+								},
+							}
+						: {
+								runEphemeralTurn: async () => ({
+									replyText: JSON.stringify(payload),
+								}),
+							},
+				);
+				const run = assessEvidenceSemantics(ctx, evidenceInput);
+				if (!valid) await expect(run).rejects.toThrow(/diagnosis/);
+				else {
+					const assessment = (await run).assessment;
+					expect(assessment.decision).toBe(decision);
+					expect(assessment.diagnosis).toEqual(diagnosis ?? undefined);
+				}
+			}
+		},
+	);
+
 	it("classifies passing evidence semantically rather than by wording", async () => {
 		let questionInstructions = "";
 		const result = await assessEvidenceSemantics(

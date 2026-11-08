@@ -1,0 +1,377 @@
+{
+	"observedAt": "2026-11-08T03:12:09.589Z",
+	"promptVersion": "2026-11-08.evidence.v2",
+	"assessorSourceSha256": "04ff299422bd3d67cc76e331f29f3533a7708e6a60144e90f206f0ca9bd1a791",
+	"corpusSha256": "be2100754106da524f538a7e60c4b3ba164e1018872b9b019c3088d1b38e8053",
+	"model": {
+		"provider": "openai-codex",
+		"id": "gpt-6.1-sol"
+	},
+	"administrativeRetries": 0,
+	"summary": {
+		"total": 9,
+		"matched": 9,
+		"falsePositives": 0,
+		"falseNegatives": 0,
+		"errors": 0
+	},
+	"rows": [
+		{
+			"id": "negative-trial-report",
+			"expected": "supported",
+			"elapsedMs": 2223,
+			"assessment": {
+				"contractVersion": 1,
+				"provenance": {
+					"version": 1,
+					"strategy": "pi_chat",
+					"provider": "openai-codex",
+					"model": "gpt-6.1-sol",
+					"promptVersion": "2026-11-08.evidence.v2",
+					"inputHash": "e088ed30c58b2a030a9f51643ddde85359f258967f97a045ed63ff13ce43b055",
+					"assessedAt": "2026-11-08T03:11:39.350Z"
+				},
+				"inputHash": "e088ed30c58b2a030a9f51643ddde85359f258967f97a045ed63ff13ce43b055",
+				"decision": "supported",
+				"confidence": 0.99,
+				"issues": []
+			},
+			"usage": {
+				"input": 1201,
+				"output": 32,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 1233,
+				"cost": {
+					"input": 0.002402,
+					"output": 0.00032,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0.002722,
+					"totalFromProvider": false
+				}
+			}
+		},
+		{
+			"id": "negative-trial-implementation",
+			"expected": "unsupported",
+			"elapsedMs": 3389,
+			"assessment": {
+				"contractVersion": 1,
+				"diagnosis": {
+					"claim": "Trial execution is repaired and produces useful verified output.",
+					"missingObservation": "Acceptance requires observed working execution and useful verified work. The ledger instead records zero useful outputs and three authentication failures before dispatch, with the execution failure explicitly unresolved."
+				},
+				"provenance": {
+					"version": 1,
+					"strategy": "pi_chat",
+					"provider": "openai-codex",
+					"model": "gpt-6.1-sol",
+					"promptVersion": "2026-11-08.evidence.v2",
+					"inputHash": "906b546c63d33622b19e2f08a76ef86730b18710bce83fae00d9ebb8c33eb8ef",
+					"assessedAt": "2026-11-08T03:11:41.563Z"
+				},
+				"inputHash": "906b546c63d33622b19e2f08a76ef86730b18710bce83fae00d9ebb8c33eb8ef",
+				"decision": "unsupported",
+				"confidence": 1,
+				"issues": ["contradictory_result"]
+			},
+			"usage": {
+				"input": 1182,
+				"output": 86,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 1268,
+				"cost": {
+					"input": 0.0023639999999999998,
+					"output": 0.0008600000000000001,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0.003224,
+					"totalFromProvider": false
+				}
+			}
+		},
+		{
+			"id": "contradictory-success",
+			"expected": "unsupported",
+			"elapsedMs": 3711,
+			"assessment": {
+				"contractVersion": 1,
+				"diagnosis": {
+					"claim": "Trial execution is repaired and produces useful verified work.",
+					"missingObservation": "The ledger reports zero useful outputs and three authentication refusals before dispatch, with the execution boundary unresolved. No working execution or useful verified output is observed."
+				},
+				"provenance": {
+					"version": 1,
+					"strategy": "pi_chat",
+					"provider": "openai-codex",
+					"model": "gpt-6.1-sol",
+					"promptVersion": "2026-11-08.evidence.v2",
+					"inputHash": "127998d75f0324a68a4d7030aa3fb23e18c5defdfbf7d991a68b91dd27b51895",
+					"assessedAt": "2026-11-08T03:11:44.952Z"
+				},
+				"inputHash": "127998d75f0324a68a4d7030aa3fb23e18c5defdfbf7d991a68b91dd27b51895",
+				"decision": "unsupported",
+				"confidence": 1,
+				"issues": ["contradictory_result"]
+			},
+			"usage": {
+				"input": 1175,
+				"output": 85,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 1260,
+				"cost": {
+					"input": 0.00235,
+					"output": 0.0008500000000000001,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0.0032,
+					"totalFromProvider": false
+				}
+			}
+		},
+		{
+			"id": "future-expectation",
+			"expected": "unsupported",
+			"elapsedMs": 3788,
+			"assessment": {
+				"contractVersion": 1,
+				"diagnosis": {
+					"claim": "Retained trial results have been reconciled into a sourced report of the observed outcome and unresolved execution mechanism.",
+					"missingObservation": "No actual trial outcome, inspected worker-log findings, or unresolved mechanism is reported. The artifact reference alone does not establish reconciliation, and the prediction that a next run will report the outcome is not an observed result from retained artifacts."
+				},
+				"provenance": {
+					"version": 1,
+					"strategy": "pi_chat",
+					"provider": "openai-codex",
+					"model": "gpt-6.1-sol",
+					"promptVersion": "2026-11-08.evidence.v2",
+					"inputHash": "decf6c594cc666cd4713d4a92c0fe4d4aef8907e30ab1c650988249164255732",
+					"assessedAt": "2026-11-08T03:11:48.670Z"
+				},
+				"inputHash": "decf6c594cc666cd4713d4a92c0fe4d4aef8907e30ab1c650988249164255732",
+				"decision": "unsupported",
+				"confidence": 0.99,
+				"issues": ["missing_observation", "hedged_claim"]
+			},
+			"usage": {
+				"input": 1156,
+				"output": 115,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 1271,
+				"cost": {
+					"input": 0.002312,
+					"output": 0.0011500000000000002,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0.003462,
+					"totalFromProvider": false
+				}
+			}
+		},
+		{
+			"id": "reference-only",
+			"expected": "unsupported",
+			"elapsedMs": 3951,
+			"assessment": {
+				"contractVersion": 1,
+				"diagnosis": {
+					"claim": "A sourced reconciliation reports the retained trial outcome and unresolved execution mechanism.",
+					"missingObservation": "The record asserts no useful work and unresolved execution failure but provides no concrete retained worker findings or reconciliation contents supporting those conclusions or identifying the unresolved mechanism. The artifact path and 'See' reference alone do not supply observed results."
+				},
+				"provenance": {
+					"version": 1,
+					"strategy": "pi_chat",
+					"provider": "openai-codex",
+					"model": "gpt-6.1-sol",
+					"promptVersion": "2026-11-08.evidence.v2",
+					"inputHash": "765effbc3b7326c5b3e35bc607917b369f6f7ab3d2c2d7410e6796890fccbc62",
+					"assessedAt": "2026-11-08T03:11:52.451Z"
+				},
+				"inputHash": "765effbc3b7326c5b3e35bc607917b369f6f7ab3d2c2d7410e6796890fccbc62",
+				"decision": "unsupported",
+				"confidence": 0.96,
+				"issues": ["missing_observation"]
+			},
+			"usage": {
+				"input": 1162,
+				"output": 102,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 1264,
+				"cost": {
+					"input": 0.002324,
+					"output": 0.00102,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0.003344,
+					"totalFromProvider": false
+				}
+			}
+		},
+		{
+			"id": "supported-synthesis",
+			"expected": "supported",
+			"elapsedMs": 2173,
+			"assessment": {
+				"contractVersion": 1,
+				"provenance": {
+					"version": 1,
+					"strategy": "pi_chat",
+					"provider": "openai-codex",
+					"model": "gpt-6.1-sol",
+					"promptVersion": "2026-11-08.evidence.v2",
+					"inputHash": "6f84b2545d11892bcf979cbe91eb048b1969bf095f8396474d2ade2f62c4579e",
+					"assessedAt": "2026-11-08T03:11:56.402Z"
+				},
+				"inputHash": "6f84b2545d11892bcf979cbe91eb048b1969bf095f8396474d2ade2f62c4579e",
+				"decision": "supported",
+				"confidence": 0.99,
+				"issues": []
+			},
+			"usage": {
+				"input": 1199,
+				"output": 32,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 1231,
+				"cost": {
+					"input": 0.002398,
+					"output": 0.00032,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0.002718,
+					"totalFromProvider": false
+				}
+			}
+		},
+		{
+			"id": "unsupported-synthesis",
+			"expected": "unsupported",
+			"elapsedMs": 4116,
+			"assessment": {
+				"contractVersion": 1,
+				"diagnosis": {
+					"claim": "The retained results establish a sourced reconciliation of the trial outcome and unresolved execution mechanism.",
+					"missingObservation": "The record only states that files were read and analysis completed. It reports no specific trial outcome, inspected findings, unresolved mechanism, or connection from retained findings to the reconciliation conclusion."
+				},
+				"provenance": {
+					"version": 1,
+					"strategy": "pi_chat",
+					"provider": "openai-codex",
+					"model": "gpt-6.1-sol",
+					"promptVersion": "2026-11-08.evidence.v2",
+					"inputHash": "a76a1f9c261e20ca86d6f89f6a1de61222de37d72c8e6b75060e3287556879b2",
+					"assessedAt": "2026-11-08T03:11:58.574Z"
+				},
+				"inputHash": "a76a1f9c261e20ca86d6f89f6a1de61222de37d72c8e6b75060e3287556879b2",
+				"decision": "unsupported",
+				"confidence": 0.99,
+				"issues": ["missing_observation"]
+			},
+			"usage": {
+				"input": 1157,
+				"output": 96,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 1253,
+				"cost": {
+					"input": 0.002314,
+					"output": 0.0009600000000000001,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0.003274,
+					"totalFromProvider": false
+				}
+			}
+		},
+		{
+			"id": "diagnostic-not-implementation",
+			"expected": "supported",
+			"elapsedMs": 2768,
+			"assessment": {
+				"contractVersion": 1,
+				"provenance": {
+					"version": 1,
+					"strategy": "pi_chat",
+					"provider": "openai-codex",
+					"model": "gpt-6.1-sol",
+					"promptVersion": "2026-11-08.evidence.v2",
+					"inputHash": "b6418aec526c50825e57e064d6ce0843ec6ab459297bbdff6d63d803f4669a35",
+					"assessedAt": "2026-11-08T03:12:02.692Z"
+				},
+				"inputHash": "b6418aec526c50825e57e064d6ce0843ec6ab459297bbdff6d63d803f4669a35",
+				"decision": "supported",
+				"confidence": 0.99,
+				"issues": []
+			},
+			"usage": {
+				"input": 1182,
+				"output": 32,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 1214,
+				"cost": {
+					"input": 0.0023639999999999998,
+					"output": 0.00032,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0.0026839999999999998,
+					"totalFromProvider": false
+				}
+			}
+		},
+		{
+			"id": "evidence-cannot-redefine-contract",
+			"expected": "unsupported",
+			"elapsedMs": 4131,
+			"assessment": {
+				"contractVersion": 1,
+				"diagnosis": {
+					"claim": "Trial execution is repaired and produces useful verified output.",
+					"missingObservation": "Acceptance requires observed working execution and useful verified work. The ledger instead records zero useful outputs, three authentication failures before dispatch, and an unresolved execution boundary; no repair or successful trial is observed."
+				},
+				"provenance": {
+					"version": 1,
+					"strategy": "pi_chat",
+					"provider": "openai-codex",
+					"model": "gpt-6.1-sol",
+					"promptVersion": "2026-11-08.evidence.v2",
+					"inputHash": "13028ec5ea22a053fb02b517170094663380a81e4a7ca3aabbc417262a40046d",
+					"assessedAt": "2026-11-08T03:12:05.459Z"
+				},
+				"inputHash": "13028ec5ea22a053fb02b517170094663380a81e4a7ca3aabbc417262a40046d",
+				"decision": "unsupported",
+				"confidence": 1,
+				"issues": ["contradictory_result"]
+			},
+			"usage": {
+				"input": 1180,
+				"output": 93,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 1273,
+				"cost": {
+					"input": 0.0023599999999999997,
+					"output": 0.00093,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0.0032899999999999995,
+					"totalFromProvider": false
+				}
+			}
+		}
+	]
+}

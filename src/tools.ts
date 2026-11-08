@@ -5,6 +5,7 @@ import {
 	recoveryChecks,
 	repositoryIdentity,
 } from "./compaction-recovery.ts";
+import { evidenceContract } from "./evidence-contract.ts";
 import {
 	handoffSchema,
 	type OrchestrationHandoff,
@@ -72,6 +73,7 @@ import {
 	assessEvidenceSemantics,
 	assessPlanSemantics,
 	type EvidenceAssessmentInput,
+	hashEvidenceAssessmentInput,
 	mergeUsage,
 	SemanticAssessmentError,
 } from "./semantic-assessment.ts";
@@ -1149,7 +1151,10 @@ export function registerTaskTools(
 				return rejectedMutationResult(error, store.getState(), draftEvent);
 			}
 			try {
-				const input = evidenceAssessmentInput(params);
+				const task = store.getState().tasks[params.task_id];
+				if (!task)
+					throw new TaskTransitionError(`Task ${params.task_id} not found`);
+				const input = evidenceAssessmentInput(params, task);
 				const replayVersion = store.getReplayVersion();
 				const run = await assessEvidenceSemantics(ctx, input, signal);
 				assertReplayVersion(store, replayVersion, run.usage);
@@ -1270,6 +1275,7 @@ export function registerTaskTools(
 					{ ...entry, task_id: params.task_id },
 				);
 				const evidence = {
+					contractVersion: 1 as const,
 					id: duplicate?.id ?? nextEvidenceId(state, idGenerator, reservedIds),
 					type: entry.type,
 					role: entry.role ?? "acceptance",
@@ -1361,7 +1367,10 @@ export function registerTaskTools(
 				step_ids: [params.step_id],
 				quality: params.quality,
 			};
-			const duplicate = findDuplicateEvidenceForParams(task, evidenceParams);
+			const duplicate = findDuplicateEvidenceForParams(task, {
+				...evidenceParams,
+				step_id: params.step_id,
+			});
 			const step = task?.planSteps.find(
 				(candidate) => candidate.id === params.step_id,
 			);
@@ -1408,6 +1417,7 @@ export function registerTaskTools(
 			const event = baseEvent("task.step_verified", params.task_id, ctx, {
 				stepId: params.step_id,
 				evidence: {
+					contractVersion: 1,
 					id: evidenceId,
 					type: params.type,
 					role: "acceptance",
@@ -1732,8 +1742,14 @@ function planStepInputs(
 
 function evidenceAssessmentInput(
 	params: TaskEvidenceParams,
+	task: Task,
 ): EvidenceAssessmentInput {
 	return {
+		contract: evidenceContract(task, {
+			stepIds: params.step_ids,
+			criterionIds: params.criterion_ids,
+			role: params.role,
+		}),
 		type: params.type,
 		level: params.level,
 		summary: params.summary,
@@ -1750,6 +1766,7 @@ function evidenceEvent(
 ): Extract<TaskEvent, { type: "task.evidence_added" }> {
 	return baseEvent("task.evidence_added", params.task_id, ctx, {
 		evidence: {
+			contractVersion: 1,
 			id: evidenceId,
 			type: params.type,
 			level: params.level,
@@ -1914,6 +1931,19 @@ async function assessForkMutation(
 				const run = await assessEvidenceSemantics(
 					ctx,
 					{
+						contract: evidenceContract(task, {
+							stepIds:
+								entry.type === "task.step_verified"
+									? [entry.stepId]
+									: entry.stepIds,
+							criterionIds:
+								entry.criterionIds ??
+								(entry.type === "task.step_verified"
+									? task.planSteps.find((step) => step.id === entry.stepId)
+											?.criterionIds
+									: []),
+							role: evidence.role,
+						}),
 						type: evidence.type,
 						level: evidence.level,
 						summary: evidence.summary,
@@ -2409,13 +2439,42 @@ function parsePassed(value: string): boolean | "unknown" {
 
 function findDuplicateEvidenceForParams(
 	task: Task | undefined,
-	params: TaskEvidenceParams,
+	params: TaskEvidenceParams & { step_id?: string },
 ): TaskEvidence | undefined {
 	if (!task) return undefined;
 	const passed = parsePassed(params.passed);
+	let inputHash: string | undefined;
+	if (passed === true) {
+		try {
+			inputHash = hashEvidenceAssessmentInput(
+				evidenceAssessmentInput(
+					{
+						...params,
+						...(params.step_id
+							? {
+									step_ids: [params.step_id],
+									criterion_ids:
+										params.criterion_ids ??
+										task.planSteps.find((step) => step.id === params.step_id)
+											?.criterionIds ??
+										[],
+								}
+							: {}),
+					},
+					task,
+				),
+			);
+		} catch {
+			// Invalid targets proceed to the ordinary structural rejection, never a shortcut.
+			return undefined;
+		}
+	}
 	const references = params.references ?? [];
 	return task.evidence.find(
 		(evidence) =>
+			(passed !== true ||
+				(evidence.semanticAssessment?.contractVersion === 1 &&
+					evidence.semanticAssessment.inputHash === inputHash)) &&
 			evidence.type === params.type &&
 			(evidence.role ?? "acceptance") === (params.role ?? "acceptance") &&
 			evidence.level === params.level &&

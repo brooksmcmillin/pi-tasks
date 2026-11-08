@@ -1,4 +1,5 @@
 import { checkpoint, latestCheckpoint, recoveryChecks, repositoryIdentity, } from "./compaction-recovery.js";
+import { evidenceContract } from "./evidence-contract.js";
 import { handoffSchema, validateHandoff, } from "./handoff.js";
 import { createEventId, SequentialIdGenerator, } from "./ids.js";
 import { isAtMaximumDecompositionDepth, MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH, MAX_EVIDENCE_REFERENCE_LENGTH, MAX_EVIDENCE_SUMMARY_LENGTH, } from "./model.js";
@@ -6,7 +7,7 @@ import { evidenceQualityEqual, normalizeEvidenceQuality, reduceTaskState, TaskTr
 import { COMPACT_REMEDIATION_GUIDANCE, compactRemediationSchema, normalizeReworkInput, } from "./remediation.js";
 import { buildTaskResume, formatTaskFocus, formatTaskList, formatTaskNext, formatTaskReceipt, formatTaskResume, getTaskPlanRecoveryParams, recoveryPlanStep, } from "./render.js";
 import { Type } from "./schema.js";
-import { assessEvidenceSemantics, assessPlanSemantics, mergeUsage, SemanticAssessmentError, } from "./semantic-assessment.js";
+import { assessEvidenceSemantics, assessPlanSemantics, hashEvidenceAssessmentInput, mergeUsage, SemanticAssessmentError, } from "./semantic-assessment.js";
 import { TASK_TELEMETRY_EVENT } from "./state-events.js";
 import { errorText, snapshotState } from "./store.js";
 import { updateTaskUi } from "./widget.js";
@@ -680,7 +681,10 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 return rejectedMutationResult(error, store.getState(), draftEvent);
             }
             try {
-                const input = evidenceAssessmentInput(params);
+                const task = store.getState().tasks[params.task_id];
+                if (!task)
+                    throw new TaskTransitionError(`Task ${params.task_id} not found`);
+                const input = evidenceAssessmentInput(params, task);
                 const replayVersion = store.getReplayVersion();
                 const run = await assessEvidenceSemantics(ctx, input, signal);
                 assertReplayVersion(store, replayVersion, run.usage);
@@ -761,6 +765,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             const entries = params.entries.map((entry) => {
                 const duplicate = findDuplicateEvidenceForParams(state.tasks[params.task_id], { ...entry, task_id: params.task_id });
                 const evidence = {
+                    contractVersion: 1,
                     id: duplicate?.id ?? nextEvidenceId(state, idGenerator, reservedIds),
                     type: entry.type,
                     role: entry.role ?? "acceptance",
@@ -838,7 +843,10 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 step_ids: [params.step_id],
                 quality: params.quality,
             };
-            const duplicate = findDuplicateEvidenceForParams(task, evidenceParams);
+            const duplicate = findDuplicateEvidenceForParams(task, {
+                ...evidenceParams,
+                step_id: params.step_id,
+            });
             const step = task?.planSteps.find((candidate) => candidate.id === params.step_id);
             const criterionIds = params.criterion_ids ?? step?.criterionIds ?? [];
             const criteriaBelongToStep = criterionIds.every((criterionId) => step?.criterionIds.includes(criterionId));
@@ -871,6 +879,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             const event = baseEvent("task.step_verified", params.task_id, ctx, {
                 stepId: params.step_id,
                 evidence: {
+                    contractVersion: 1,
                     id: evidenceId,
                     type: params.type,
                     role: "acceptance",
@@ -1101,8 +1110,13 @@ function planStepInputs(planSteps, initialSteps) {
         allowedActions: [],
     }));
 }
-function evidenceAssessmentInput(params) {
+function evidenceAssessmentInput(params, task) {
     return {
+        contract: evidenceContract(task, {
+            stepIds: params.step_ids,
+            criterionIds: params.criterion_ids,
+            role: params.role,
+        }),
         type: params.type,
         level: params.level,
         summary: params.summary,
@@ -1113,6 +1127,7 @@ function evidenceAssessmentInput(params) {
 function evidenceEvent(params, evidenceId, ctx, semanticAssessment) {
     return baseEvent("task.evidence_added", params.task_id, ctx, {
         evidence: {
+            contractVersion: 1,
             id: evidenceId,
             type: params.type,
             level: params.level,
@@ -1235,6 +1250,17 @@ async function assessForkMutation(state, event, ctx, signal) {
                     continue;
                 const evidence = entry.evidence;
                 const run = await assessEvidenceSemantics(ctx, {
+                    contract: evidenceContract(task, {
+                        stepIds: entry.type === "task.step_verified"
+                            ? [entry.stepId]
+                            : entry.stepIds,
+                        criterionIds: entry.criterionIds ??
+                            (entry.type === "task.step_verified"
+                                ? task.planSteps.find((step) => step.id === entry.stepId)
+                                    ?.criterionIds
+                                : []),
+                        role: evidence.role,
+                    }),
                     type: evidence.type,
                     level: evidence.level,
                     summary: evidence.summary,
@@ -1594,8 +1620,32 @@ function findDuplicateEvidenceForParams(task, params) {
     if (!task)
         return undefined;
     const passed = parsePassed(params.passed);
+    let inputHash;
+    if (passed === true) {
+        try {
+            inputHash = hashEvidenceAssessmentInput(evidenceAssessmentInput({
+                ...params,
+                ...(params.step_id
+                    ? {
+                        step_ids: [params.step_id],
+                        criterion_ids: params.criterion_ids ??
+                            task.planSteps.find((step) => step.id === params.step_id)
+                                ?.criterionIds ??
+                            [],
+                    }
+                    : {}),
+            }, task));
+        }
+        catch {
+            // Invalid targets proceed to the ordinary structural rejection, never a shortcut.
+            return undefined;
+        }
+    }
     const references = params.references ?? [];
-    return task.evidence.find((evidence) => evidence.type === params.type &&
+    return task.evidence.find((evidence) => (passed !== true ||
+        (evidence.semanticAssessment?.contractVersion === 1 &&
+            evidence.semanticAssessment.inputHash === inputHash)) &&
+        evidence.type === params.type &&
         (evidence.role ?? "acceptance") === (params.role ?? "acceptance") &&
         evidence.level === params.level &&
         evidence.passed === passed &&
