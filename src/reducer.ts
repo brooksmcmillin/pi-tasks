@@ -57,7 +57,8 @@ const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 
 export type TaskTransitionErrorCode =
 	| "scope_activity_required"
-	| "scope_reason_required";
+	| "scope_reason_required"
+	| "status_transition";
 
 export class TaskTransitionError extends Error {
 	readonly code: TaskTransitionErrorCode | undefined;
@@ -1955,6 +1956,7 @@ function validateStatusTransition(
 	if (TERMINAL_STATUSES.includes(current)) {
 		throw new TaskTransitionError(
 			`Task ${task.id} is ${current} and cannot transition to ${nextStatus}`,
+			"status_transition",
 		);
 	}
 	const allowed: Record<TaskStatus, TaskStatus[]> = {
@@ -1968,10 +1970,14 @@ function validateStatusTransition(
 	if (!allowed[current].includes(nextStatus)) {
 		throw new TaskTransitionError(
 			`Invalid transition for ${task.id}: ${current} -> ${nextStatus}`,
+			"status_transition",
 		);
 	}
 	if (nextStatus === "done" && event.type === "task.updated") {
-		throw new TaskTransitionError("Use task_complete to mark a task done");
+		throw new TaskTransitionError(
+			"Use task_complete to mark a task done",
+			"status_transition",
+		);
 	}
 	if (
 		nextStatus === "cancelled" &&
@@ -1985,7 +1991,10 @@ function validateStatusTransition(
 		event.type === "task.updated" &&
 		!event.blocker
 	) {
-		throw new TaskTransitionError("Blocking a task requires blocker details");
+		throw new TaskTransitionError(
+			"Blocking a task requires blocker details",
+			"status_transition",
+		);
 	}
 	if (
 		nextStatus === "active" &&
@@ -1993,7 +2002,10 @@ function validateStatusTransition(
 		event.type === "task.updated" &&
 		!event.reason?.trim()
 	) {
-		throw new TaskTransitionError("Unblocking a task requires a reason");
+		throw new TaskTransitionError(
+			"Unblocking a task requires a reason",
+			"status_transition",
+		);
 	}
 	if (
 		nextStatus === "review" &&
@@ -2003,6 +2015,7 @@ function validateStatusTransition(
 	) {
 		throw new TaskTransitionError(
 			"Moving to review requires progress or evidence",
+			"status_transition",
 		);
 	}
 }

@@ -1,6 +1,6 @@
 import { type AcceptanceCriterion, type EvidenceQuality, type Task, type TaskEvent, type TaskEvidence, type TaskState, type TaskStepInput } from "./model.ts";
 import { type PlanAssessmentInput } from "./semantic-assessment.ts";
-export type TaskTransitionErrorCode = "scope_activity_required" | "scope_reason_required";
+export type TaskTransitionErrorCode = "scope_activity_required" | "scope_reason_required" | "status_transition";
 export declare class TaskTransitionError extends Error {
     readonly code: TaskTransitionErrorCode | undefined;
     constructor(message: string, code?: TaskTransitionErrorCode);

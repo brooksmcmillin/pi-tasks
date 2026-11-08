@@ -449,7 +449,11 @@ purpose (`to verify`, `to validate`, `to confirm`, `to analyze`, `to summarize`,
 `to check`), regardless of object length or words such as `test` in the object.
 The existing quality and evidence gates still apply to substantive deliverables. When `task_update` rejects a missing scope
 `activity` or cancellation `reason`, recovery points back to `task_update` and
-prints the required parameters.
+prints the required parameters. Invalid status transitions also target the existing
+task: blocked-to-review first requires actual blocker resolution and an explicit
+reason for blocked-to-active. Completion still requires `task_complete` and its
+evidence checks. Terminal or unsupported transitions explain the remaining action
+rather than suggesting a new task; a rejected call does not change state.
 
 ## Classify an already-simple step
 

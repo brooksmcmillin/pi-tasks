@@ -133,6 +133,306 @@ function requireTool(
 }
 
 describe("registered task tools", () => {
+	async function transitionHarness(status = "active") {
+		const harness = createHarness();
+		const call = async (name: string, params: Record<string, unknown>) => {
+			const tool = requireTool(harness.tools, name);
+			assertSchema(tool.parameters, params);
+			return execute(tool, params, harness.ctx);
+		};
+		expect(
+			(
+				await call("task_plan", {
+					title: "Transition fixture",
+					objective: "Preserve an existing task through legal recovery",
+					acceptance_criteria: ["Recovery preserves recorded verification"],
+					plan_steps: [
+						{
+							text: "Verify the fixture checksum",
+							expectedOutput: "One verified checksum",
+							allowedActions: ["Run checksum test"],
+						},
+					],
+					activate: status !== "pending",
+				})
+			).isError,
+		).not.toBe(true);
+		if (status !== "pending") {
+			expect(
+				(
+					await call("task_verify_step", {
+						task_id: "T1",
+						step_id: "T1-S1",
+						type: "test",
+						level: "unit_test",
+						summary: "Checksum test passed",
+						references: ["fixture-test"],
+						quality: {
+							source: "fixture runner",
+							reproducible: true,
+							verifier: "tool",
+							command: "checksum-test",
+							artifactRefs: ["fixture-test"],
+							observedOutput: "1 test passed",
+						},
+					})
+				).isError,
+			).not.toBe(true);
+		}
+		if (status === "done") {
+			const evidenceId = harness.store.getState().tasks.T1?.evidence[0]?.id;
+			expect(
+				(
+					await call("task_complete", {
+						task_id: "T1",
+						summary: "Checksum verified",
+						evidence_ids: [evidenceId],
+					})
+				).isError,
+			).not.toBe(true);
+		} else if (!["pending", "active"].includes(status)) {
+			expect(
+				(
+					await call("task_update", {
+						task_id: "T1",
+						status,
+						...(status === "blocked"
+							? {
+									blocker: {
+										reason: "Awaiting fixture owner decision",
+										blockedBy: "user",
+										neededToUnblock: "Owner confirms checksum",
+									},
+								}
+							: {}),
+						...(status === "cancelled"
+							? { reason: "Owner withdrew objective" }
+							: {}),
+					})
+				).isError,
+			).not.toBe(true);
+		}
+		return { ...harness, call };
+	}
+
+	it("recovers blocked-to-review on the existing task without discarding evidence or blockers", async () => {
+		const { call, store, entries, publications } =
+			await transitionHarness("blocked");
+		const before = structuredClone(store.getState());
+		const eventCount = entries.length;
+		const publicationCount = publications.length;
+		const rejected = await call("task_update", {
+			task_id: "T1",
+			status: "review",
+		});
+		expect(rejected.isError).toBe(true);
+		expect(store.getState()).toEqual(before);
+		expect(entries).toHaveLength(eventCount);
+		expect(publications).toHaveLength(publicationCount);
+		expect(rejected.details).toMatchObject({
+			retry_with: "task_update",
+			minimum_params: {
+				task_id: "T1",
+				status: "active",
+				reason: expect.stringContaining("blocker is resolved"),
+			},
+			transition_recovery: {
+				task_id: "T1",
+				current_status: "blocked",
+				requested_status: "review",
+			},
+		});
+		expect(rejected.content[0]?.text).toContain(
+			"Only after the recorded blocker is actually resolved",
+		);
+		expect(rejected.content[0]?.text).not.toContain("task_plan");
+		const recovery = rejected.details as {
+			minimum_params: Record<string, unknown>;
+		};
+		const noReason = await call("task_update", {
+			task_id: "T1",
+			status: "active",
+		});
+		expect(noReason.isError).toBe(true);
+		expect(store.getState()).toEqual(before);
+		// The fixture owner decision is supplied explicitly, not inferred by recovery.
+		expect(
+			(
+				await call("task_update", {
+					...recovery.minimum_params,
+					reason: "Fixture owner confirmed the checksum",
+				})
+			).isError,
+		).not.toBe(true);
+		expect(
+			(await call("task_update", { task_id: "T1", status: "review" })).isError,
+		).not.toBe(true);
+		const after = store.getState();
+		expect(Object.keys(after.tasks)).toEqual(["T1"]);
+		expect(after.tasks.T1?.status).toBe("review");
+		expect(after.tasks.T1?.evidence).toEqual(before.tasks.T1?.evidence);
+		expect(after.tasks.T1?.acceptanceCriteria).toEqual(
+			before.tasks.T1?.acceptanceCriteria,
+		);
+		expect(after.tasks.T1?.planSteps).toEqual(before.tasks.T1?.planSteps);
+		expect(
+			after.tasks.T1?.blockers.every((blocker) => blocker.resolvedAt),
+		).toBe(true);
+		expect(after.events.slice(0, before.events.length)).toEqual(before.events);
+		expect(entries).toHaveLength(eventCount + 2);
+	});
+
+	it.each([
+		["pending", "review", "task_update", "Activate existing task T1 first"],
+		["pending", "blocked", "task_update", "Activate existing task T1 first"],
+		["pending", "done", "task_update", "Activate existing task T1 first"],
+		[
+			"active",
+			"pending",
+			"task_resume",
+			"cannot transition from active to pending",
+		],
+		[
+			"review",
+			"pending",
+			"task_resume",
+			"cannot transition from review to pending",
+		],
+		[
+			"blocked",
+			"pending",
+			"task_resume",
+			"cannot transition from blocked to pending",
+		],
+		[
+			"blocked",
+			"done",
+			"task_update",
+			"Only after the recorded blocker is actually resolved",
+		],
+		["blocked", "active", "task_update", "explicit resolution reason"],
+		["active", "blocked", "task_update", "actual blocker reason"],
+		["review", "blocked", "task_update", "actual blocker reason"],
+		["active", "done", "task_complete", "only after its plan"],
+		["review", "done", "task_complete", "only after its plan"],
+		["done", "active", "task_resume", "no status transition is allowed"],
+		["cancelled", "active", "task_resume", "no status transition is allowed"],
+	])(
+		"targets %s -> %s rejection without borrowing the active task recommendation",
+		async (current, requested, retryWith, explanation) => {
+			const { call, store, entries, publications, tools } =
+				await transitionHarness(current);
+			const before = structuredClone(store.getState());
+			const eventCount = entries.length;
+			const publicationCount = publications.length;
+			const rejected = await call("task_update", {
+				task_id: "T1",
+				status: requested,
+			});
+			expect(rejected.isError).toBe(true);
+			expect(rejected.details).toMatchObject({
+				retry_with: retryWith,
+				transition_recovery: {
+					task_id: "T1",
+					current_status: current,
+					requested_status: requested,
+				},
+			});
+			expect(rejected.content[0]?.text).toContain(explanation);
+			expect(rejected.content[0]?.text).not.toContain("retry_with: task_plan");
+			expect(store.getState()).toEqual(before);
+			expect(entries).toHaveLength(eventCount);
+			expect(publications).toHaveLength(publicationCount);
+			const recovery = rejected.details as {
+				minimum_params: Record<string, unknown>;
+			};
+			assertSchema(
+				requireTool(tools, retryWith).parameters,
+				recovery.minimum_params,
+			);
+		},
+	);
+
+	it("does not borrow recovery from another active task", async () => {
+		const { call, store } = await transitionHarness("blocked");
+		expect(
+			(
+				await call("task_plan", {
+					title: "Unrelated objective",
+					objective: "Verify another fixture",
+					acceptance_criteria: ["Other fixture passes"],
+					plan_steps: [
+						{
+							text: "Verify the second checksum",
+							expectedOutput: "Second checksum verified",
+							allowedActions: ["Run second test"],
+						},
+					],
+				})
+			).isError,
+		).not.toBe(true);
+		const otherActive = store.getState().activeTaskId;
+		expect(otherActive).not.toBe("T1");
+		const rejected = await call("task_update", {
+			task_id: "T1",
+			status: "review",
+		});
+		expect(rejected.details).toMatchObject({
+			retry_with: "task_update",
+			minimum_params: { task_id: "T1", status: "active" },
+		});
+		expect(store.getState().activeTaskId).toBe(otherActive);
+	});
+
+	it("leaves legacy zero-progress review recovery conditional on real work", async () => {
+		const { call, store, entries } = await transitionHarness("pending");
+		// Legacy snapshots may contain active tasks before the current progress floor.
+		const task = store.getState().tasks.T1;
+		if (!task) throw new Error("Missing fixture task");
+		task.status = "active";
+		task.progress = 0;
+		store.getState().activeTaskId = "T1";
+		const before = structuredClone(store.getState());
+		const rejected = await call("task_update", {
+			task_id: "T1",
+			status: "review",
+		});
+		expect(rejected.isError).toBe(true);
+		expect(rejected.details).toMatchObject({
+			retry_with: "task_resume",
+			minimum_params: {},
+		});
+		expect(rejected.content[0]?.text).toContain(
+			"record actual progress or evidence",
+		);
+		expect(store.getState()).toEqual(before);
+		expect(entries).toHaveLength(1);
+	});
+
+	it.each(["active", "review"])(
+		"follows task_complete recovery from %s through schema and completion guards",
+		async (current) => {
+			const { call, store } = await transitionHarness(current);
+			const rejected = await call("task_update", {
+				task_id: "T1",
+				status: "done",
+			});
+			const recovery = rejected.details as {
+				minimum_params: Record<string, unknown>;
+			};
+			const evidenceId = store.getState().tasks.T1?.evidence[0]?.id;
+			expect(
+				(
+					await call("task_complete", {
+						...recovery.minimum_params,
+						summary: "Verified checksum",
+						evidence_ids: [evidenceId],
+					})
+				).isError,
+			).not.toBe(true);
+			expect(store.getState().tasks.T1?.status).toBe("done");
+		},
+	);
 	it.each(["task_plan", "task_update", "task_decompose", "task_rework"])(
 		"preserves full deliverable context and replay for %s",
 		async (name) => {
