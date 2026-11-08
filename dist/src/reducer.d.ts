@@ -9,6 +9,9 @@ export declare function reduceTaskState(state: TaskState, event: TaskEvent, opti
     replay?: boolean;
 }): TaskState;
 export declare function replayTaskEvents(events: TaskEvent[]): TaskState;
+export declare function taskMutationAssessmentInput(task: Task, event: Extract<TaskEvent, {
+    type: "task.steps_decomposed" | "task.replanned" | "task.reworked" | "task.updated";
+}>): PlanAssessmentInput;
 export declare function taskPlanAssessmentInput(task: Task, steps: TaskStepInput[]): PlanAssessmentInput;
 export declare function hasFreshCriterionEvidence(task: Task, criterion: AcceptanceCriterion): boolean;
 export declare function normalizeEvidenceQuality(quality: EvidenceQuality | undefined, evidence: Omit<TaskEvidence, "taskId" | "createdAt" | "quality">): EvidenceQuality;

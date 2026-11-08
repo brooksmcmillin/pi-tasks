@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TASK_EVENT_CUSTOM_TYPE, type TaskEvent } from "../../src/model.ts";
-import { taskPlanAssessmentInput } from "../../src/reducer.ts";
+import { taskMutationAssessmentInput } from "../../src/reducer.ts";
 import { buildTaskResume } from "../../src/render.ts";
 import { createTaskRuntimeStore } from "../../src/store.ts";
 import { planAssessment } from "./semantic-fixture.ts";
@@ -216,7 +216,7 @@ describe("current-step atomic classification", () => {
 		const task = store.getState().tasks.T1;
 		if (!task) throw new Error("Missing task fixture");
 		const semanticAssessment = planAssessment(
-			taskPlanAssessmentInput(task, task.planSteps),
+			taskMutationAssessmentInput(task, classification),
 			["needs_breakdown"],
 		);
 		expect(() =>

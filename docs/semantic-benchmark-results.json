@@ -1,0 +1,1134 @@
+{
+	"hostVersion": "1.5.0",
+	"note": "One baseline and three candidate source revisions evaluated; this final comparison retains baseline and the latest context-preservation/index-validation candidate. No case was reworded or retried within an evaluation. These small local results do not establish population accuracy.",
+	"baseline": {
+		"observedAt": "2026-11-07T23:30:27.129Z",
+		"promptVersion": "2026-11-04.v2",
+		"assessorSourceSha256": "3967fe6ece50e96c03cce9c8f69f4032303677e7cafa0569ee6a29c4f0e2922b",
+		"corpusSha256": "eca068b1afa218aaa15a55ec65676f6ed8d4fe6a13b194005049dc90d2dd77fe",
+		"model": {
+			"provider": "openai-codex",
+			"id": "gpt-6.1-sol"
+		},
+		"administrativeRetries": 0,
+		"agreement": {
+			"matched": 6,
+			"total": 8
+		},
+		"rows": [
+			{
+				"id": "batch-prose",
+				"expected": "atomic",
+				"agreed": true,
+				"elapsedMs": 5995,
+				"assessment": {
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-04.v2",
+						"inputHash": "9c1e7eae32084fd07653e5aac8e94e1765ca5af6c08b53a6b5e8b48f4ba08dba",
+						"assessedAt": "2026-11-07T23:29:54.769Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "630579db5665622f0abe88927d53bef8671b88bacfba26fd6a0a7d513b09e47a",
+							"decision": "atomic",
+							"specific": {
+								"value": true,
+								"confidence": 0.94
+							},
+							"actionCount": {
+								"value": "one",
+								"confidence": 0.97
+							},
+							"outputCount": {
+								"value": "one",
+								"confidence": 0.97
+							},
+							"verificationCount": {
+								"value": "one",
+								"confidence": 0.98
+							},
+							"hiddenSubtasks": {
+								"value": false,
+								"confidence": 0.96
+							},
+							"confidence": 0.94,
+							"issues": []
+						}
+					]
+				},
+				"usage": {
+					"input": 795,
+					"output": 97,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 17,
+					"totalTokens": 892,
+					"cost": {
+						"input": 0.0015899999999999998,
+						"output": 0.00097,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.0025599999999999998,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "batch-command",
+				"expected": "atomic",
+				"agreed": true,
+				"elapsedMs": 5574,
+				"assessment": {
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-04.v2",
+						"inputHash": "734a1fc2f1738f599d18184a91e48d0a2b4e7298e4090c6edba3241104202592",
+						"assessedAt": "2026-11-07T23:30:00.755Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "219cba3399f0a9f87bbb6c5a70d05f865299715983c3db915d0abb893edd4fbf",
+							"decision": "atomic",
+							"specific": {
+								"value": true,
+								"confidence": 0.94
+							},
+							"actionCount": {
+								"value": "one",
+								"confidence": 0.97
+							},
+							"outputCount": {
+								"value": "one",
+								"confidence": 0.97
+							},
+							"verificationCount": {
+								"value": "one",
+								"confidence": 0.98
+							},
+							"hiddenSubtasks": {
+								"value": false,
+								"confidence": 0.96
+							},
+							"confidence": 0.94,
+							"issues": []
+						}
+					]
+				},
+				"usage": {
+					"input": 793,
+					"output": 97,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 17,
+					"totalTokens": 890,
+					"cost": {
+						"input": 0.001586,
+						"output": 0.00097,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.002556,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "bounded-report",
+				"expected": "atomic",
+				"agreed": true,
+				"elapsedMs": 2966,
+				"assessment": {
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-04.v2",
+						"inputHash": "1a4c92a750d4c4b4a38ab2c56ef09a4ca9d161a0b82522753053556fde6d07ce",
+						"assessedAt": "2026-11-07T23:30:06.330Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "85347afa290c81acdf12fb7d489d5898108bb557f56ea27b27a3c4351e7386b1",
+							"decision": "atomic",
+							"specific": {
+								"value": true,
+								"confidence": 0.9
+							},
+							"actionCount": {
+								"value": "one",
+								"confidence": 0.96
+							},
+							"outputCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"verificationCount": {
+								"value": "one",
+								"confidence": 0.96
+							},
+							"hiddenSubtasks": {
+								"value": false,
+								"confidence": 0.94
+							},
+							"confidence": 0.9,
+							"issues": []
+						}
+					]
+				},
+				"usage": {
+					"input": 758,
+					"output": 78,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 836,
+					"cost": {
+						"input": 0.001516,
+						"output": 0.0007800000000000001,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.0022960000000000003,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "focused-repair",
+				"expected": "atomic",
+				"agreed": true,
+				"elapsedMs": 3564,
+				"assessment": {
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-04.v2",
+						"inputHash": "ef01963d0f74ad244a6e1bff96331a8699e0fe9a542e2215c391a4c24e5abd6b",
+						"assessedAt": "2026-11-07T23:30:09.296Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "dc9f399b5bf5a0e98c23fdc9ce093e954bab381c4103472c2344f24547a660ff",
+							"decision": "atomic",
+							"specific": {
+								"value": true,
+								"confidence": 0.96
+							},
+							"actionCount": {
+								"value": "one",
+								"confidence": 0.98
+							},
+							"outputCount": {
+								"value": "one",
+								"confidence": 0.98
+							},
+							"verificationCount": {
+								"value": "one",
+								"confidence": 0.97
+							},
+							"hiddenSubtasks": {
+								"value": false,
+								"confidence": 0.97
+							},
+							"confidence": 0.96,
+							"issues": []
+						}
+					]
+				},
+				"usage": {
+					"input": 761,
+					"output": 78,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 839,
+					"cost": {
+						"input": 0.001522,
+						"output": 0.0007800000000000001,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.0023020000000000002,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "independent-products",
+				"expected": "needs_breakdown",
+				"agreed": false,
+				"elapsedMs": 3177,
+				"assessment": {
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-04.v2",
+						"inputHash": "a3cb25314f437ab7d3a06235c218032ecc5910155f3c523ce305d01f5256a60c",
+						"assessedAt": "2026-11-07T23:30:12.859Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "586712ca9ccd1553f3debfe3fb07cc836b77d07c4d38b816ccda4519a7460df7",
+							"decision": "rejected",
+							"specific": {
+								"value": false,
+								"confidence": 0.92
+							},
+							"actionCount": {
+								"value": "multiple",
+								"confidence": 0.99
+							},
+							"outputCount": {
+								"value": "multiple",
+								"confidence": 1
+							},
+							"verificationCount": {
+								"value": "multiple",
+								"confidence": 0.99
+							},
+							"hiddenSubtasks": {
+								"value": true,
+								"confidence": 0.95
+							},
+							"confidence": 0.92,
+							"issues": [
+								"step description is not specific enough",
+								"step contains multiple independent actions",
+								"step contains multiple independently observable outputs",
+								"step requires multiple independent verification methods",
+								"step contains hidden subtasks"
+							]
+						}
+					]
+				},
+				"usage": {
+					"input": 740,
+					"output": 76,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 816,
+					"cost": {
+						"input": 0.00148,
+						"output": 0.00076,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.00224,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "publish-and-implement",
+				"expected": "needs_breakdown",
+				"agreed": false,
+				"elapsedMs": 2914,
+				"assessment": {
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-04.v2",
+						"inputHash": "4141494fcaa88b831fa818892f9a2fd8e511afc2722eef95c6080a4afbd0fbc9",
+						"assessedAt": "2026-11-07T23:30:16.036Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "9bb76ef1aae506c2705f925136f31472a0fbfead6df44526ea0e301c992b54ec",
+							"decision": "rejected",
+							"specific": {
+								"value": false,
+								"confidence": 0.98
+							},
+							"actionCount": {
+								"value": "multiple",
+								"confidence": 1
+							},
+							"outputCount": {
+								"value": "multiple",
+								"confidence": 1
+							},
+							"verificationCount": {
+								"value": "multiple",
+								"confidence": 0.99
+							},
+							"hiddenSubtasks": {
+								"value": true,
+								"confidence": 0.99
+							},
+							"confidence": 0.98,
+							"issues": [
+								"step description is not specific enough",
+								"step contains multiple independent actions",
+								"step contains multiple independently observable outputs",
+								"step requires multiple independent verification methods",
+								"step contains hidden subtasks"
+							]
+						}
+					]
+				},
+				"usage": {
+					"input": 758,
+					"output": 74,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 832,
+					"cost": {
+						"input": 0.001516,
+						"output": 0.0007400000000000001,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.002256,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "missing-boundary",
+				"expected": "rejected",
+				"agreed": true,
+				"elapsedMs": 3506,
+				"assessment": {
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-04.v2",
+						"inputHash": "fcc4c30b5d3827f21350a9540b3b11734ff5e16f0487cae8aaefc0c2a31873e4",
+						"assessedAt": "2026-11-07T23:30:18.952Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "cd3f63b37035a2433bc957979523eccb816f9d647a4ca8888468184ebfc3b5e2",
+							"decision": "rejected",
+							"specific": {
+								"value": false,
+								"confidence": 0.99
+							},
+							"actionCount": {
+								"value": "unclear",
+								"confidence": 0.99
+							},
+							"outputCount": {
+								"value": "unclear",
+								"confidence": 0.99
+							},
+							"verificationCount": {
+								"value": "unclear",
+								"confidence": 0.99
+							},
+							"hiddenSubtasks": {
+								"value": true,
+								"confidence": 0.85
+							},
+							"confidence": 0.85,
+							"issues": [
+								"step description is not specific enough",
+								"independent action count is unclear",
+								"observable output count is unclear",
+								"verification method count is unclear",
+								"step contains hidden subtasks"
+							]
+						}
+					]
+				},
+				"usage": {
+					"input": 702,
+					"output": 81,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 783,
+					"cost": {
+						"input": 0.0014039999999999999,
+						"output": 0.0008100000000000001,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.002214,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "mixed-language-batch",
+				"expected": "atomic",
+				"agreed": true,
+				"elapsedMs": 4674,
+				"assessment": {
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-04.v2",
+						"inputHash": "0bd578dab0f707e0287460cf68178980e5ea05343968840ca62c2e596592fa6b",
+						"assessedAt": "2026-11-07T23:30:22.458Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "1f5cb121acd47c0c91bf531a2e480c6ea0628577852c9888b07bebc8d276f6b8",
+							"decision": "atomic",
+							"specific": {
+								"value": true,
+								"confidence": 0.96
+							},
+							"actionCount": {
+								"value": "one",
+								"confidence": 0.97
+							},
+							"outputCount": {
+								"value": "one",
+								"confidence": 0.98
+							},
+							"verificationCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"hiddenSubtasks": {
+								"value": false,
+								"confidence": 0.97
+							},
+							"confidence": 0.96,
+							"issues": []
+						}
+					]
+				},
+				"usage": {
+					"input": 803,
+					"output": 103,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 23,
+					"totalTokens": 906,
+					"cost": {
+						"input": 0.001606,
+						"output": 0.00103,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.0026360000000000003,
+						"totalFromProvider": false
+					}
+				}
+			}
+		]
+	},
+	"candidate": {
+		"observedAt": "2026-11-08T00:32:45.866Z",
+		"promptVersion": "2026-11-07.v3",
+		"assessorSourceSha256": "1136219efe52f746f50bbf4f7491f5059fc0cf8af675f735f8aa68b83558c93e",
+		"corpusSha256": "eca068b1afa218aaa15a55ec65676f6ed8d4fe6a13b194005049dc90d2dd77fe",
+		"model": {
+			"provider": "openai-codex",
+			"id": "gpt-6.1-sol"
+		},
+		"administrativeRetries": 0,
+		"agreement": {
+			"matched": 7,
+			"total": 8
+		},
+		"rows": [
+			{
+				"id": "batch-prose",
+				"expected": "atomic",
+				"agreed": true,
+				"elapsedMs": 3525,
+				"assessment": {
+					"descriptiveContextVersion": 1,
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-07.v3",
+						"inputHash": "9c1e7eae32084fd07653e5aac8e94e1765ca5af6c08b53a6b5e8b48f4ba08dba",
+						"assessedAt": "2026-11-08T00:32:09.286Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "630579db5665622f0abe88927d53bef8671b88bacfba26fd6a0a7d513b09e47a",
+							"decision": "atomic",
+							"specific": {
+								"value": true,
+								"confidence": 0.98
+							},
+							"actionCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"outputCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"verificationCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"hiddenSubtasks": {
+								"value": false,
+								"confidence": 0.99
+							},
+							"confidence": 0.98,
+							"issues": [],
+							"diagnosis": {
+								"independentOutcomes": [],
+								"missingContext": [],
+								"correction": ""
+							}
+						}
+					]
+				},
+				"usage": {
+					"input": 1242,
+					"output": 96,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 1338,
+					"cost": {
+						"input": 0.002484,
+						"output": 0.0009600000000000001,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.003444,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "batch-command",
+				"expected": "atomic",
+				"agreed": true,
+				"elapsedMs": 3485,
+				"assessment": {
+					"descriptiveContextVersion": 1,
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-07.v3",
+						"inputHash": "734a1fc2f1738f599d18184a91e48d0a2b4e7298e4090c6edba3241104202592",
+						"assessedAt": "2026-11-08T00:32:12.801Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "219cba3399f0a9f87bbb6c5a70d05f865299715983c3db915d0abb893edd4fbf",
+							"decision": "atomic",
+							"specific": {
+								"value": true,
+								"confidence": 0.97
+							},
+							"actionCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"outputCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"verificationCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"hiddenSubtasks": {
+								"value": false,
+								"confidence": 0.99
+							},
+							"confidence": 0.97,
+							"issues": [],
+							"diagnosis": {
+								"independentOutcomes": [],
+								"missingContext": [],
+								"correction": ""
+							}
+						}
+					]
+				},
+				"usage": {
+					"input": 1240,
+					"output": 96,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 1336,
+					"cost": {
+						"input": 0.00248,
+						"output": 0.0009600000000000001,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.0034400000000000003,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "bounded-report",
+				"expected": "atomic",
+				"agreed": true,
+				"elapsedMs": 3741,
+				"assessment": {
+					"descriptiveContextVersion": 1,
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-07.v3",
+						"inputHash": "1a4c92a750d4c4b4a38ab2c56ef09a4ca9d161a0b82522753053556fde6d07ce",
+						"assessedAt": "2026-11-08T00:32:16.288Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "85347afa290c81acdf12fb7d489d5898108bb557f56ea27b27a3c4351e7386b1",
+							"decision": "atomic",
+							"specific": {
+								"value": true,
+								"confidence": 0.97
+							},
+							"actionCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"outputCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"verificationCount": {
+								"value": "one",
+								"confidence": 0.98
+							},
+							"hiddenSubtasks": {
+								"value": false,
+								"confidence": 0.99
+							},
+							"confidence": 0.97,
+							"issues": [],
+							"diagnosis": {
+								"independentOutcomes": [],
+								"missingContext": [],
+								"correction": ""
+							}
+						}
+					]
+				},
+				"usage": {
+					"input": 1205,
+					"output": 96,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 1301,
+					"cost": {
+						"input": 0.00241,
+						"output": 0.0009600000000000001,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.0033699999999999997,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "focused-repair",
+				"expected": "atomic",
+				"agreed": true,
+				"elapsedMs": 3768,
+				"assessment": {
+					"descriptiveContextVersion": 1,
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-07.v3",
+						"inputHash": "ef01963d0f74ad244a6e1bff96331a8699e0fe9a542e2215c391a4c24e5abd6b",
+						"assessedAt": "2026-11-08T00:32:20.028Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "dc9f399b5bf5a0e98c23fdc9ce093e954bab381c4103472c2344f24547a660ff",
+							"decision": "atomic",
+							"specific": {
+								"value": true,
+								"confidence": 0.98
+							},
+							"actionCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"outputCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"verificationCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"hiddenSubtasks": {
+								"value": false,
+								"confidence": 0.99
+							},
+							"confidence": 0.98,
+							"issues": [],
+							"diagnosis": {
+								"independentOutcomes": [],
+								"missingContext": [],
+								"correction": ""
+							}
+						}
+					]
+				},
+				"usage": {
+					"input": 1208,
+					"output": 96,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 1304,
+					"cost": {
+						"input": 0.0024159999999999997,
+						"output": 0.0009600000000000001,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.0033759999999999997,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "independent-products",
+				"expected": "needs_breakdown",
+				"agreed": true,
+				"elapsedMs": 4280,
+				"assessment": {
+					"descriptiveContextVersion": 1,
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-07.v3",
+						"inputHash": "a3cb25314f437ab7d3a06235c218032ecc5910155f3c523ce305d01f5256a60c",
+						"assessedAt": "2026-11-08T00:32:23.795Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "586712ca9ccd1553f3debfe3fb07cc836b77d07c4d38b816ccda4519a7460df7",
+							"decision": "needs_breakdown",
+							"specific": {
+								"value": true,
+								"confidence": 0.97
+							},
+							"actionCount": {
+								"value": "multiple",
+								"confidence": 1
+							},
+							"outputCount": {
+								"value": "multiple",
+								"confidence": 1
+							},
+							"verificationCount": {
+								"value": "multiple",
+								"confidence": 1
+							},
+							"hiddenSubtasks": {
+								"value": false,
+								"confidence": 0.96
+							},
+							"confidence": 0.96,
+							"issues": [
+								"step contains multiple independent actions",
+								"step contains multiple independently observable outputs",
+								"step requires multiple independent verification methods",
+								"Independent outcomes: OAuth refresh support that refreshes expired sessions.; Separately deployable billing dashboard that charts invoices.; Independent verification of OAuth refresh behavior and billing charts.",
+								"Smallest correction: Split into an OAuth refresh implementation-and-verification step and a billing dashboard implementation-and-verification step."
+							],
+							"diagnosis": {
+								"independentOutcomes": [
+									"OAuth refresh support that refreshes expired sessions.",
+									"Separately deployable billing dashboard that charts invoices.",
+									"Independent verification of OAuth refresh behavior and billing charts."
+								],
+								"missingContext": [],
+								"correction": "Split into an OAuth refresh implementation-and-verification step and a billing dashboard implementation-and-verification step."
+							}
+						}
+					]
+				},
+				"usage": {
+					"input": 1187,
+					"output": 138,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 1325,
+					"cost": {
+						"input": 0.002374,
+						"output": 0.0013800000000000002,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.003754,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "publish-and-implement",
+				"expected": "needs_breakdown",
+				"agreed": false,
+				"elapsedMs": 6073,
+				"assessment": {
+					"descriptiveContextVersion": 1,
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-07.v3",
+						"inputHash": "4141494fcaa88b831fa818892f9a2fd8e511afc2722eef95c6080a4afbd0fbc9",
+						"assessedAt": "2026-11-08T00:32:28.077Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "9bb76ef1aae506c2705f925136f31472a0fbfead6df44526ea0e301c992b54ec",
+							"decision": "rejected",
+							"specific": {
+								"value": false,
+								"confidence": 0.96
+							},
+							"actionCount": {
+								"value": "multiple",
+								"confidence": 0.99
+							},
+							"outputCount": {
+								"value": "multiple",
+								"confidence": 0.99
+							},
+							"verificationCount": {
+								"value": "multiple",
+								"confidence": 0.99
+							},
+							"hiddenSubtasks": {
+								"value": true,
+								"confidence": 0.98
+							},
+							"confidence": 0.96,
+							"issues": [
+								"step description is not specific enough",
+								"step contains multiple independent actions",
+								"step contains multiple independently observable outputs",
+								"step requires multiple independent verification methods",
+								"step contains hidden subtasks",
+								"Independent outcomes: Published graph containing the eight reviewed tasks and only reviewed dependency edges, verified by readback.; Working OAuth renewal with independent repair verification.; Working scheduler recovery with independent repair verification.; Working metrics export with independent repair verification.",
+								"Missing context: The eight reviewed task definitions and approved dependency edges are not supplied or located.; OAuth, scheduler and metrics repair targets, required behavior and verification criteria are unspecified.",
+								"Smallest correction: Separate graph publication with readback from the three independently implemented and tested repairs. Supply the reviewed graph reference and bounded targets, intended behavior and verification criteria for each repair."
+							],
+							"diagnosis": {
+								"independentOutcomes": [
+									"Published graph containing the eight reviewed tasks and only reviewed dependency edges, verified by readback.",
+									"Working OAuth renewal with independent repair verification.",
+									"Working scheduler recovery with independent repair verification.",
+									"Working metrics export with independent repair verification."
+								],
+								"missingContext": [
+									"The eight reviewed task definitions and approved dependency edges are not supplied or located.",
+									"OAuth, scheduler and metrics repair targets, required behavior and verification criteria are unspecified."
+								],
+								"correction": "Separate graph publication with readback from the three independently implemented and tested repairs. Supply the reviewed graph reference and bounded targets, intended behavior and verification criteria for each repair."
+							}
+						}
+					]
+				},
+				"usage": {
+					"input": 1205,
+					"output": 201,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 1406,
+					"cost": {
+						"input": 0.00241,
+						"output": 0.00201,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.00442,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "missing-boundary",
+				"expected": "rejected",
+				"agreed": true,
+				"elapsedMs": 5086,
+				"assessment": {
+					"descriptiveContextVersion": 1,
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-07.v3",
+						"inputHash": "fcc4c30b5d3827f21350a9540b3b11734ff5e16f0487cae8aaefc0c2a31873e4",
+						"assessedAt": "2026-11-08T00:32:34.148Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "cd3f63b37035a2433bc957979523eccb816f9d647a4ca8888468184ebfc3b5e2",
+							"decision": "rejected",
+							"specific": {
+								"value": false,
+								"confidence": 1
+							},
+							"actionCount": {
+								"value": "unclear",
+								"confidence": 1
+							},
+							"outputCount": {
+								"value": "unclear",
+								"confidence": 1
+							},
+							"verificationCount": {
+								"value": "unclear",
+								"confidence": 1
+							},
+							"hiddenSubtasks": {
+								"value": false,
+								"confidence": 0.6
+							},
+							"confidence": 0.6,
+							"issues": [
+								"step description is not specific enough",
+								"independent action count is unclear",
+								"observable output count is unclear",
+								"verification method count is unclear",
+								"semantic assessment confidence 0.60 is below 0.70",
+								"Missing context: The target and scope of 'remaining issues' are unspecified.; 'Everything is done' and 'It is better' provide no observable success criteria or verification procedure.",
+								"Smallest correction: Identify the affected target and bounded issue, describe the intended observable result, and specify how to verify it."
+							],
+							"diagnosis": {
+								"independentOutcomes": [],
+								"missingContext": [
+									"The target and scope of 'remaining issues' are unspecified.",
+									"'Everything is done' and 'It is better' provide no observable success criteria or verification procedure."
+								],
+								"correction": "Identify the affected target and bounded issue, describe the intended observable result, and specify how to verify it."
+							}
+						}
+					]
+				},
+				"usage": {
+					"input": 1149,
+					"output": 143,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 1292,
+					"cost": {
+						"input": 0.0022979999999999997,
+						"output": 0.00143,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.0037279999999999995,
+						"totalFromProvider": false
+					}
+				}
+			},
+			{
+				"id": "mixed-language-batch",
+				"expected": "atomic",
+				"agreed": true,
+				"elapsedMs": 6633,
+				"assessment": {
+					"descriptiveContextVersion": 1,
+					"provenance": {
+						"version": 1,
+						"strategy": "pi_chat",
+						"provider": "openai-codex",
+						"model": "gpt-6.1-sol",
+						"promptVersion": "2026-11-07.v3",
+						"inputHash": "0bd578dab0f707e0287460cf68178980e5ea05343968840ca62c2e596592fa6b",
+						"assessedAt": "2026-11-08T00:32:39.234Z"
+					},
+					"steps": [
+						{
+							"index": 0,
+							"inputHash": "1f5cb121acd47c0c91bf531a2e480c6ea0628577852c9888b07bebc8d276f6b8",
+							"decision": "atomic",
+							"specific": {
+								"value": true,
+								"confidence": 0.99
+							},
+							"actionCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"outputCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"verificationCount": {
+								"value": "one",
+								"confidence": 0.99
+							},
+							"hiddenSubtasks": {
+								"value": false,
+								"confidence": 0.99
+							},
+							"confidence": 0.99,
+							"issues": [],
+							"diagnosis": {
+								"independentOutcomes": [],
+								"missingContext": [],
+								"correction": ""
+							}
+						}
+					]
+				},
+				"usage": {
+					"input": 1250,
+					"output": 96,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"reasoning": 0,
+					"totalTokens": 1346,
+					"cost": {
+						"input": 0.0025,
+						"output": 0.0009600000000000001,
+						"cacheRead": 0,
+						"cacheWrite": 0,
+						"total": 0.0034600000000000004,
+						"totalFromProvider": false
+					}
+				}
+			}
+		]
+	}
+}

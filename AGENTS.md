@@ -129,6 +129,13 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Classify an already-simple current step through `task_update.step_granularity_check` without replacing its identity or creating artificial children. Require an explicit reason, all atomicity flags, and a native assessment confirming atomicity; preserve evidence, criteria, blockers, and completion gates.
 - Plan deliverables rather than support reads, staging, or receipt bookkeeping. Keep mechanics within the deliverable's allowed execution. Decompose genuinely compound work; classification is not verification or authority to bypass an evidence gate.
 
+## Semantic Deliverable Context and Recovery
+
+- Assess the complete target, owned scope, observable output and bounded verification procedure together. Batch publication/readback, multi-seam investigation reports and focused implementation/regression cycles may be one outcome; neither exact-command phrasing nor a script wrapper determines atomicity.
+- Preserve supplied clarification in atomic reclassification, parent scope in decomposition and findings reason in rework. New native assessments retain descriptive unit/scope/verification/reason in materialized state while all atomicity flags remain model-derived; an internal context-version marker preserves historical materialization. Hash the actual context used; historical prompt-version hashes remain replayable without new inference or changed acceptance links.
+- Native chat/OMP non-atomic assessments require concrete independent outcomes or missing essential context and the smallest correction; atomic success needs no rejection explanation. Persist and validate typed diagnosis against displayed issues and require complete zero-based index coverage before mapping any native batch; never invent model explanations. Classifier rejections may request one batched native-chat explanation, but explanation failure cannot replace classifier judgments or create a new execution gate.
+- Show concrete corrections in rejection, focus and resume guidance. Missing-context reclassification recovery clarifies the same step; genuinely independent outcomes still decompose. Invalid input must not persist events, publish state or erase history.
+
 ## Passive Telemetry Contract
 
 - Keep the companion opt-in and separate from task authority and compaction policy.

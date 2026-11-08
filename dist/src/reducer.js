@@ -1,6 +1,6 @@
 import { validateHandoff } from "./handoff.js";
 import { createEmptyState, isAtMaximumDecompositionDepth, MAX_DECOMPOSITION_DEPTH, MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH, MAX_EVIDENCE_REFERENCE_LENGTH, MAX_EVIDENCE_SUMMARY_LENGTH, SEMANTIC_ASSESSMENT_VERSION, } from "./model.js";
-import { hashEvidenceAssessmentInput, hashPlanAssessmentInput, hashStepSemanticInput, MIN_SEMANTIC_CONFIDENCE, } from "./semantic-assessment.js";
+import { hashEvidenceAssessmentInput, hashPlanAssessmentInput, hashStepSemanticInput, MIN_SEMANTIC_CONFIDENCE, planDiagnosisIssues, } from "./semantic-assessment.js";
 import { classifyMechanicStep, mechanicStepMessage, } from "./support-actions.js";
 const TERMINAL_STATUSES = ["done", "cancelled"];
 const SEMANTIC_ASSESSMENT_STRATEGIES = new Set([
@@ -186,12 +186,7 @@ function decomposeStep(state, event, replay) {
     if (parent.depth >= MAX_DECOMPOSITION_DEPTH) {
         throw new TaskTransitionError(`Plan step ${parent.id} reached maximum decomposition depth ${MAX_DECOMPOSITION_DEPTH}`);
     }
-    const assessmentInput = {
-        title: task.title,
-        objective: task.objective,
-        acceptanceCriteria: task.acceptanceCriteria.map((criterion) => criterion.text),
-        steps: event.childSteps,
-    };
+    const assessmentInput = taskMutationAssessmentInput(task, event);
     validatePlanSemanticAssessment(event.semanticAssessment, assessmentInput, event.version === 2);
     const children = createPlanSteps(task.id, event.childSteps, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, false, event.semanticAssessment, {
         replay,
@@ -252,7 +247,7 @@ function replanTask(state, event, replay) {
         return step;
     });
     validateReworkSteps(event.planSteps);
-    validatePlanSemanticAssessment(event.semanticAssessment, taskPlanAssessmentInput(task, event.planSteps), event.version === 2);
+    validatePlanSemanticAssessment(event.semanticAssessment, taskMutationAssessmentInput(task, event), event.version === 2);
     const replacements = createPlanSteps(task.id, event.planSteps, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, false, event.semanticAssessment, { startIndex: nextRootStepNumber(task), replay });
     const covered = new Set(replacements.flatMap((step) => step.criterionIds));
     if (targets.some((step) => step.criterionIds.some((id) => !covered.has(id)))) {
@@ -279,6 +274,27 @@ function replanTask(state, event, replay) {
     task.warnings.push(`replan: ${event.reason.trim()} -> ${replacements.map((step) => step.id).join(",")}`);
     task.updatedAt = event.createdAt;
     return state;
+}
+export function taskMutationAssessmentInput(task, event) {
+    if (event.type === "task.updated") {
+        return taskPlanAssessmentInput(task, task.planSteps
+            .filter((step) => step.id === event.stepId)
+            .map((step) => ({
+            ...step,
+            ...(event.stepGranularityCheck
+                ? { granularityCheck: event.stepGranularityCheck }
+                : {}),
+        })));
+    }
+    const input = taskPlanAssessmentInput(task, event.type === "task.steps_decomposed" ? event.childSteps : event.planSteps);
+    const parentStep = event.type === "task.steps_decomposed"
+        ? task.planSteps.find((step) => step.id === event.parentStepId)
+        : undefined;
+    input.context = {
+        reason: event.reason,
+        ...(parentStep ? { parentStep } : {}),
+    };
+    return input;
 }
 export function taskPlanAssessmentInput(task, steps) {
     return {
@@ -321,7 +337,7 @@ function reworkTask(state, event, replay) {
     const previousCurrent = getCurrentOpenStep(task);
     validateReworkSteps(event.planSteps);
     const nextStepNumber = nextRootStepNumber(task);
-    validatePlanSemanticAssessment(event.semanticAssessment, taskPlanAssessmentInput(task, event.planSteps), event.version === 2);
+    validatePlanSemanticAssessment(event.semanticAssessment, taskMutationAssessmentInput(task, event), event.version === 2);
     const steps = createPlanSteps(task.id, event.planSteps, task.acceptanceCriteria.map((criterion) => criterion.id), event.createdAt, !previousCurrent, event.semanticAssessment, { startIndex: nextStepNumber, replay });
     const affectedIds = new Set(steps.flatMap((step) => step.criterionIds));
     for (const criterion of task.acceptanceCriteria) {
@@ -466,10 +482,10 @@ function classifyCurrentStep(state, task, event, replay) {
         ].some((value) => value !== true)) {
         throw new TaskTransitionError("Atomic classification requires a reason and all atomicity flags true; decompose genuine compound work");
     }
-    validatePlanSemanticAssessment(event.semanticAssessment, taskPlanAssessmentInput(task, [step]), event.version === 2);
+    validatePlanSemanticAssessment(event.semanticAssessment, taskMutationAssessmentInput(task, event), event.version === 2);
     const assessment = event.semanticAssessment?.steps[0];
     if (assessment && assessment.decision !== "atomic") {
-        throw new TaskTransitionError("Semantic assessment requires decomposition; current step was not classified atomic");
+        throw new TaskTransitionError(`Semantic assessment requires decomposition or clarification; current step was not classified atomic: ${assessment.issues.join("; ")}`);
     }
     const mechanic = classifyMechanicStep(step.text, true);
     if (mechanic)
@@ -477,7 +493,11 @@ function classifyCurrentStep(state, task, event, replay) {
     const candidate = {
         ...step,
         decompositionStatus: "atomic",
-        granularityCheck: assessment ? semanticGranularityCheck(assessment) : check,
+        granularityCheck: assessment
+            ? semanticGranularityCheck(assessment, event.semanticAssessment?.descriptiveContextVersion === 1
+                ? check
+                : undefined)
+            : check,
     };
     candidate.planQuality = legacyPlanQuality(candidate);
     validateGranularityContract(candidate, 0, replay);
@@ -727,10 +747,14 @@ function validatePlanSemanticAssessment(assessment, input, required) {
         return;
     }
     validateSemanticProvenance(assessment.provenance, "Semantic assessment");
+    if (assessment.descriptiveContextVersion !== undefined &&
+        assessment.descriptiveContextVersion !== 1) {
+        throw new TaskTransitionError("Unsupported descriptive context version");
+    }
     if (!Array.isArray(assessment.steps)) {
         throw new TaskTransitionError("Semantic assessment steps are invalid");
     }
-    const expectedBatchHash = hashPlanAssessmentInput(input);
+    const expectedBatchHash = hashPlanAssessmentInput(input, assessment.provenance.promptVersion);
     if (assessment.provenance.inputHash !== expectedBatchHash) {
         throw new TaskTransitionError("Semantic assessment input hash does not match the plan mutation");
     }
@@ -745,7 +769,8 @@ function validatePlanSemanticAssessment(assessment, input, required) {
             result.index !== index) {
             throw new TaskTransitionError(`Semantic assessment result ${index + 1} has an invalid index`);
         }
-        if (result.inputHash !== hashStepSemanticInput(step)) {
+        if (result.inputHash !==
+            hashStepSemanticInput(step, assessment.provenance.promptVersion)) {
             throw new TaskTransitionError(`Semantic assessment result ${index + 1} does not match its plan step`);
         }
         validateStepSemanticAssessment(result, index);
@@ -821,6 +846,7 @@ function expectedPlanSemanticIssues(assessment) {
     if (assessment.confidence < MIN_SEMANTIC_CONFIDENCE) {
         issues.push(`semantic assessment confidence ${assessment.confidence.toFixed(2)} is below ${MIN_SEMANTIC_CONFIDENCE.toFixed(2)}`);
     }
+    issues.push(...planDiagnosisIssues(assessment.diagnosis, assessment.decision));
     return issues;
 }
 function createPlanSteps(taskId, steps, criterionIds, createdAt, activate, semanticAssessment, options = {}) {
@@ -828,7 +854,10 @@ function createPlanSteps(taskId, steps, criterionIds, createdAt, activate, seman
     const validationErrors = [];
     for (const [index, step] of steps.entries()) {
         try {
-            createdSteps.push(createPlanStep(taskId, step, index, criterionIds, createdAt, activate, semanticAssessment?.steps[index], options));
+            createdSteps.push(createPlanStep(taskId, step, index, criterionIds, createdAt, activate, semanticAssessment?.steps[index], {
+                ...options,
+                preserveDescriptiveContext: semanticAssessment?.descriptiveContextVersion === 1,
+            }));
         }
         catch (error) {
             if (!(error instanceof TaskTransitionError))
@@ -883,7 +912,7 @@ function createPlanStep(taskId, step, index, criterionIds, createdAt, activate, 
         throw new TaskTransitionError(`Plan step ${index + 1} failed semantic assessment: ${semanticAssessment.issues.join("; ") || "model confidence was insufficient"}`);
     }
     const granularityCheck = semanticAssessment
-        ? semanticGranularityCheck(semanticAssessment)
+        ? semanticGranularityCheck(semanticAssessment, options.preserveDescriptiveContext ? step.granularityCheck : undefined)
         : normalizeGranularityCheck(step);
     const decompositionStatus = semanticAssessment
         ? semanticAssessment.decision === "atomic"
@@ -947,12 +976,20 @@ function createPlanStep(taskId, step, index, criterionIds, createdAt, activate, 
         ...(status === "active" ? { startedAt: createdAt } : {}),
     };
 }
-function semanticGranularityCheck(assessment) {
+function semanticGranularityCheck(assessment, context) {
     return {
+        ...(context?.unit !== undefined ? { unit: context.unit } : {}),
+        ...(context?.boundedScope !== undefined
+            ? { boundedScope: context.boundedScope.trim() }
+            : {}),
+        ...(context?.verificationPlan !== undefined
+            ? { verificationPlan: context.verificationPlan.trim() }
+            : {}),
         isAtomic: assessment.decision === "atomic",
-        reason: assessment.issues.length > 0
-            ? assessment.issues.join("; ")
-            : "Native semantic assessment found one action, one output, one verification method, and no hidden subtasks",
+        reason: context?.reason.trim() ||
+            (assessment.issues.length > 0
+                ? assessment.issues.join("; ")
+                : "Native semantic assessment found one action, one output, one verification method, and no hidden subtasks"),
         canBeDoneInOneAgentAction: assessment.actionCount.value === "one",
         hasSingleObservableOutput: assessment.outputCount.value === "one",
         hasSingleVerificationMethod: assessment.verificationCount.value === "one",

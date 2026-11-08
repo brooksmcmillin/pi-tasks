@@ -124,6 +124,9 @@ export function formatTaskFocus(state) {
     if (step) {
         lines.push(`Current step: ${step.id} [${step.status}] ${compactDetail(step.text)}`);
         lines.push(`Granularity: ${step.decompositionStatus}`);
+        const correction = semanticCorrection(step);
+        if (correction)
+            lines.push(correction);
         lines.push(`Atomicity reason: ${compactDetail(step.granularityCheck.reason)}`);
         lines.push(`Plan quality: ${step.planQuality.score}${step.planQuality.issues.length ? ` (${compactDetail(step.planQuality.issues.join("; "))})` : ""}`);
         if (step.parentStepId)
@@ -671,6 +674,13 @@ function getStepLineage(task, step) {
     }
     return lineage;
 }
+function semanticCorrection(step) {
+    return (step.semanticAssessment?.issues ?? [])
+        .filter((issue) => /^(Independent outcomes|Missing context|Smallest correction):/.test(issue))
+        .slice(0, 3)
+        .map((issue) => truncateText(issue, 700))
+        .join("\n");
+}
 function buildResumeInstruction(task, step, gaps, nextAllowedActions) {
     if (task.status === "blocked") {
         return "Resolve the blocker with task_update before continuing execution. task_rework can record remediation but does not resolve blockers.";
@@ -683,7 +693,7 @@ function buildResumeInstruction(task, step, gaps, nextAllowedActions) {
     if (step.decompositionStatus !== "atomic") {
         return isAtMaximumDecompositionDepth(step)
             ? `Block ${step.id} with task_update instead of decomposing again; carry the remaining scope and existing evidence references into an explicitly planned flat successor task.`
-            : `For compound work, decompose ${step.id}. If already simple, use task_update with step_id and step_granularity_check (reason and all flags true) to classify it without inventing children. Do not execute or mark it done until atomic.`;
+            : `For compound work, decompose ${step.id}. If already simple, use task_update with step_id and step_granularity_check (reason and all flags true) to classify it without inventing children. Do not execute or mark it done until atomic.${semanticCorrection(step) ? `\n${semanticCorrection(step)}` : ""}`;
     }
     if (step.evidenceRequired && step.evidenceIds.length === 0) {
         return step.granularityCheck.unit === "deliverable"

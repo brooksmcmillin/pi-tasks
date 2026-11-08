@@ -76,6 +76,12 @@ export interface SemanticChoiceJudgment<
 
 export type PlanSemanticDecision = "atomic" | "needs_breakdown" | "rejected";
 
+export interface PlanSemanticDiagnosis {
+	independentOutcomes: string[];
+	missingContext: string[];
+	correction: string;
+}
+
 export interface StepSemanticAssessment {
 	index: number;
 	inputHash: string;
@@ -87,9 +93,12 @@ export interface StepSemanticAssessment {
 	hiddenSubtasks: SemanticBooleanJudgment;
 	confidence: number;
 	issues: string[];
+	diagnosis?: PlanSemanticDiagnosis;
 }
 
 export interface PlanSemanticAssessment {
+	// Omission retains historical count-only materialization during replay.
+	descriptiveContextVersion?: 1;
 	provenance: SemanticAssessmentProvenance;
 	steps: StepSemanticAssessment[];
 }
