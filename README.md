@@ -223,6 +223,18 @@ filename, keyword, or text length is never sufficient by itself. Task and
 evidence fields are quoted as untrusted data, and typed model output is validated
 before persistence.
 
+Classification uses the complete target, scope, output and bounded verification
+context, including new current-step clarification and decomposition's parent
+scope. A bounded batch with readback, one multi-source investigation report, or
+a focused repair with regression checks can be one deliverable without exact
+command phrasing. A script wrapping unrelated products still needs decomposition.
+Non-atomic chat/OMP assessments name independent outcomes or missing context and
+the smallest correction; focus/resume and rejected updates retain that guidance.
+Classifier rejections may add one batched native-chat diagnosis when available;
+if diagnosis fails, the original classifier judgment remains authoritative.
+See the [local calibration report](docs/semantic-planning-calibration.md) for the
+reviewed corpus, measured native comparison and remaining limitations.
+
 Successful results are stored in version 2 task events with their input hash,
 model provenance, prompt version, confidence, and decision. Replay, resume,
 branch navigation, rendering, and completion remain deterministic and never

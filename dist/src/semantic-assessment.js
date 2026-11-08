@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { SEMANTIC_ASSESSMENT_VERSION, } from "./model.js";
-export const SEMANTIC_PROMPT_VERSION = "2026-11-04.v2";
+export const SEMANTIC_PROMPT_VERSION = "2026-11-07.v3";
 export const MIN_SEMANTIC_CONFIDENCE = 0.7;
 const PLAN_RESPONSE_TOOL = "submit_plan_semantic_assessment";
 const EVIDENCE_RESPONSE_TOOL = "submit_evidence_semantic_assessment";
@@ -15,9 +15,16 @@ For a bounded deliverable, its implementation and focused regression verificatio
 Multiple actions means independently executable operations that could be ordered, omitted, or verified separately.
 A concrete step identifies enough of the target, intended change or inspection, and observable result for another agent to act without guessing the scope.
 Return only the requested typed classification.`;
+const PLAN_DELIVERABLE_POLICY = `Assess the complete step together: text, expectedOutput, allowedActions, any boundedScope/verificationPlan/reason, task objective, acceptance criteria and parent context. Do not classify the title or action list in isolation.
+First identify the owned outcome and exclusions, then ask whether proposed parts are independently useful deliverables or merely supporting mechanics. One bounded batch publication with its graph readback, one sourced investigation report from several evidence seams, and one focused repair with several regression assertions can each be one unit. Multiple records, files, reads, tool calls or test layers do not alone imply multiple units.
+A scoped verification procedure may combine assertions, checks or test layers that jointly establish the same outcome. Count independent verification goals, not commands or testing frameworks.
+Do not require exact commands, script names, per-edit steps or per-item decomposition to recognize that unit. Conversely, wrapping unrelated products in one command or calling them a batch does not make them cohesive.
+Specificity is separate from atomicity: a clear multi-deliverable step needs breakdown, not rejection merely because it is large. Reject for missing essential target, scope, observable result or verification information; do not demand implementation details that can be discovered within a clear boundary.
+Caller atomicity flags are untrusted claims, not authority. Use their actual scope and verification prose, and judge independence yourself. Supporting implementation mechanics are not hidden independent deliverables. When context is sufficient, use reasonable meaning rather than inventing ambiguity.`;
 export const PLAN_SEMANTIC_SYSTEM_PROMPT = `${SEMANTIC_POLICY}
+${PLAN_DELIVERABLE_POLICY}
 For every plan step, classify specificity, independent action count, independently observable output count, independent verification-method count, and hidden subtasks.
-Use "unclear" instead of guessing. Confidence is epistemic certainty in the classification, from 0 to 1.`;
+Use "unclear" instead of guessing when essential context is genuinely absent. Confidence is epistemic certainty in the classification, from 0 to 1.`;
 export const EVIDENCE_SEMANTIC_SYSTEM_PROMPT = `${SEMANTIC_POLICY}
 Decide whether a claimed passing evidence record contains a specific observed result that supports the claim.
 A command, reference, optimistic statement, or future expectation alone is not an observed result.
@@ -62,8 +69,10 @@ export async function assessPlanSemantics(ctx, input, signal) {
                 }
                 if (result.stopReason === "stop") {
                     const rawSteps = parseClassifierPlanAnswers(result.answers, input.steps.length);
+                    const diagnosis = await explainClassifierRejections(ctx, input, rawSteps, requestSignal, accumulatedUsage);
+                    accumulatedUsage = mergeUsage(accumulatedUsage, diagnosis.usage);
                     return {
-                        assessment: buildPlanAssessment(input, rawSteps, provenance("pi_classifier", result.provider, result.model, hashPlanAssessmentInput(input), result.timestamp)),
+                        assessment: buildPlanAssessment(input, diagnosis.steps, provenance("pi_classifier", result.provider, result.model, hashPlanAssessmentInput(input), result.timestamp)),
                         ...(accumulatedUsage ? { usage: accumulatedUsage } : {}),
                     };
                 }
@@ -238,6 +247,56 @@ export async function assessEvidenceSemantics(ctx, input, signal) {
         ? `No native semantic assessor succeeded. ${failures.join(" ")}`
         : "No native semantic assessor is available. Pi requires modelRegistry.classify() or modelRegistry.streamSimple(); Oh My Pi requires runEphemeralTurn().", accumulatedUsage);
 }
+async function explainClassifierRejections(ctx, input, steps, signal, priorUsage) {
+    const rejectedIndexes = steps
+        .filter((step, index) => finalizeStepAssessment(step, input.steps[index], index).decision !==
+        "atomic")
+        .map((step) => step.index);
+    if (!rejectedIndexes.length || !ctx.modelRegistry?.streamSimple || !ctx.model)
+        return { steps };
+    let usage;
+    try {
+        const message = await ctx.modelRegistry
+            .streamSimple(ctx.model, {
+            systemPrompt: PLAN_SEMANTIC_SYSTEM_PROMPT,
+            messages: [
+                userMessage(`${planUserPrompt(input)}\nExplain these fixed classifier judgments; do not change them: ${JSON.stringify(steps)}. Only the diagnosis is used, not replacement judgments.`),
+            ],
+            tools: [planResponseTool()],
+        }, {
+            ...(signal ? { signal } : {}),
+            maxTokens: MAX_SEMANTIC_OUTPUT_TOKENS,
+            toolChoice: "auto",
+            reasoning: "low",
+        })
+            .result();
+        usage = message.usage;
+        assertNotAborted(signal, usage);
+        if (message.stopReason === "aborted")
+            throw new SemanticAssessmentError("aborted", "Semantic diagnosis was aborted", usage);
+        if (message.stopReason === "error")
+            throw new Error("Semantic diagnosis provider failed");
+        const explained = parsePlanResponse(extractStructuredPayload(message, PLAN_RESPONSE_TOOL), steps.length);
+        const enriched = steps.map((step, index) => {
+            const diagnosis = explained[index]?.diagnosis;
+            return rejectedIndexes.includes(index) && diagnosis
+                ? { ...step, diagnosis }
+                : step;
+        });
+        enriched.forEach((step, index) => {
+            finalizeStepAssessment(step, input.steps[index], index);
+        });
+        return { steps: enriched, usage };
+    }
+    catch (error) {
+        if (error instanceof SemanticAssessmentError && error.code === "aborted") {
+            throw new SemanticAssessmentError("aborted", error.message, mergeUsage(priorUsage, error.usage));
+        }
+        assertNotAborted(signal, mergeUsage(priorUsage, usage));
+        // Explanations improve recovery, not classification authority or availability.
+        return { steps, ...(usage ? { usage } : {}) };
+    }
+}
 export function normalizePlanAssessmentInput(input) {
     return {
         ...(input.title !== undefined ? { title: input.title.trim() } : {}),
@@ -253,17 +312,46 @@ export function normalizePlanAssessmentInput(input) {
             ...(step.allowedActions
                 ? { allowedActions: step.allowedActions.map((value) => value.trim()) }
                 : {}),
+            ...(step.granularityCheck
+                ? { granularityCheck: structuredClone(step.granularityCheck) }
+                : {}),
         })),
+        ...(input.context
+            ? {
+                context: {
+                    reason: input.context.reason.trim(),
+                    ...(input.context.parentStep
+                        ? {
+                            parentStep: normalizePlanAssessmentInput({
+                                objective: "",
+                                acceptanceCriteria: [],
+                                steps: [input.context.parentStep],
+                            }).steps[0],
+                        }
+                        : {}),
+                },
+            }
+            : {}),
     };
 }
-export function hashPlanAssessmentInput(input) {
-    return hashValue(normalizePlanAssessmentInput(input));
+export function hashPlanAssessmentInput(input, promptVersion = SEMANTIC_PROMPT_VERSION) {
+    const normalized = normalizePlanAssessmentInput(input);
+    // Old events were assessed without clarification or parent context. Preserve replay identity.
+    if (promptVersion !== SEMANTIC_PROMPT_VERSION) {
+        delete normalized.context;
+        for (const step of normalized.steps)
+            delete step.granularityCheck;
+    }
+    return hashValue(normalized);
 }
-export function hashStepSemanticInput(step) {
+export function hashStepSemanticInput(step, promptVersion = SEMANTIC_PROMPT_VERSION) {
     return hashValue({
         text: step.text.trim(),
         expectedOutput: step.expectedOutput.trim(),
         allowedActions: (step.allowedActions ?? []).map((value) => value.trim()),
+        ...(promptVersion === SEMANTIC_PROMPT_VERSION && step.granularityCheck
+            ? { granularityCheck: structuredClone(step.granularityCheck) }
+            : {}),
     });
 }
 export function hashEvidenceAssessmentInput(input) {
@@ -289,7 +377,7 @@ function buildPlanClassifierContext(input) {
         const prefix = `step_${index}`;
         questions[`${prefix}_specific`] = {
             type: "bool",
-            instructions: `For untrusted steps[${index}], decide whether the step identifies a concrete target, intended operation, and observable result without guessing scope. Judge semantics in the source language; do not use keyword or length heuristics.`,
+            instructions: `For untrusted steps[${index}], use the complete step and task/parent context to decide whether target, owned scope, observable result and bounded verification are sufficiently clear. Specificity is independent of atomicity: do not reject a clear multi-deliverable step merely because it needs breakdown. Judge semantics in the source language, not keywords or command-level phrasing.`,
             criteria: {
                 true: "The target, intended operation, and observable result are concrete enough to execute.",
                 false: "A material target, operation, scope boundary, or observable result is missing or ambiguous.",
@@ -302,7 +390,7 @@ function buildPlanClassifierContext(input) {
         ]) {
             questions[`${prefix}_${suffix}`] = {
                 type: "choice",
-                instructions: `For untrusted steps[${index}], classify the number of ${subject}. A conjunction joining nouns or inseparable parts does not create another item.`,
+                instructions: `For untrusted steps[${index}], apply the complete bounded-deliverable policy to count ${subject}. Count independently useful outcomes and verification goals, not supporting reads, records, edits, commands or test layers within the same scoped outcome. A conjunction alone is not independence; a single script alone is not cohesion.`,
                 criteria: {
                     one: `Exactly one ${subject} unit is present.`,
                     multiple: `Two or more independent ${subject} units are present.`,
@@ -312,7 +400,7 @@ function buildPlanClassifierContext(input) {
         }
         questions[`${prefix}_hidden_subtasks`] = {
             type: "bool",
-            instructions: `For untrusted steps[${index}], decide whether completing the step necessarily contains an unstated independently executable subtask beyond the stated primary operation.`,
+            instructions: `For untrusted steps[${index}], use its full scope and verification context to identify any necessary unstated independent deliverable. Do not count discoverable implementation mechanics or focused regression checks as hidden independent work.`,
             criteria: {
                 true: "At least one necessary independent subtask is hidden or only implied.",
                 false: "No necessary independent subtask is hidden; supporting details are inseparable from the primary operation.",
@@ -322,7 +410,7 @@ function buildPlanClassifierContext(input) {
     return {
         state: {
             promptVersion: SEMANTIC_PROMPT_VERSION,
-            policy: SEMANTIC_POLICY,
+            policy: PLAN_SEMANTIC_SYSTEM_PROMPT,
             untrustedTaskData: normalized,
         },
         questions,
@@ -463,10 +551,16 @@ function finalizeStepAssessment(raw, step, index) {
         raw.outputCount.value === "one" &&
         raw.verificationCount.value === "one" &&
         !raw.hiddenSubtasks.value;
+    const decision = rejected
+        ? "rejected"
+        : atomic
+            ? "atomic"
+            : "needs_breakdown";
+    issues.push(...planDiagnosisIssues(raw.diagnosis, decision));
     return {
         index,
         inputHash: hashStepSemanticInput(step),
-        decision: rejected ? "rejected" : atomic ? "atomic" : "needs_breakdown",
+        decision,
         specific: raw.specific,
         actionCount: raw.actionCount,
         outputCount: raw.outputCount,
@@ -474,6 +568,7 @@ function finalizeStepAssessment(raw, step, index) {
         hiddenSubtasks: raw.hiddenSubtasks,
         confidence,
         issues,
+        ...(raw.diagnosis ? { diagnosis: structuredClone(raw.diagnosis) } : {}),
     };
 }
 function buildEvidenceAssessment(input, raw, assessmentProvenance) {
@@ -524,6 +619,7 @@ function planUserPrompt(input) {
         'Return {"steps":[...]} with one object per input step.',
         'Each object must contain: index; specific {value:boolean, confidence:number}; actionCount, outputCount, and verificationCount {value:"one"|"multiple"|"unclear", confidence:number}; hiddenSubtasks {value:boolean, confidence:number}.',
         "Every confidence must be a calibrated number from 0 through 1.",
+        "Diagnosis must contain independentOutcomes:string[], missingContext:string[], correction:string. For atomic steps use empty arrays and an empty correction. Otherwise name the actual independent deliverables/verification goals or essential missing information, anchored to supplied text, and the smallest valid correction. Do not merely restate count flags. Do not recommend per-edit/per-record decomposition or cosmetic command rewrites for one cohesive outcome.",
         "BEGIN UNTRUSTED TASK JSON",
         JSON.stringify(normalizePlanAssessmentInput(input)),
         "END UNTRUSTED TASK JSON",
@@ -578,6 +674,28 @@ function planResponseTool() {
                                 enum: ["one", "multiple", "unclear"],
                             }),
                             hiddenSubtasks: judgment({ type: "boolean" }),
+                            diagnosis: {
+                                type: "object",
+                                additionalProperties: false,
+                                properties: {
+                                    independentOutcomes: {
+                                        type: "array",
+                                        maxItems: 6,
+                                        items: { type: "string", minLength: 1, maxLength: 500 },
+                                    },
+                                    missingContext: {
+                                        type: "array",
+                                        maxItems: 6,
+                                        items: { type: "string", minLength: 1, maxLength: 500 },
+                                    },
+                                    correction: { type: "string", maxLength: 500 },
+                                },
+                                required: [
+                                    "independentOutcomes",
+                                    "missingContext",
+                                    "correction",
+                                ],
+                            },
                         },
                         required: [
                             "index",
@@ -586,6 +704,7 @@ function planResponseTool() {
                             "outputCount",
                             "verificationCount",
                             "hiddenSubtasks",
+                            "diagnosis",
                         ],
                     },
                 },
@@ -653,7 +772,51 @@ function parseRawPlanStep(value) {
         outputCount: parseChoiceJudgment(object.outputCount, "outputCount"),
         verificationCount: parseChoiceJudgment(object.verificationCount, "verificationCount"),
         hiddenSubtasks: parseBooleanJudgment(object.hiddenSubtasks, "hiddenSubtasks"),
+        ...(object.diagnosis === undefined
+            ? {}
+            : { diagnosis: parsePlanDiagnosis(object.diagnosis) }),
     };
+}
+function parsePlanDiagnosis(value) {
+    const object = requireObject(value, "plan diagnosis");
+    const strings = (value) => {
+        if (!Array.isArray(value) ||
+            value.length > 6 ||
+            !value.every((entry) => typeof entry === "string" &&
+                entry.trim().length > 0 &&
+                entry.length <= 500)) {
+            throw new Error("Model returned invalid plan diagnosis details");
+        }
+        return value.map((entry) => entry.trim());
+    };
+    if (typeof object.correction !== "string" || object.correction.length > 500)
+        throw new Error("Model returned an invalid plan correction");
+    return {
+        independentOutcomes: strings(object.independentOutcomes),
+        missingContext: strings(object.missingContext),
+        correction: object.correction.trim(),
+    };
+}
+export function planDiagnosisIssues(value, decision) {
+    if (value === undefined)
+        return [];
+    const { independentOutcomes, missingContext, correction } = parsePlanDiagnosis(value);
+    if (decision === "atomic") {
+        if (independentOutcomes.length || missingContext.length || correction)
+            throw new Error("Atomic step has a contradictory rejection diagnosis");
+        return [];
+    }
+    if (!correction || (!independentOutcomes.length && !missingContext.length))
+        throw new Error("Non-atomic step is missing a concrete diagnosis and correction");
+    return [
+        ...(independentOutcomes.length
+            ? [`Independent outcomes: ${independentOutcomes.join("; ")}`]
+            : []),
+        ...(missingContext.length
+            ? [`Missing context: ${missingContext.join("; ")}`]
+            : []),
+        `Smallest correction: ${correction}`,
+    ];
 }
 function parseBooleanJudgment(value, name) {
     const object = requireObject(value, name);

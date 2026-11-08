@@ -187,6 +187,8 @@ export function formatTaskFocus(state: TaskState): string {
 			`Current step: ${step.id} [${step.status}] ${compactDetail(step.text)}`,
 		);
 		lines.push(`Granularity: ${step.decompositionStatus}`);
+		const correction = semanticCorrection(step);
+		if (correction) lines.push(correction);
 		lines.push(
 			`Atomicity reason: ${compactDetail(step.granularityCheck.reason)}`,
 		);
@@ -857,6 +859,18 @@ function getStepLineage(task: Task, step: TaskStep): TaskResumeStep[] {
 	return lineage;
 }
 
+function semanticCorrection(step: TaskStep): string {
+	return (step.semanticAssessment?.issues ?? [])
+		.filter((issue) =>
+			/^(Independent outcomes|Missing context|Smallest correction):/.test(
+				issue,
+			),
+		)
+		.slice(0, 3)
+		.map((issue) => truncateText(issue, 700))
+		.join("\n");
+}
+
 function buildResumeInstruction(
 	task: Task,
 	step: TaskStep | undefined,
@@ -874,7 +888,7 @@ function buildResumeInstruction(
 	if (step.decompositionStatus !== "atomic") {
 		return isAtMaximumDecompositionDepth(step)
 			? `Block ${step.id} with task_update instead of decomposing again; carry the remaining scope and existing evidence references into an explicitly planned flat successor task.`
-			: `For compound work, decompose ${step.id}. If already simple, use task_update with step_id and step_granularity_check (reason and all flags true) to classify it without inventing children. Do not execute or mark it done until atomic.`;
+			: `For compound work, decompose ${step.id}. If already simple, use task_update with step_id and step_granularity_check (reason and all flags true) to classify it without inventing children. Do not execute or mark it done until atomic.${semanticCorrection(step) ? `\n${semanticCorrection(step)}` : ""}`;
 	}
 	if (step.evidenceRequired && step.evidenceIds.length === 0) {
 		return step.granularityCheck.unit === "deliverable"

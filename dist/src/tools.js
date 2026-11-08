@@ -2,7 +2,7 @@ import { checkpoint, latestCheckpoint, recoveryChecks, repositoryIdentity, } fro
 import { handoffSchema, validateHandoff, } from "./handoff.js";
 import { createEventId, SequentialIdGenerator, } from "./ids.js";
 import { isAtMaximumDecompositionDepth, MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH, MAX_EVIDENCE_REFERENCE_LENGTH, MAX_EVIDENCE_SUMMARY_LENGTH, } from "./model.js";
-import { evidenceQualityEqual, normalizeEvidenceQuality, reduceTaskState, TaskTransitionError, taskPlanAssessmentInput, } from "./reducer.js";
+import { evidenceQualityEqual, normalizeEvidenceQuality, reduceTaskState, TaskTransitionError, taskMutationAssessmentInput, } from "./reducer.js";
 import { COMPACT_REMEDIATION_GUIDANCE, compactRemediationSchema, normalizeReworkInput, } from "./remediation.js";
 import { buildTaskResume, formatTaskFocus, formatTaskList, formatTaskNext, formatTaskReceipt, formatTaskResume, getTaskPlanRecoveryParams, recoveryPlanStep, } from "./render.js";
 import { Type } from "./schema.js";
@@ -411,6 +411,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                     objective: beforeTask.objective,
                     acceptanceCriteria: beforeTask.acceptanceCriteria.map((criterion) => criterion.text),
                     steps: params.child_steps,
+                    context: { reason: params.reason, parentStep: beforeStep },
                 }, signal);
                 assertReplayVersion(store, replayVersion, run.usage);
                 const currentStep = store
@@ -1222,10 +1223,7 @@ async function assessForkMutation(state, event, ctx, signal) {
         if (event.type === "task.replanned" ||
             event.type === "task.reworked" ||
             (event.type === "task.updated" && event.stepGranularityCheck)) {
-            const steps = event.type === "task.updated"
-                ? task.planSteps.filter((step) => step.id === event.stepId)
-                : event.planSteps;
-            const run = await assessPlanSemantics(ctx, taskPlanAssessmentInput(task, steps), signal);
+            const run = await assessPlanSemantics(ctx, taskMutationAssessmentInput(task, event), signal);
             usage = run.usage;
             event.semanticAssessment = run.assessment;
         }
@@ -1411,6 +1409,18 @@ function buildRejectionRecovery(error, state, event) {
 function buildUpdateArgumentRepair(event, message) {
     if (event?.type !== "task.updated")
         return undefined;
+    if (message.startsWith("Semantic assessment requires") &&
+        event.semanticAssessment?.steps[0]?.decision === "rejected" &&
+        event.stepGranularityCheck) {
+        return {
+            task_id: event.taskId,
+            step_id: event.stepId,
+            step_granularity_check: {
+                ...event.stepGranularityCheck,
+                reason: "<address the concrete missing context in the assessment reason>",
+            },
+        };
+    }
     if (message !== "Scope updates require an activity" &&
         message !== "Scope change or off-plan activity requires scopeReason" &&
         message !== "Cancelling a task requires a reason")

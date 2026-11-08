@@ -48,7 +48,7 @@ import {
 	normalizeEvidenceQuality,
 	reduceTaskState,
 	TaskTransitionError,
-	taskPlanAssessmentInput,
+	taskMutationAssessmentInput,
 } from "./reducer.ts";
 import {
 	COMPACT_REMEDIATION_GUIDANCE,
@@ -786,6 +786,7 @@ export function registerTaskTools(
 							(criterion) => criterion.text,
 						),
 						steps: params.child_steps,
+						context: { reason: params.reason, parentStep: beforeStep },
 					},
 					signal,
 				);
@@ -1894,13 +1895,9 @@ async function assessForkMutation(
 			event.type === "task.reworked" ||
 			(event.type === "task.updated" && event.stepGranularityCheck)
 		) {
-			const steps =
-				event.type === "task.updated"
-					? task.planSteps.filter((step) => step.id === event.stepId)
-					: event.planSteps;
 			const run = await assessPlanSemantics(
 				ctx,
-				taskPlanAssessmentInput(task, steps),
+				taskMutationAssessmentInput(task, event),
 				signal,
 			);
 			usage = run.usage;
@@ -2146,6 +2143,21 @@ function buildUpdateArgumentRepair(
 	message: string,
 ): Record<string, unknown> | undefined {
 	if (event?.type !== "task.updated") return undefined;
+	if (
+		message.startsWith("Semantic assessment requires") &&
+		event.semanticAssessment?.steps[0]?.decision === "rejected" &&
+		event.stepGranularityCheck
+	) {
+		return {
+			task_id: event.taskId,
+			step_id: event.stepId,
+			step_granularity_check: {
+				...event.stepGranularityCheck,
+				reason:
+					"<address the concrete missing context in the assessment reason>",
+			},
+		};
+	}
 	if (
 		message !== "Scope updates require an activity" &&
 		message !== "Scope change or off-plan activity requires scopeReason" &&
