@@ -1206,6 +1206,9 @@ function rejectedMutationResult(error, state, event, usage) {
             `- minimum_params: ${JSON.stringify(recovery.minimum_params)}`,
             `- do_not_retry_same_call: ${recovery.do_not_retry_same_call}`,
             `- reason: ${recovery.reason}`,
+            ...(recovery.transition_recovery
+                ? [`- next_action: ${recovery.transition_recovery.next_action}`]
+                : []),
             ...(recovery.retry_example
                 ? [
                     "",
@@ -1222,7 +1225,7 @@ function rejectedMutationResult(error, state, event, usage) {
                 recovery.retry_with === recovery.resume.recommendedTool
                 ? ["Recovery guidance:", resumeText]
                 : [
-                    "Recovery guidance: correct the rejected call above, then call task_resume for the next task action.",
+                    "Recovery guidance: follow the recovery above, then call task_resume for the next task action.",
                 ]),
         ].join("\n"), recovery),
         isError: true,
@@ -1342,6 +1345,18 @@ function rejectionResult(error, store, event) {
 }
 function buildRejectionRecovery(error, state, event) {
     const resume = buildTaskResume(state);
+    const transitionRecovery = buildStatusTransitionRecovery(error, state, event);
+    if (transitionRecovery) {
+        return {
+            rejected: true,
+            reason: errorText(error),
+            ...transitionRecovery,
+            retry_example: undefined,
+            correct_rejected_call_first: true,
+            do_not_retry_same_call: true,
+            resume,
+        };
+    }
     const retryExample = event?.type === "task.evidence_batch"
         ? {
             task_id: event.taskId,
@@ -1377,6 +1392,7 @@ function buildRejectionRecovery(error, state, event) {
     return {
         rejected: true,
         reason: errorText(error),
+        transition_recovery: undefined,
         retry_with: event?.type === "task.evidence_batch"
             ? "task_evidence_batch"
             : event?.type === "task.evidence_added"
@@ -1430,6 +1446,71 @@ function buildRejectionRecovery(error, state, event) {
             }
             : {}),
         resume,
+    };
+}
+function buildStatusTransitionRecovery(error, state, event) {
+    if (!(error instanceof TaskTransitionError) ||
+        error.code !== "status_transition" ||
+        !event)
+        return undefined;
+    const task = state.tasks[event.taskId];
+    if (!task)
+        return undefined;
+    const requested = event.type === "task.updated" ? event.status : "done";
+    let retryWith = "task_resume";
+    let params = {};
+    let nextAction;
+    if (task.status === "done" || task.status === "cancelled") {
+        nextAction = `Task ${task.id} is ${task.status}; no status transition is allowed. Preserve its history. Only genuine review findings on a done task may use task_rework; do not reopen or create a duplicate objective to repair this call.`;
+    }
+    else if (requested === "pending") {
+        nextAction = `Task ${task.id} cannot transition from ${task.status} to pending. Inspect the existing task and choose a supported action; do not create a replacement task.`;
+    }
+    else if (task.status === "blocked" || task.status === "pending") {
+        retryWith = "task_update";
+        params = { task_id: task.id, status: "active" };
+        if (task.status === "blocked") {
+            params.reason = "<explicit reason the recorded blocker is resolved>";
+            nextAction = `Only after the recorded blocker is actually resolved, supply an explicit resolution reason and transition existing task ${task.id} from blocked to active. Otherwise keep it blocked and obtain the missing action/decision. Then reassess the requested ${requested} action with task_resume; guards and evidence obligations still apply.`;
+        }
+        else {
+            nextAction = `Activate existing task ${task.id} first, then reassess the requested ${requested} action with task_resume; progress, blocker and completion checks still apply.`;
+        }
+    }
+    else if (requested === "done") {
+        retryWith = "task_complete";
+        params = {
+            task_id: task.id,
+            summary: "<summary of verified completion>",
+            evidence_ids: ["<existing passing acceptance evidence ID>"],
+        };
+        nextAction = `Use task_complete for existing task ${task.id} only after its plan, acceptance criteria and evidence requirements are satisfied. Fill the template from actual observations; do not invent evidence or bypass completion checks.`;
+    }
+    else if (requested === "blocked") {
+        retryWith = "task_update";
+        params = {
+            task_id: task.id,
+            status: "blocked",
+            blocker: {
+                reason: "<observed blocker>",
+                blockedBy: "user",
+                neededToUnblock: "<actual action or decision needed>",
+            },
+        };
+        nextAction = `Supply the actual blocker reason, blockedBy category and neededToUnblock action for existing task ${task.id}; the template category must be replaced when appropriate. Missing implementation or verification is work, not automatically a blocker.`;
+    }
+    else {
+        nextAction = `Before moving existing task ${task.id} to review, record actual progress or evidence. Do not fabricate progress, clear blockers or create a new task. Inspect the existing task with task_resume for remaining work.`;
+    }
+    return {
+        retry_with: retryWith,
+        minimum_params: params,
+        transition_recovery: {
+            task_id: task.id,
+            current_status: task.status,
+            requested_status: requested,
+            next_action: nextAction,
+        },
     };
 }
 function buildUpdateArgumentRepair(event, message) {

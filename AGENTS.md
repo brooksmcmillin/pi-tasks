@@ -166,6 +166,7 @@ This project must align with the commercial-quality bar established by `pi-knowl
 ## Runtime Recovery Contracts
 
 - Recovery argument scaffolds must match the named registered public tool schema, including nested fields and required arguments. Never expose reducer-owned planning assessment fields. Rejection retries target the rejected operation rather than borrowing an unrelated active task's next action.
+- Status-transition recovery targets the rejected task, not the active-task fallback. Blocked-to-review recovery requires actual blocker resolution and an explicit reason before blocked-to-active; completion still uses `task_complete`. Terminal or unsupported transitions explain the remaining action without creating a duplicate objective or mutating state.
 - Scaffolds require caller replacement with real scope and observations; schema validity is not semantic acceptance or evidence. Preserve native assessment, evidence, blocker and completion gates. Test generated payloads against registered schemas, not only direct `execute()` calls that bypass host validation.
 
 - A non-atomic step at decomposition depth 4 must direct every guidance surface to an explicit `task_update` blocker; never recommend another decomposition, mark the step done, or create a successor automatically.
