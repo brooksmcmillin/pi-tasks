@@ -244,6 +244,17 @@ branch navigation, rendering, and completion remain deterministic and never
 re-run inference. Existing version 1 sessions continue to replay as legacy
 history.
 
+Evidence assessment receives the persisted objective, targeted step outputs,
+selected criterion meanings and evidence role. Specific negative results can
+prove a completed investigation or reconciliation without proving implementation
+success. Diagnostic records remain diagnostic; they cannot satisfy acceptance
+criteria or complete steps with new proof. Existing evidence IDs cannot transfer
+reporting proof to an unassessed implementation target. Reproducibility may mean inspecting retained artifacts,
+not replaying a consumed paid operation. Unsupported claims retain issue codes
+and recovery guidance; chat/OMP responses can also identify the unsupported claim
+and missing observation. See the [evidence calibration report](docs/semantic-evidence-calibration.md)
+for the bounded native evaluation and its limits.
+
 Semantic calls consume model tokens and can add latency. Pi classifier/chat calls
 send only the assessment payload. Oh My Pi ephemeral turns may include the
 current conversation snapshot according to the host's side-turn contract; use

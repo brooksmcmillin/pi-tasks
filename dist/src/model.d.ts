@@ -1,3 +1,4 @@
+import type { EvidenceContract } from "./evidence-contract.ts";
 import type { handoffRecovery, OrchestrationHandoff } from "./handoff.ts";
 export declare const TASK_EVENT_CUSTOM_TYPE = "pi-tasks:event";
 export declare const TASK_SNAPSHOT_CUSTOM_TYPE = "pi-tasks:snapshot";
@@ -57,6 +58,11 @@ export interface PlanSemanticAssessment {
 }
 export type EvidenceSemanticDecision = "supported" | "unsupported" | "uncertain";
 export interface EvidenceSemanticAssessment {
+    contractVersion?: 1;
+    diagnosis?: {
+        claim: string;
+        missingObservation: string;
+    };
     provenance: SemanticAssessmentProvenance;
     inputHash: string;
     decision: EvidenceSemanticDecision;
@@ -64,6 +70,10 @@ export interface EvidenceSemanticAssessment {
     issues: string[];
 }
 export interface TaskEvidence {
+    /** Includes model-free failure/unknown authoring; omission preserves legacy replay. */
+    contractVersion?: 1;
+    /** Derived from the assessed event targets; never authored by evidence callers. */
+    assessedContract?: EvidenceContract;
     id: string;
     taskId: string;
     type: EvidenceType;
