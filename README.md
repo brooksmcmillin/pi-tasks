@@ -207,6 +207,14 @@ their critical guidance into descriptions. Lazily activated controls keep only
 compact descriptions so native Pi can add them without active-only prompt
 metadata.
 
+### Review and publication contracts
+
+Use the [schema-tested contract examples](docs/review-publication-contracts.md)
+for candidate capture, reviewer dispatch/results, ledger persistence and separate
+commit/push/PR receipts. Related read-only checks can produce one identity-bound
+verification bundle; unrelated claims and durable mutations remain separate.
+Examples still require concrete scope, native assessment and execution authority.
+
 ### Native semantic assessment
 
 Planning, decomposition, replan/rework, current-step classification, and passing

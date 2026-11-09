@@ -200,8 +200,11 @@ describe("semantic rejection diagnosis", () => {
 						...(mode === "unavailable"
 							? {}
 							: {
-									streamSimple: () => ({
+									streamSimple: (_model, request) => ({
 										result: async () => {
+											expect(request.tools?.[0]?.parameters).toMatchObject({
+												properties: { steps: { minItems: 1, maxItems: 1 } },
+											});
 											explanations++;
 											if (mode === "abort") controller.abort();
 											if (mode === "error")

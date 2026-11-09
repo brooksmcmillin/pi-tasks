@@ -17,6 +17,7 @@ import {
 	type PlanAssessmentInput,
 	type SemanticAssessmentError,
 } from "../../src/semantic-assessment.ts";
+import { reviewContractCases } from "../fixtures/review-contract-cases.ts";
 import { fakeUsage } from "./semantic-fixture.ts";
 
 const planInput: PlanAssessmentInput = {
@@ -121,6 +122,68 @@ function assistantMessage(
 }
 
 describe("native semantic assessment", () => {
+	it.each(reviewContractCases)(
+		"preserves native judgment for $name ($source)",
+		async ({ step, expected }) => {
+			const input = { ...planInput, steps: [step] };
+			let calls = 0;
+			const result = await assessPlanSemantics(
+				context({
+					modelRegistry: {
+						getAvailableOfType: async () => [
+							{ id: "semantic", provider: "test", type: "classifier" },
+						],
+						classify: async (_model, request) => {
+							calls++;
+							expect(request.state?.policy).toBe(PLAN_SEMANTIC_SYSTEM_PROMPT);
+							expect(request.state?.untrustedTaskData).toEqual(input);
+							const answers = planAnswers(Object.keys(request.questions));
+							for (const name of Object.keys(answers)) {
+								if (expected === "rejected" && name.endsWith("_specific"))
+									answers[name] = { type: "bool", probability: 0.04 };
+								if (
+									expected === "needs_breakdown" &&
+									name.endsWith("_action_count")
+								)
+									answers[name] = {
+										type: "choice",
+										choice: "multiple",
+										confidence: 0.94,
+									};
+							}
+							return {
+								provider: "test",
+								model: "semantic",
+								answers,
+								usage: fakeUsage,
+								stopReason: "stop",
+								timestamp: Date.now(),
+							};
+						},
+					},
+				}),
+				input,
+			);
+			expect(calls).toBe(1);
+			expect(result.assessment.steps[0]?.decision).toBe(expected);
+		},
+	);
+
+	it("states bundle limits and independent mutation boundaries without granting authority", () => {
+		expect(PLAN_SEMANTIC_SYSTEM_PROMPT).toContain(
+			"Related read-only checks may form one verification bundle",
+		);
+		expect(PLAN_SEMANTIC_SYSTEM_PROMPT).toContain(
+			"Unrelated claims remain separate",
+		);
+		expect(PLAN_SEMANTIC_SYSTEM_PROMPT).toContain(
+			"Keep independently durable mutations separate",
+		);
+		expect(PLAN_SEMANTIC_SYSTEM_PROMPT).toContain(
+			"Templates and reported permission are not authorization",
+		);
+	});
+
 	it("hashes full clarification and parent context while retaining historical v2 identity", () => {
 		const original = structuredClone(planInput);
 		const step = original.steps[0];
@@ -272,6 +335,35 @@ describe("native semantic assessment", () => {
 		expect(result.assessment.steps[0]?.decision).toBe("atomic");
 		expect(result.assessment.provenance.strategy).toBe("pi_classifier");
 		expect(result.usage).toEqual(fakeUsage);
+	});
+
+	it("binds the chat response schema and prompt to the exact plan length", async () => {
+		const steps = reviewContractCases.map((c) => c.step);
+		await assessPlanSemantics(
+			context({
+				model: { id: "test-chat", provider: "test-provider" },
+				modelRegistry: {
+					streamSimple: (_model, request) => {
+						expect(request.tools?.[0]?.parameters).toMatchObject({
+							properties: { steps: { minItems: 8, maxItems: 8 } },
+						});
+						expect(JSON.stringify(request.messages)).toContain(
+							"exactly 8 objects",
+						);
+						return {
+							result: async () =>
+								assistantMessage("submit_plan_semantic_assessment", {
+									steps: steps.map((_, index) => ({
+										...planPayload().steps[0],
+										index,
+									})),
+								}),
+						};
+					},
+				},
+			}),
+			{ ...planInput, steps },
+		);
 	});
 
 	it("falls back from a failed Pi classifier to structured Pi chat and merges usage", async () => {

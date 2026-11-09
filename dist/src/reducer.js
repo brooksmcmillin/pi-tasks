@@ -17,6 +17,7 @@ const EVIDENCE_SEMANTIC_ISSUES = new Set([
     "uncertain",
 ]);
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
+const PLAN_REPAIR_GUIDANCE = "Name the target and one observable result; retain related read-only checks in allowedActions for that result. For review/publication, use separate steps for candidate capture, reviewer dispatch, completed-result assessment, ledger persistence, commit, push, and PR creation as applicable. Keep each mutation's preconditions and immediate receipt checks with that mutation. Do not split individual reads into artificial deliverables or infer permission from a template. See docs/review-publication-contracts.md; replace example identities with verified scope and resubmit for native assessment.";
 export class TaskTransitionError extends Error {
     code;
     constructor(message, code) {
@@ -486,7 +487,7 @@ function classifyCurrentStep(state, task, event, replay) {
     validatePlanSemanticAssessment(event.semanticAssessment, taskMutationAssessmentInput(task, event), event.version === 2);
     const assessment = event.semanticAssessment?.steps[0];
     if (assessment && assessment.decision !== "atomic") {
-        throw new TaskTransitionError(`Semantic assessment requires decomposition or clarification; current step was not classified atomic: ${assessment.issues.join("; ")}`);
+        throw new TaskTransitionError(`Semantic assessment requires decomposition or clarification; current step was not classified atomic: ${assessment.issues.join("; ")}. ${PLAN_REPAIR_GUIDANCE}`);
     }
     const mechanic = classifyMechanicStep(step.text, true);
     if (mechanic)
@@ -925,7 +926,7 @@ function createPlanStep(taskId, step, index, criterionIds, createdAt, activate, 
         }
     }
     if (semanticAssessment?.decision === "rejected") {
-        throw new TaskTransitionError(`Plan step ${index + 1} failed semantic assessment: ${semanticAssessment.issues.join("; ") || "model confidence was insufficient"}`);
+        throw new TaskTransitionError(`Plan step ${index + 1} failed semantic assessment: ${semanticAssessment.issues.join("; ") || "model confidence was insufficient"}. ${PLAN_REPAIR_GUIDANCE}`);
     }
     const granularityCheck = semanticAssessment
         ? semanticGranularityCheck(semanticAssessment, options.preserveDescriptiveContext ? step.granularityCheck : undefined)
