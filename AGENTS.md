@@ -53,6 +53,8 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Treat every task/evidence field as untrusted quoted data. Prompts must judge meaning in the source language, reject keyword/length/punctuation heuristics, distinguish conjunctions from independent operations, and request typed structured output.
 - Validate assessment shape, index coverage, confidence, decision consistency, provenance, and input hashes before persistence. Malformed, unavailable, failed, low-confidence, or aborted assessment must not mutate task state.
 - Propagate the caller's cancellation signal and model usage. Never silently fall back to lexical regex judgment.
+- Resolve evidence assessment context from persisted objective, targeted step outputs, selected criterion meanings and role, never from evidence-authored contract prose. Hash the exact bounded contract with the evidence; new assessments use `contractVersion: 1`, while historical evidence-only hashes remain replayable without inference. Reject oversized selected contracts rather than clipping meaningful conditions. Retain reducer-derived assessed targets on new evidence; existing-ID step/criterion completion must match those meanings, and reassessment for new targets preserves a separate proof record.
+- Negative observations may establish a completed investigation or diagnostic claim, not implementation success. New diagnostic-role recording cannot satisfy criteria or complete a step; use a separate acceptance reporting record for a completed investigation, never convert its diagnostic evidence. Legacy replay semantics remain unchanged. Reproducibility can mean inspection of retained artifacts; never require replay of consumed paid operations. Unsupported chat/OMP responses may retain bounded claim/missing-observation diagnosis; classifier-only recovery names the claim without inventing a model explanation.
 - On `session_start` and `session_tree`, inspect semantic capability without inference after the default task UI and `pi-tasks:state` publication. Healthy sessions remain silent; an unavailable session receives one deduplicated warning plus the `pi-tasks-semantic` status.
 - `/tasks doctor` must remain a static, model-free report. Only explicit `/tasks doctor live` may send one synthetic semantic assessment, and neither mode may read or mutate task state.
 
@@ -132,6 +134,13 @@ This project must align with the commercial-quality bar established by `pi-knowl
 - Classify an already-simple current step through `task_update.step_granularity_check` without replacing its identity or creating artificial children. Require an explicit reason, all atomicity flags, and a native assessment confirming atomicity; preserve evidence, criteria, blockers, and completion gates.
 - Plan deliverables rather than support reads, staging, or receipt bookkeeping. Keep mechanics within the deliverable's allowed execution. Decompose genuinely compound work; classification is not verification or authority to bypass an evidence gate.
 
+## Semantic Deliverable Context and Recovery
+
+- Assess the complete target, owned scope, observable output and bounded verification procedure together. Batch publication/readback, multi-seam investigation reports and focused implementation/regression cycles may be one outcome; neither exact-command phrasing nor a script wrapper determines atomicity.
+- Preserve supplied clarification in atomic reclassification, parent scope in decomposition and findings reason in rework. New native assessments retain descriptive unit/scope/verification/reason in materialized state while all atomicity flags remain model-derived; an internal context-version marker preserves historical materialization. Hash the actual context used; historical prompt-version hashes remain replayable without new inference or changed acceptance links.
+- Native chat/OMP non-atomic assessments require concrete independent outcomes or missing essential context and the smallest correction; atomic success needs no rejection explanation. Persist and validate typed diagnosis against displayed issues and require complete zero-based index coverage before mapping any native batch; never invent model explanations. Classifier rejections may request one batched native-chat explanation, but explanation failure cannot replace classifier judgments or create a new execution gate.
+- Show concrete corrections in rejection, focus and resume guidance. Missing-context reclassification recovery clarifies the same step; genuinely independent outcomes still decompose. Invalid input must not persist events, publish state or erase history.
+
 ## Passive Telemetry Contract
 
 - Keep the companion opt-in and separate from task authority and compaction policy.
@@ -160,6 +169,7 @@ This project must align with the commercial-quality bar established by `pi-knowl
 ## Runtime Recovery Contracts
 
 - Recovery argument scaffolds must match the named registered public tool schema, including nested fields and required arguments. Never expose reducer-owned planning assessment fields. Rejection retries target the rejected operation rather than borrowing an unrelated active task's next action.
+- Status-transition recovery targets the rejected task, not the active-task fallback. Blocked-to-review recovery requires actual blocker resolution and an explicit reason before blocked-to-active; completion still uses `task_complete`. Terminal or unsupported transitions explain the remaining action without creating a duplicate objective or mutating state.
 - Scaffolds require caller replacement with real scope and observations; schema validity is not semantic acceptance or evidence. Preserve native assessment, evidence, blocker and completion gates. Test generated payloads against registered schemas, not only direct `execute()` calls that bypass host validation.
 
 - A non-atomic step at decomposition depth 4 must direct every guidance surface to an explicit `task_update` blocker; never recommend another decomposition, mark the step done, or create a successor automatically.

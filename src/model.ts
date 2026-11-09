@@ -1,3 +1,4 @@
+import type { EvidenceContract } from "./evidence-contract.ts";
 import type { handoffRecovery, OrchestrationHandoff } from "./handoff.ts";
 
 export const TASK_EVENT_CUSTOM_TYPE = "pi-tasks:event";
@@ -76,6 +77,12 @@ export interface SemanticChoiceJudgment<
 
 export type PlanSemanticDecision = "atomic" | "needs_breakdown" | "rejected";
 
+export interface PlanSemanticDiagnosis {
+	independentOutcomes: string[];
+	missingContext: string[];
+	correction: string;
+}
+
 export interface StepSemanticAssessment {
 	index: number;
 	inputHash: string;
@@ -87,9 +94,12 @@ export interface StepSemanticAssessment {
 	hiddenSubtasks: SemanticBooleanJudgment;
 	confidence: number;
 	issues: string[];
+	diagnosis?: PlanSemanticDiagnosis;
 }
 
 export interface PlanSemanticAssessment {
+	// Omission retains historical count-only materialization during replay.
+	descriptiveContextVersion?: 1;
 	provenance: SemanticAssessmentProvenance;
 	steps: StepSemanticAssessment[];
 }
@@ -100,6 +110,9 @@ export type EvidenceSemanticDecision =
 	| "uncertain";
 
 export interface EvidenceSemanticAssessment {
+	// Omission retains historical evidence-only hash validation during replay.
+	contractVersion?: 1;
+	diagnosis?: { claim: string; missingObservation: string };
 	provenance: SemanticAssessmentProvenance;
 	inputHash: string;
 	decision: EvidenceSemanticDecision;
@@ -108,6 +121,10 @@ export interface EvidenceSemanticAssessment {
 }
 
 export interface TaskEvidence {
+	/** Includes model-free failure/unknown authoring; omission preserves legacy replay. */
+	contractVersion?: 1;
+	/** Derived from the assessed event targets; never authored by evidence callers. */
+	assessedContract?: EvidenceContract;
 	id: string;
 	taskId: string;
 	type: EvidenceType;

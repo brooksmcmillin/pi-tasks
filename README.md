@@ -231,11 +231,37 @@ filename, keyword, or text length is never sufficient by itself. Task and
 evidence fields are quoted as untrusted data, and typed model output is validated
 before persistence.
 
+Classification uses the complete target, scope, output and bounded verification
+context, including new current-step clarification and decomposition's parent
+scope. Successful classification retains descriptive scope and verification in
+resume and subsequent decomposition, separately from model-derived count flags;
+old assessments retain their historical replay behavior. A bounded batch with
+readback, one multi-source investigation report, or
+a focused repair with regression checks can be one deliverable without exact
+command phrasing. A script wrapping unrelated products still needs decomposition.
+Non-atomic chat/OMP assessments name independent outcomes or missing context and
+the smallest correction; focus/resume and rejected updates retain that guidance.
+Classifier rejections may add one batched native-chat diagnosis when available;
+if diagnosis fails, the original classifier judgment remains authoritative.
+See the [local calibration report](docs/semantic-planning-calibration.md) for the
+reviewed corpus, measured native comparison and remaining limitations.
+
 Successful results are stored in version 2 task events with their input hash,
 model provenance, prompt version, confidence, and decision. Replay, resume,
 branch navigation, rendering, and completion remain deterministic and never
 re-run inference. Existing version 1 sessions continue to replay as legacy
 history.
+
+Evidence assessment receives the persisted objective, targeted step outputs,
+selected criterion meanings and evidence role. Specific negative results can
+prove a completed investigation or reconciliation without proving implementation
+success. Diagnostic records remain diagnostic; they cannot satisfy acceptance
+criteria or complete steps with new proof. Existing evidence IDs cannot transfer
+reporting proof to an unassessed implementation target. Reproducibility may mean inspecting retained artifacts,
+not replaying a consumed paid operation. Unsupported claims retain issue codes
+and recovery guidance; chat/OMP responses can also identify the unsupported claim
+and missing observation. See the [evidence calibration report](docs/semantic-evidence-calibration.md)
+for the bounded native evaluation and its limits.
 
 Semantic calls consume model tokens and can add latency. Pi classifier/chat calls
 send only the assessment payload. Oh My Pi ephemeral turns may include the
@@ -431,7 +457,11 @@ purpose (`to verify`, `to validate`, `to confirm`, `to analyze`, `to summarize`,
 `to check`), regardless of object length or words such as `test` in the object.
 The existing quality and evidence gates still apply to substantive deliverables. When `task_update` rejects a missing scope
 `activity` or cancellation `reason`, recovery points back to `task_update` and
-prints the required parameters.
+prints the required parameters. Invalid status transitions also target the existing
+task: blocked-to-review first requires actual blocker resolution and an explicit
+reason for blocked-to-active. Completion still requires `task_complete` and its
+evidence checks. Terminal or unsupported transitions explain the remaining action
+rather than suggesting a new task; a rejected call does not change state.
 
 ## Classify an already-simple step
 

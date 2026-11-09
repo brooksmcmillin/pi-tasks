@@ -5,6 +5,7 @@ import {
 	recoveryChecks,
 	repositoryIdentity,
 } from "./compaction-recovery.ts";
+import { evidenceContract } from "./evidence-contract.ts";
 import {
 	handoffSchema,
 	type OrchestrationHandoff,
@@ -48,7 +49,7 @@ import {
 	normalizeEvidenceQuality,
 	reduceTaskState,
 	TaskTransitionError,
-	taskPlanAssessmentInput,
+	taskMutationAssessmentInput,
 } from "./reducer.ts";
 import {
 	COMPACT_REMEDIATION_GUIDANCE,
@@ -72,6 +73,7 @@ import {
 	assessEvidenceSemantics,
 	assessPlanSemantics,
 	type EvidenceAssessmentInput,
+	hashEvidenceAssessmentInput,
 	mergeUsage,
 	SemanticAssessmentError,
 } from "./semantic-assessment.ts";
@@ -786,6 +788,7 @@ export function registerTaskTools(
 							(criterion) => criterion.text,
 						),
 						steps: params.child_steps,
+						context: { reason: params.reason, parentStep: beforeStep },
 					},
 					signal,
 				);
@@ -1148,7 +1151,10 @@ export function registerTaskTools(
 				return rejectedMutationResult(error, store.getState(), draftEvent);
 			}
 			try {
-				const input = evidenceAssessmentInput(params);
+				const task = store.getState().tasks[params.task_id];
+				if (!task)
+					throw new TaskTransitionError(`Task ${params.task_id} not found`);
+				const input = evidenceAssessmentInput(params, task);
 				const replayVersion = store.getReplayVersion();
 				const run = await assessEvidenceSemantics(ctx, input, signal);
 				assertReplayVersion(store, replayVersion, run.usage);
@@ -1269,6 +1275,7 @@ export function registerTaskTools(
 					{ ...entry, task_id: params.task_id },
 				);
 				const evidence = {
+					contractVersion: 1 as const,
 					id: duplicate?.id ?? nextEvidenceId(state, idGenerator, reservedIds),
 					type: entry.type,
 					role: entry.role ?? "acceptance",
@@ -1360,7 +1367,10 @@ export function registerTaskTools(
 				step_ids: [params.step_id],
 				quality: params.quality,
 			};
-			const duplicate = findDuplicateEvidenceForParams(task, evidenceParams);
+			const duplicate = findDuplicateEvidenceForParams(task, {
+				...evidenceParams,
+				step_id: params.step_id,
+			});
 			const step = task?.planSteps.find(
 				(candidate) => candidate.id === params.step_id,
 			);
@@ -1407,6 +1417,7 @@ export function registerTaskTools(
 			const event = baseEvent("task.step_verified", params.task_id, ctx, {
 				stepId: params.step_id,
 				evidence: {
+					contractVersion: 1,
 					id: evidenceId,
 					type: params.type,
 					role: "acceptance",
@@ -1731,8 +1742,14 @@ function planStepInputs(
 
 function evidenceAssessmentInput(
 	params: TaskEvidenceParams,
+	task: Task,
 ): EvidenceAssessmentInput {
 	return {
+		contract: evidenceContract(task, {
+			stepIds: params.step_ids,
+			criterionIds: params.criterion_ids,
+			role: params.role,
+		}),
 		type: params.type,
 		level: params.level,
 		summary: params.summary,
@@ -1749,6 +1766,7 @@ function evidenceEvent(
 ): Extract<TaskEvent, { type: "task.evidence_added" }> {
 	return baseEvent("task.evidence_added", params.task_id, ctx, {
 		evidence: {
+			contractVersion: 1,
 			id: evidenceId,
 			type: params.type,
 			level: params.level,
@@ -1853,6 +1871,9 @@ function rejectedMutationResult(
 				`- minimum_params: ${JSON.stringify(recovery.minimum_params)}`,
 				`- do_not_retry_same_call: ${recovery.do_not_retry_same_call}`,
 				`- reason: ${recovery.reason}`,
+				...(recovery.transition_recovery
+					? [`- next_action: ${recovery.transition_recovery.next_action}`]
+					: []),
 				...(recovery.retry_example
 					? [
 							"",
@@ -1869,7 +1890,7 @@ function rejectedMutationResult(
 				recovery.retry_with === recovery.resume.recommendedTool
 					? ["Recovery guidance:", resumeText]
 					: [
-							"Recovery guidance: correct the rejected call above, then call task_resume for the next task action.",
+							"Recovery guidance: follow the recovery above, then call task_resume for the next task action.",
 						]),
 			].join("\n"),
 			recovery,
@@ -1894,13 +1915,9 @@ async function assessForkMutation(
 			event.type === "task.reworked" ||
 			(event.type === "task.updated" && event.stepGranularityCheck)
 		) {
-			const steps =
-				event.type === "task.updated"
-					? task.planSteps.filter((step) => step.id === event.stepId)
-					: event.planSteps;
 			const run = await assessPlanSemantics(
 				ctx,
-				taskPlanAssessmentInput(task, steps),
+				taskMutationAssessmentInput(task, event),
 				signal,
 			);
 			usage = run.usage;
@@ -1917,6 +1934,19 @@ async function assessForkMutation(
 				const run = await assessEvidenceSemantics(
 					ctx,
 					{
+						contract: evidenceContract(task, {
+							stepIds:
+								entry.type === "task.step_verified"
+									? [entry.stepId]
+									: entry.stepIds,
+							criterionIds:
+								entry.criterionIds ??
+								(entry.type === "task.step_verified"
+									? task.planSteps.find((step) => step.id === entry.stepId)
+											?.criterionIds
+									: []),
+							role: evidence.role,
+						}),
 						type: evidence.type,
 						level: evidence.level,
 						summary: evidence.summary,
@@ -2042,6 +2072,18 @@ function buildRejectionRecovery(
 	event?: TaskEvent,
 ) {
 	const resume = buildTaskResume(state);
+	const transitionRecovery = buildStatusTransitionRecovery(error, state, event);
+	if (transitionRecovery) {
+		return {
+			rejected: true,
+			reason: errorText(error),
+			...transitionRecovery,
+			retry_example: undefined,
+			correct_rejected_call_first: true,
+			do_not_retry_same_call: true,
+			resume,
+		};
+	}
 	const retryExample =
 		event?.type === "task.evidence_batch"
 			? {
@@ -2083,6 +2125,7 @@ function buildRejectionRecovery(
 	return {
 		rejected: true,
 		reason: errorText(error),
+		transition_recovery: undefined,
 		retry_with:
 			event?.type === "task.evidence_batch"
 				? "task_evidence_batch"
@@ -2141,11 +2184,91 @@ function buildRejectionRecovery(
 	};
 }
 
+function buildStatusTransitionRecovery(
+	error: unknown,
+	state: TaskState,
+	event?: TaskEvent,
+) {
+	if (
+		!(error instanceof TaskTransitionError) ||
+		error.code !== "status_transition" ||
+		!event
+	)
+		return undefined;
+	const task = state.tasks[event.taskId];
+	if (!task) return undefined;
+	const requested = event.type === "task.updated" ? event.status : "done";
+	let retryWith = "task_resume";
+	let params: Record<string, unknown> = {};
+	let nextAction: string;
+	if (task.status === "done" || task.status === "cancelled") {
+		nextAction = `Task ${task.id} is ${task.status}; no status transition is allowed. Preserve its history. Only genuine review findings on a done task may use task_rework; do not reopen or create a duplicate objective to repair this call.`;
+	} else if (requested === "pending") {
+		nextAction = `Task ${task.id} cannot transition from ${task.status} to pending. Inspect the existing task and choose a supported action; do not create a replacement task.`;
+	} else if (task.status === "blocked" || task.status === "pending") {
+		retryWith = "task_update";
+		params = { task_id: task.id, status: "active" };
+		if (task.status === "blocked") {
+			params.reason = "<explicit reason the recorded blocker is resolved>";
+			nextAction = `Only after the recorded blocker is actually resolved, supply an explicit resolution reason and transition existing task ${task.id} from blocked to active. Otherwise keep it blocked and obtain the missing action/decision. Then reassess the requested ${requested} action with task_resume; guards and evidence obligations still apply.`;
+		} else {
+			nextAction = `Activate existing task ${task.id} first, then reassess the requested ${requested} action with task_resume; progress, blocker and completion checks still apply.`;
+		}
+	} else if (requested === "done") {
+		retryWith = "task_complete";
+		params = {
+			task_id: task.id,
+			summary: "<summary of verified completion>",
+			evidence_ids: ["<existing passing acceptance evidence ID>"],
+		};
+		nextAction = `Use task_complete for existing task ${task.id} only after its plan, acceptance criteria and evidence requirements are satisfied. Fill the template from actual observations; do not invent evidence or bypass completion checks.`;
+	} else if (requested === "blocked") {
+		retryWith = "task_update";
+		params = {
+			task_id: task.id,
+			status: "blocked",
+			blocker: {
+				reason: "<observed blocker>",
+				blockedBy: "user",
+				neededToUnblock: "<actual action or decision needed>",
+			},
+		};
+		nextAction = `Supply the actual blocker reason, blockedBy category and neededToUnblock action for existing task ${task.id}; the template category must be replaced when appropriate. Missing implementation or verification is work, not automatically a blocker.`;
+	} else {
+		nextAction = `Before moving existing task ${task.id} to review, record actual progress or evidence. Do not fabricate progress, clear blockers or create a new task. Inspect the existing task with task_resume for remaining work.`;
+	}
+	return {
+		retry_with: retryWith,
+		minimum_params: params,
+		transition_recovery: {
+			task_id: task.id,
+			current_status: task.status,
+			requested_status: requested,
+			next_action: nextAction,
+		},
+	};
+}
+
 function buildUpdateArgumentRepair(
 	event: TaskEvent | undefined,
 	message: string,
 ): Record<string, unknown> | undefined {
 	if (event?.type !== "task.updated") return undefined;
+	if (
+		message.startsWith("Semantic assessment requires") &&
+		event.semanticAssessment?.steps[0]?.decision === "rejected" &&
+		event.stepGranularityCheck
+	) {
+		return {
+			task_id: event.taskId,
+			step_id: event.stepId,
+			step_granularity_check: {
+				...event.stepGranularityCheck,
+				reason:
+					"<address the concrete missing context in the assessment reason>",
+			},
+		};
+	}
 	if (
 		message !== "Scope updates require an activity" &&
 		message !== "Scope change or off-plan activity requires scopeReason" &&
@@ -2397,13 +2520,42 @@ function parsePassed(value: string): boolean | "unknown" {
 
 function findDuplicateEvidenceForParams(
 	task: Task | undefined,
-	params: TaskEvidenceParams,
+	params: TaskEvidenceParams & { step_id?: string },
 ): TaskEvidence | undefined {
 	if (!task) return undefined;
 	const passed = parsePassed(params.passed);
+	let inputHash: string | undefined;
+	if (passed === true) {
+		try {
+			inputHash = hashEvidenceAssessmentInput(
+				evidenceAssessmentInput(
+					{
+						...params,
+						...(params.step_id
+							? {
+									step_ids: [params.step_id],
+									criterion_ids:
+										params.criterion_ids ??
+										task.planSteps.find((step) => step.id === params.step_id)
+											?.criterionIds ??
+										[],
+								}
+							: {}),
+					},
+					task,
+				),
+			);
+		} catch {
+			// Invalid targets proceed to the ordinary structural rejection, never a shortcut.
+			return undefined;
+		}
+	}
 	const references = params.references ?? [];
 	return task.evidence.find(
 		(evidence) =>
+			(passed !== true ||
+				(evidence.semanticAssessment?.contractVersion === 1 &&
+					evidence.semanticAssessment.inputHash === inputHash)) &&
 			evidence.type === params.type &&
 			(evidence.role ?? "acceptance") === (params.role ?? "acceptance") &&
 			evidence.level === params.level &&

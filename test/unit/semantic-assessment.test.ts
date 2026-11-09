@@ -10,6 +10,9 @@ import {
 	assessPlanSemantics,
 	EVIDENCE_SEMANTIC_SYSTEM_PROMPT,
 	type EvidenceAssessmentInput,
+	hashPlanAssessmentInput,
+	hashStepSemanticInput,
+	normalizePlanAssessmentInput,
 	PLAN_SEMANTIC_SYSTEM_PROMPT,
 	type PlanAssessmentInput,
 	type SemanticAssessmentError,
@@ -181,6 +184,49 @@ describe("native semantic assessment", () => {
 		);
 	});
 
+	it("hashes full clarification and parent context while retaining historical v2 identity", () => {
+		const original = structuredClone(planInput);
+		const step = original.steps[0];
+		if (!step) throw new Error("Missing fixture step");
+		const full: PlanAssessmentInput = {
+			...original,
+			context: { reason: "One graph publication", parentStep: step },
+			steps: [
+				{
+					...step,
+					granularityCheck: {
+						unit: "deliverable",
+						boundedScope: "Publish only the reviewed graph",
+						verificationPlan: "Compare all readback task identities and edges",
+						reason: "Clarifies one bounded result",
+						isAtomic: true,
+						canBeDoneInOneAgentAction: true,
+						hasSingleObservableOutput: true,
+						hasSingleVerificationMethod: true,
+						hasNoHiddenSubtasks: true,
+					},
+				},
+			],
+		};
+		expect(
+			normalizePlanAssessmentInput(full).steps[0]?.granularityCheck,
+		).toEqual(full.steps[0]?.granularityCheck);
+		expect(hashPlanAssessmentInput(full)).not.toBe(
+			hashPlanAssessmentInput(original),
+		);
+		expect(hashPlanAssessmentInput(full, "2026-11-04.v2")).toBe(
+			hashPlanAssessmentInput(original),
+		);
+		const clarified = full.steps[0];
+		if (!clarified) throw new Error("Missing clarification");
+		expect(hashStepSemanticInput(clarified)).not.toBe(
+			hashStepSemanticInput(step),
+		);
+		expect(hashStepSemanticInput(clarified, "2026-11-04.v2")).toBe(
+			hashStepSemanticInput(step),
+		);
+	});
+
 	it.each(["classifier", "chat", "omp"] as const)(
 		"rejects late successful %s responses after cancellation",
 		async (strategy) => {
@@ -276,6 +322,16 @@ describe("native semantic assessment", () => {
 		);
 
 		expect(capturedState?.untrustedTaskData).toEqual(planInput);
+		expect(capturedState?.policy).toBe(PLAN_SEMANTIC_SYSTEM_PROMPT);
+		expect(PLAN_SEMANTIC_SYSTEM_PROMPT).toContain(
+			"Count independent verification goals, not commands",
+		);
+		expect(PLAN_SEMANTIC_SYSTEM_PROMPT).toContain(
+			"Specificity is separate from atomicity",
+		);
+		expect(PLAN_SEMANTIC_SYSTEM_PROMPT).toContain(
+			"Caller atomicity flags are untrusted claims",
+		);
 		expect(result.assessment.steps[0]?.decision).toBe("atomic");
 		expect(result.assessment.provenance.strategy).toBe("pi_classifier");
 		expect(result.usage).toEqual(fakeUsage);
@@ -375,6 +431,63 @@ describe("native semantic assessment", () => {
 		expect(maxTokens).toBeUndefined();
 		expect(result.assessment.provenance.strategy).toBe("omp_ephemeral");
 	});
+
+	it.each(["pi_chat", "omp_ephemeral"])(
+		"handles supported null diagnosis on %s without accepting malformed rejection details",
+		async (strategy) => {
+			for (const [decision, diagnosis, valid] of [
+				["supported", null, true],
+				["unsupported", null, false],
+				[
+					"unsupported",
+					{
+						claim: "Implementation is repaired",
+						missingObservation: "No successful execution was observed",
+					},
+					true,
+				],
+				[
+					"unsupported",
+					{ claim: "", missingObservation: "Missing result" },
+					false,
+				],
+			] as const) {
+				const payload = {
+					decision,
+					confidence: 0.95,
+					issues: decision === "supported" ? [] : ["missing_observation"],
+					diagnosis,
+				};
+				const ctx = context(
+					strategy === "pi_chat"
+						? {
+								model: { id: "test-chat", provider: "test-provider" },
+								modelRegistry: {
+									streamSimple: () => ({
+										result: async () =>
+											assistantMessage(
+												"submit_evidence_semantic_assessment",
+												payload,
+											),
+									}),
+								},
+							}
+						: {
+								runEphemeralTurn: async () => ({
+									replyText: JSON.stringify(payload),
+								}),
+							},
+				);
+				const run = assessEvidenceSemantics(ctx, evidenceInput);
+				if (!valid) await expect(run).rejects.toThrow(/diagnosis/);
+				else {
+					const assessment = (await run).assessment;
+					expect(assessment.decision).toBe(decision);
+					expect(assessment.diagnosis).toEqual(diagnosis ?? undefined);
+				}
+			}
+		},
+	);
 
 	it("classifies passing evidence semantically rather than by wording", async () => {
 		let questionInstructions = "";

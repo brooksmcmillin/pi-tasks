@@ -1,3 +1,8 @@
+import {
+	type EvidenceContract,
+	evidenceContract,
+	evidenceSupportsTarget,
+} from "./evidence-contract.ts";
 import { validateHandoff } from "./handoff.ts";
 import {
 	type AcceptanceCriterion,
@@ -28,6 +33,7 @@ import {
 	hashStepSemanticInput,
 	MIN_SEMANTIC_CONFIDENCE,
 	type PlanAssessmentInput,
+	planDiagnosisIssues,
 } from "./semantic-assessment.ts";
 import {
 	classifyMechanicStep,
@@ -51,7 +57,8 @@ const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 
 export type TaskTransitionErrorCode =
 	| "scope_activity_required"
-	| "scope_reason_required";
+	| "scope_reason_required"
+	| "status_transition";
 
 const PLAN_REPAIR_GUIDANCE =
 	"Name the target and one observable result; retain related read-only checks in allowedActions for that result. For review/publication, use separate steps for candidate capture, reviewer dispatch, completed-result assessment, ledger persistence, commit, push, and PR creation as applicable. Keep each mutation's preconditions and immediate receipt checks with that mutation. Do not split individual reads into artificial deliverables or infer permission from a template. See docs/review-publication-contracts.md; replace example identities with verified scope and resubmit for native assessment.";
@@ -287,14 +294,7 @@ function decomposeStep(
 			`Plan step ${parent.id} reached maximum decomposition depth ${MAX_DECOMPOSITION_DEPTH}`,
 		);
 	}
-	const assessmentInput: PlanAssessmentInput = {
-		title: task.title,
-		objective: task.objective,
-		acceptanceCriteria: task.acceptanceCriteria.map(
-			(criterion) => criterion.text,
-		),
-		steps: event.childSteps,
-	};
+	const assessmentInput = taskMutationAssessmentInput(task, event);
 	validatePlanSemanticAssessment(
 		event.semanticAssessment,
 		assessmentInput,
@@ -382,7 +382,7 @@ function replanTask(
 	validateReworkSteps(event.planSteps);
 	validatePlanSemanticAssessment(
 		event.semanticAssessment,
-		taskPlanAssessmentInput(task, event.planSteps),
+		taskMutationAssessmentInput(task, event),
 		event.version === 2,
 	);
 	const replacements = createPlanSteps(
@@ -427,6 +427,47 @@ function replanTask(
 	);
 	task.updatedAt = event.createdAt;
 	return state;
+}
+
+export function taskMutationAssessmentInput(
+	task: Task,
+	event: Extract<
+		TaskEvent,
+		{
+			type:
+				| "task.steps_decomposed"
+				| "task.replanned"
+				| "task.reworked"
+				| "task.updated";
+		}
+	>,
+): PlanAssessmentInput {
+	if (event.type === "task.updated") {
+		return taskPlanAssessmentInput(
+			task,
+			task.planSteps
+				.filter((step) => step.id === event.stepId)
+				.map((step) => ({
+					...step,
+					...(event.stepGranularityCheck
+						? { granularityCheck: event.stepGranularityCheck }
+						: {}),
+				})),
+		);
+	}
+	const input = taskPlanAssessmentInput(
+		task,
+		event.type === "task.steps_decomposed" ? event.childSteps : event.planSteps,
+	);
+	const parentStep =
+		event.type === "task.steps_decomposed"
+			? task.planSteps.find((step) => step.id === event.parentStepId)
+			: undefined;
+	input.context = {
+		reason: event.reason,
+		...(parentStep ? { parentStep } : {}),
+	};
+	return input;
 }
 
 export function taskPlanAssessmentInput(
@@ -510,7 +551,7 @@ function reworkTask(
 	const nextStepNumber = nextRootStepNumber(task);
 	validatePlanSemanticAssessment(
 		event.semanticAssessment,
-		taskPlanAssessmentInput(task, event.planSteps),
+		taskMutationAssessmentInput(task, event),
 		event.version === 2,
 	);
 	const steps = createPlanSteps(
@@ -704,13 +745,13 @@ function classifyCurrentStep(
 	}
 	validatePlanSemanticAssessment(
 		event.semanticAssessment,
-		taskPlanAssessmentInput(task, [step]),
+		taskMutationAssessmentInput(task, event),
 		event.version === 2,
 	);
 	const assessment = event.semanticAssessment?.steps[0];
 	if (assessment && assessment.decision !== "atomic") {
 		throw new TaskTransitionError(
-			`Semantic assessment requires decomposition; current step was not classified atomic: ${assessment.issues.join("; ")}. ${PLAN_REPAIR_GUIDANCE}`,
+			`Semantic assessment requires decomposition or clarification; current step was not classified atomic: ${assessment.issues.join("; ")}. ${PLAN_REPAIR_GUIDANCE}`,
 		);
 	}
 	const mechanic = classifyMechanicStep(step.text, true);
@@ -719,7 +760,14 @@ function classifyCurrentStep(
 	const candidate = {
 		...step,
 		decompositionStatus: "atomic" as const,
-		granularityCheck: assessment ? semanticGranularityCheck(assessment) : check,
+		granularityCheck: assessment
+			? semanticGranularityCheck(
+					assessment,
+					event.semanticAssessment?.descriptiveContextVersion === 1
+						? check
+						: undefined,
+				)
+			: check,
 	};
 	candidate.planQuality = legacyPlanQuality(candidate);
 	validateGranularityContract(candidate, 0, replay);
@@ -738,14 +786,15 @@ function addEvidence(
 	const evidence = materializeEvidence(task, event.evidence, event.createdAt);
 	if (event.semanticAssessment)
 		evidence.semanticAssessment = event.semanticAssessment;
-	validateEvidence(evidence, event.version === 2);
+	validateEventEvidence(task, event, evidence);
 	const duplicate = findDuplicateEvidence(task, evidence);
-	// Keep legacy replay unchanged; rework proof must have unambiguous IDs.
+	// Keep legacy replay unchanged; rework and contract-bound proof need unique IDs.
 	if (
 		!duplicate &&
-		task.acceptanceCriteria.some(
-			(criterion) => criterion.evidenceBaseline !== undefined,
-		) &&
+		(evidence.assessedContract ||
+			task.acceptanceCriteria.some(
+				(criterion) => criterion.evidenceBaseline !== undefined,
+			)) &&
 		task.evidence.some((existing) => existing.id === evidence.id)
 	) {
 		throw new TaskTransitionError(
@@ -773,6 +822,30 @@ function addEvidence(
 	recalculateProgress(task);
 	task.updatedAt = event.createdAt;
 	return state;
+}
+
+function validateEventEvidence(
+	task: Task,
+	event: Extract<
+		TaskEvent,
+		{ type: "task.evidence_added" | "task.step_verified" }
+	>,
+	evidence: TaskEvidence,
+): void {
+	delete evidence.assessedContract;
+	if (evidence.semanticAssessment?.contractVersion === 1) {
+		evidence.assessedContract = evidenceContract(task, {
+			stepIds:
+				event.type === "task.step_verified" ? [event.stepId] : event.stepIds,
+			criterionIds:
+				event.criterionIds ??
+				(event.type === "task.step_verified"
+					? requireStep(task, event.stepId).criterionIds
+					: []),
+			role: evidence.role,
+		});
+	}
+	validateEvidence(evidence, event.version === 2, evidence.assessedContract);
 }
 
 function materializeEvidence(
@@ -807,12 +880,12 @@ function verifyStep(
 	const evidence = materializeEvidence(task, event.evidence, event.createdAt);
 	if (event.semanticAssessment)
 		evidence.semanticAssessment = event.semanticAssessment;
-	validateEvidence(evidence, event.version === 2);
 	if (evidence.passed !== true || getEvidenceRole(evidence) !== "acceptance") {
 		throw new TaskTransitionError(
 			"task.step_verified requires passing acceptance evidence",
 		);
 	}
+	validateEventEvidence(task, event, evidence);
 	const criterionIds = event.criterionIds ?? step.criterionIds;
 	const invalidCriterionIds = criterionIds.filter(
 		(criterionId) => !step.criterionIds.includes(criterionId),
@@ -1036,6 +1109,7 @@ function applySnapshot(
 }
 
 interface CreatePlanStepsOptions {
+	preserveDescriptiveContext?: boolean;
 	replay?: boolean;
 	parentStepId?: string;
 	parentStatus?: TaskStep["status"];
@@ -1085,10 +1159,19 @@ function validatePlanSemanticAssessment(
 		return;
 	}
 	validateSemanticProvenance(assessment.provenance, "Semantic assessment");
+	if (
+		assessment.descriptiveContextVersion !== undefined &&
+		assessment.descriptiveContextVersion !== 1
+	) {
+		throw new TaskTransitionError("Unsupported descriptive context version");
+	}
 	if (!Array.isArray(assessment.steps)) {
 		throw new TaskTransitionError("Semantic assessment steps are invalid");
 	}
-	const expectedBatchHash = hashPlanAssessmentInput(input);
+	const expectedBatchHash = hashPlanAssessmentInput(
+		input,
+		assessment.provenance.promptVersion,
+	);
 	if (assessment.provenance.inputHash !== expectedBatchHash) {
 		throw new TaskTransitionError(
 			"Semantic assessment input hash does not match the plan mutation",
@@ -1111,7 +1194,10 @@ function validatePlanSemanticAssessment(
 				`Semantic assessment result ${index + 1} has an invalid index`,
 			);
 		}
-		if (result.inputHash !== hashStepSemanticInput(step)) {
+		if (
+			result.inputHash !==
+			hashStepSemanticInput(step, assessment.provenance.promptVersion)
+		) {
 			throw new TaskTransitionError(
 				`Semantic assessment result ${index + 1} does not match its plan step`,
 			);
@@ -1217,6 +1303,9 @@ function expectedPlanSemanticIssues(
 			`semantic assessment confidence ${assessment.confidence.toFixed(2)} is below ${MIN_SEMANTIC_CONFIDENCE.toFixed(2)}`,
 		);
 	}
+	issues.push(
+		...planDiagnosisIssues(assessment.diagnosis, assessment.decision),
+	);
 	return issues;
 }
 
@@ -1242,7 +1331,11 @@ function createPlanSteps(
 					createdAt,
 					activate,
 					semanticAssessment?.steps[index],
-					options,
+					{
+						...options,
+						preserveDescriptiveContext:
+							semanticAssessment?.descriptiveContextVersion === 1,
+					},
 				),
 			);
 		} catch (error) {
@@ -1322,7 +1415,10 @@ function createPlanStep(
 		);
 	}
 	const granularityCheck = semanticAssessment
-		? semanticGranularityCheck(semanticAssessment)
+		? semanticGranularityCheck(
+				semanticAssessment,
+				options.preserveDescriptiveContext ? step.granularityCheck : undefined,
+			)
 		: normalizeGranularityCheck(step);
 	const decompositionStatus = semanticAssessment
 		? semanticAssessment.decision === "atomic"
@@ -1398,13 +1494,22 @@ function createPlanStep(
 
 function semanticGranularityCheck(
 	assessment: StepSemanticAssessment,
+	context?: TaskGranularityCheck,
 ): TaskGranularityCheck {
 	return {
+		...(context?.unit !== undefined ? { unit: context.unit } : {}),
+		...(context?.boundedScope !== undefined
+			? { boundedScope: context.boundedScope.trim() }
+			: {}),
+		...(context?.verificationPlan !== undefined
+			? { verificationPlan: context.verificationPlan.trim() }
+			: {}),
 		isAtomic: assessment.decision === "atomic",
 		reason:
-			assessment.issues.length > 0
+			context?.reason.trim() ||
+			(assessment.issues.length > 0
 				? assessment.issues.join("; ")
-				: "Native semantic assessment found one action, one output, one verification method, and no hidden subtasks",
+				: "Native semantic assessment found one action, one output, one verification method, and no hidden subtasks"),
 		canBeDoneInOneAgentAction: assessment.actionCount.value === "one",
 		hasSingleObservableOutput: assessment.outputCount.value === "one",
 		hasSingleVerificationMethod: assessment.verificationCount.value === "one",
@@ -1609,6 +1714,14 @@ function updatePlanStep(
 			`Plan step ${currentStep.id} requires evidence before done`,
 		);
 	}
+	// Version 1 is also the model-free structural preflight before new proof is assessed.
+	if (
+		event.version === 2 &&
+		event.stepStatus === "done" &&
+		currentStep.evidenceRequired
+	) {
+		validateBoundStepEvidence(task, currentStep, nextEvidenceIds);
+	}
 	currentStep.status = event.stepStatus;
 	currentStep.evidenceIds = nextEvidenceIds;
 	if (event.note !== undefined) currentStep.note = event.note;
@@ -1629,6 +1742,31 @@ function updatePlanStep(
 	}
 	delete task.currentStep;
 	delete task.nextAction;
+}
+
+function validateBoundStepEvidence(
+	task: Task,
+	step: TaskStep,
+	evidenceIds: string[],
+): void {
+	const records = evidenceIds.map((id) => requireEvidence(task, id));
+	if (
+		records.some(
+			(item) =>
+				item.contractVersion === 1 ||
+				item.semanticAssessment?.contractVersion === 1,
+		) &&
+		!records.some(
+			(item) =>
+				item.passed === true &&
+				isActiveAcceptanceEvidence(task, item) &&
+				evidenceSupportsTarget(task, item, step),
+		)
+	) {
+		throw new TaskTransitionError(
+			`Plan step ${step.id} requires passing acceptance evidence assessed for its output; record proof for this target, not reuse unrelated or diagnostic evidence`,
+		);
+	}
 }
 
 function recordScopeSignal(
@@ -1750,7 +1888,11 @@ function validateCompletion(
 		}
 		const criterionEvidence = criterion.evidenceIds
 			.map((evidenceId) => requireEvidence(task, evidenceId))
-			.filter((item) => isActiveAcceptanceEvidence(task, item));
+			.filter(
+				(item) =>
+					isActiveAcceptanceEvidence(task, item) &&
+					evidenceSupportsTarget(task, item, criterion),
+			);
 		if (criterion.status === "satisfied" && criterionEvidence.length === 0) {
 			throw new TaskTransitionError(
 				`Criterion ${criterion.id} is satisfied without active acceptance evidence`,
@@ -1774,6 +1916,8 @@ function validateCompletion(
 		}
 	}
 	for (const step of task.planSteps) {
+		if (step.status === "done" && step.evidenceRequired && !forceReason)
+			validateBoundStepEvidence(task, step, step.evidenceIds);
 		const stepEvidence = step.evidenceIds
 			.map((evidenceId) => requireEvidence(task, evidenceId))
 			.filter((item) => isActiveAcceptanceEvidence(task, item));
@@ -1815,6 +1959,7 @@ function validateStatusTransition(
 	if (TERMINAL_STATUSES.includes(current)) {
 		throw new TaskTransitionError(
 			`Task ${task.id} is ${current} and cannot transition to ${nextStatus}`,
+			"status_transition",
 		);
 	}
 	const allowed: Record<TaskStatus, TaskStatus[]> = {
@@ -1828,10 +1973,14 @@ function validateStatusTransition(
 	if (!allowed[current].includes(nextStatus)) {
 		throw new TaskTransitionError(
 			`Invalid transition for ${task.id}: ${current} -> ${nextStatus}`,
+			"status_transition",
 		);
 	}
 	if (nextStatus === "done" && event.type === "task.updated") {
-		throw new TaskTransitionError("Use task_complete to mark a task done");
+		throw new TaskTransitionError(
+			"Use task_complete to mark a task done",
+			"status_transition",
+		);
 	}
 	if (
 		nextStatus === "cancelled" &&
@@ -1845,7 +1994,10 @@ function validateStatusTransition(
 		event.type === "task.updated" &&
 		!event.blocker
 	) {
-		throw new TaskTransitionError("Blocking a task requires blocker details");
+		throw new TaskTransitionError(
+			"Blocking a task requires blocker details",
+			"status_transition",
+		);
 	}
 	if (
 		nextStatus === "active" &&
@@ -1853,7 +2005,10 @@ function validateStatusTransition(
 		event.type === "task.updated" &&
 		!event.reason?.trim()
 	) {
-		throw new TaskTransitionError("Unblocking a task requires a reason");
+		throw new TaskTransitionError(
+			"Unblocking a task requires a reason",
+			"status_transition",
+		);
 	}
 	if (
 		nextStatus === "review" &&
@@ -1863,6 +2018,7 @@ function validateStatusTransition(
 	) {
 		throw new TaskTransitionError(
 			"Moving to review requires progress or evidence",
+			"status_transition",
 		);
 	}
 }
@@ -2010,7 +2166,8 @@ export function hasFreshCriterionEvidence(
 			(evidence) =>
 				criterion.evidenceIds.includes(evidence.id) &&
 				evidence.passed === true &&
-				isActiveAcceptanceEvidence(task, evidence),
+				isActiveAcceptanceEvidence(task, evidence) &&
+				evidenceSupportsTarget(task, evidence, criterion),
 		);
 }
 
@@ -2027,7 +2184,16 @@ function isActiveAcceptanceEvidence(
 function validateEvidence(
 	evidence: TaskEvidence,
 	requireSemanticAssessment: boolean,
+	contract?: EvidenceContract,
 ): void {
+	if (
+		evidence.contractVersion !== undefined &&
+		evidence.contractVersion !== 1
+	) {
+		throw new TaskTransitionError(
+			"Unsupported evidence record contract version",
+		);
+	}
 	if (!evidence.summary.trim())
 		throw new TaskTransitionError("Evidence summary is required");
 	if (evidence.summary.length > MAX_EVIDENCE_SUMMARY_LENGTH) {
@@ -2085,6 +2251,7 @@ function validateEvidence(
 			evidence.semanticAssessment,
 			evidence,
 			requireSemanticAssessment,
+			contract,
 		);
 	}
 	if (evidence.type !== "note" && evidence.references.length === 0) {
@@ -2152,6 +2319,7 @@ function validateEvidenceSemanticAssessment(
 	assessment: EvidenceSemanticAssessment | undefined,
 	evidence: TaskEvidence,
 	required: boolean,
+	contract?: EvidenceContract,
 ): void {
 	if (
 		!assessment ||
@@ -2209,7 +2377,23 @@ function validateEvidenceSemanticAssessment(
 			"Uncertain evidence semantic assessment requires the uncertain issue",
 		);
 	}
+	if (
+		assessment.contractVersion !== undefined &&
+		assessment.contractVersion !== 1
+	) {
+		throw new TaskTransitionError("Unsupported evidence contract version");
+	}
+	if (
+		assessment.diagnosis &&
+		(!assessment.diagnosis.claim?.trim() ||
+			!assessment.diagnosis.missingObservation?.trim() ||
+			assessment.diagnosis.claim.length > 500 ||
+			assessment.diagnosis.missingObservation.length > 1000)
+	) {
+		throw new TaskTransitionError("Evidence semantic diagnosis is invalid");
+	}
 	const expectedHash = hashEvidenceAssessmentInput({
+		...(contract ? { contract } : {}),
 		type: evidence.type,
 		level: evidence.level,
 		summary: evidence.summary,
@@ -2229,7 +2413,7 @@ function validateEvidenceSemanticAssessment(
 		assessment.confidence < MIN_SEMANTIC_CONFIDENCE
 	) {
 		throw new TaskTransitionError(
-			`Passing evidence failed semantic assessment: ${assessment.issues.join("; ") || assessment.decision}`,
+			`Passing evidence failed semantic assessment: ${assessment.issues.join("; ") || assessment.decision}. Unsupported claim: ${assessment.diagnosis?.claim ?? evidence.summary}. Missing or contradicting observation: ${assessment.diagnosis?.missingObservation ?? "supply a specific inspected result supporting the targeted step output and linked criterion meanings; references or expectations alone do not establish the claim"}. Inspect retained artifacts; do not replay a consumed paid operation.`,
 		);
 	}
 }
@@ -2291,19 +2475,25 @@ function findDuplicateEvidence(
 	task: Task,
 	evidence: TaskEvidence,
 ): TaskEvidence | undefined {
-	return task.evidence.find(
-		(existing) =>
-			existing.type === evidence.type &&
-			getEvidenceRole(existing) === getEvidenceRole(evidence) &&
-			existing.level === evidence.level &&
-			existing.passed === evidence.passed &&
-			existing.summary.trim() === evidence.summary.trim() &&
-			normalizedReferences(existing.references) ===
-				normalizedReferences(evidence.references) &&
-			normalizedReferences(existing.supersedesEvidenceIds ?? []) ===
-				normalizedReferences(evidence.supersedesEvidenceIds ?? []) &&
-			(existing.supersessionReason?.trim() ?? "") ===
-				(evidence.supersessionReason?.trim() ?? ""),
+	const matches = (existing: TaskEvidence) =>
+		(!evidence.assessedContract ||
+			existing.semanticAssessment?.inputHash ===
+				evidence.semanticAssessment?.inputHash) &&
+		existing.type === evidence.type &&
+		getEvidenceRole(existing) === getEvidenceRole(evidence) &&
+		existing.level === evidence.level &&
+		existing.passed === evidence.passed &&
+		existing.summary.trim() === evidence.summary.trim() &&
+		normalizedReferences(existing.references) ===
+			normalizedReferences(evidence.references) &&
+		normalizedReferences(existing.supersedesEvidenceIds ?? []) ===
+			normalizedReferences(evidence.supersedesEvidenceIds ?? []) &&
+		(existing.supersessionReason?.trim() ?? "") ===
+			(evidence.supersessionReason?.trim() ?? "");
+	return (
+		task.evidence.find(
+			(existing) => existing.id === evidence.id && matches(existing),
+		) ?? task.evidence.find(matches)
 	);
 }
 
