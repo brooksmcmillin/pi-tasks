@@ -277,6 +277,9 @@ type GuidedTaskToolDefinition<TParams extends Record<string, unknown>> =
 		promptGuidelines: string[];
 	};
 
+const REJECTION_REPORTING_GUIDANCE =
+	"For pi-tasks rejections, preserve each relevant submitted payload and returned error (or exact transcript references). Report only that those submissions failed, not that no valid plan is possible. Distinguish an exact recovery submission from an adapted scaffold; name omitted or changed fields and leave unsubmitted variants untested. If recovery fields are absent from the installed tool schema, report that mismatch rather than submitting unsupported fields or repeating a known-invalid call. Recovery suggestions do not guarantee semantic acceptance: use real scope and observations, never invent evidence or bypass execution gates.";
+
 const TASK_ENTRYPOINT_NAMES = ["task_plan", "task_resume"] as const;
 const registeredTaskToolNames = new WeakMap<ExtensionAPI, Set<string>>();
 
@@ -426,6 +429,7 @@ export function registerTaskTools(
 			"Use concrete acceptance criteria. During initial task_plan creation, use criterionRefs with 1-based acceptance_criteria positions to selectively link a step without guessing generated IDs; omit it to retain the legacy all-criteria default.",
 			"Plan and decomposition steps are semantically assessed by the configured native host model; provide concrete text and expectedOutput, but do not self-score granularity. A cohesive deliverable may include one bounded implementation cycle with its focused verification procedure; do not bundle unrelated outcomes.",
 			"Activate only one task unless the user explicitly asks for parallel work.",
+			REJECTION_REPORTING_GUIDANCE,
 		],
 		parameters: Type.Object({
 			title: Type.String({ description: "Concise task title" }),
@@ -1845,6 +1849,7 @@ function semanticAssessmentFailureResult(
 				"- no_regex_fallback: true",
 				"",
 				"Configure or restore a native Pi/Oh My Pi model capability, then retry the rejected mutation.",
+				REJECTION_REPORTING_GUIDANCE,
 			].join("\n"),
 			details,
 		),
@@ -1871,6 +1876,7 @@ function rejectedMutationResult(
 				`- minimum_params: ${JSON.stringify(recovery.minimum_params)}`,
 				`- do_not_retry_same_call: ${recovery.do_not_retry_same_call}`,
 				`- reason: ${recovery.reason}`,
+				REJECTION_REPORTING_GUIDANCE,
 				...(recovery.transition_recovery
 					? [`- next_action: ${recovery.transition_recovery.next_action}`]
 					: []),

@@ -168,6 +168,9 @@ This project must align with the commercial-quality bar established by `pi-knowl
 
 ## Runtime Recovery Contracts
 
+- Bound blocker reports to observed submissions: retain relevant payloads and returned errors or exact transcript references, distinguish exact recovery submissions from adapted scaffolds, and name omitted/changed fields. Unsubmitted variants remain untested; failed attempts do not prove no valid plan exists.
+- If suggested fields are unavailable in the installed public schema, report that mismatch without submitting unsupported fields or repeating known-invalid calls. Schema-valid suggestions do not promise semantic success or authorize invented evidence or bypassed execution gates. Keep this guidance in `task_plan` prompt metadata/description and rejection output; host-level schema failures may occur before tool execution.
+
 - Recovery argument scaffolds must match the named registered public tool schema, including nested fields and required arguments. Never expose reducer-owned planning assessment fields. Rejection retries target the rejected operation rather than borrowing an unrelated active task's next action.
 - Status-transition recovery targets the rejected task, not the active-task fallback. Blocked-to-review recovery requires actual blocker resolution and an explicit reason before blocked-to-active; completion still uses `task_complete`. Terminal or unsupported transitions explain the remaining action without creating a duplicate objective or mutating state.
 - Scaffolds require caller replacement with real scope and observations; schema validity is not semantic acceptance or evidence. Preserve native assessment, evidence, blocker and completion gates. Test generated payloads against registered schemas, not only direct `execute()` calls that bypass host validation.

@@ -2407,6 +2407,105 @@ describe("registered task tools", () => {
 		expect(store.getState().tasks.T1?.id).toBe("T1");
 	});
 
+	it.each([
+		{
+			field: "step_0_output_count",
+			choice: "multiple",
+			error: "step contains multiple independently observable outputs",
+		},
+		{
+			field: "step_0_verification_count",
+			choice: "unclear",
+			error: "verification method count is unclear",
+		},
+	])(
+		"bounds rejection reporting for $field",
+		async ({ field, choice, error }) => {
+			const runtime = fakeSemanticRuntime();
+			const registry = runtime.modelRegistry;
+			const classify = registry?.classify;
+			if (!registry || !classify) throw new Error("Missing fixture classifier");
+			registry.classify = async (model, context, options) => {
+				const result = await classify(model, context, options);
+				// Multiple outputs alone permit a breakdown scaffold; unclear
+				// verification makes this a rejected submission.
+				result.answers.step_0_verification_count = {
+					type: "choice",
+					choice: "unclear",
+					confidence: 0.95,
+				};
+				result.answers[field] = {
+					type: "choice",
+					choice,
+					confidence: 0.95,
+				};
+				return result;
+			};
+			const { tools, ctx, store, entries, publications } = createHarness({
+				semanticRuntime: runtime,
+			});
+			const plan = requireTool(tools, "task_plan");
+			const params = {
+				title: "Reporting fixture",
+				objective: "Exercise bounded rejection reports",
+				acceptance_criteria: ["Reports preserve the observed rejection"],
+				plan_steps: [
+					{
+						text: "Produce the fixture report",
+						expectedOutput: "A report verified against the fixture",
+						allowedActions: ["Write and verify the fixture report"],
+					},
+				],
+			};
+			assertSchema(plan.parameters, params);
+			const rejected = await execute(plan, params, ctx);
+			const text = rejected.content[0]?.text;
+			expect(rejected.isError).toBe(true);
+			expect(text).toContain(
+				`Plan step 1 failed semantic assessment: ${error}`,
+			);
+			expect(text).toContain(
+				"preserve each relevant submitted payload and returned error",
+			);
+			expect(text).toContain("not that no valid plan is possible");
+			expect(text).toContain(
+				"exact recovery submission from an adapted scaffold",
+			);
+			expect(text).toContain("leave unsubmitted variants untested");
+			expect(text).toContain("do not guarantee semantic acceptance");
+			expect(text).toContain("never invent evidence or bypass execution gates");
+			expect(entries).toEqual([]);
+			expect(publications).toEqual([]);
+			expect(store.getState().tasks).toEqual({});
+		},
+	);
+
+	it("exposes reporting guidance before unavailable recovery fields reach execute", () => {
+		const { tools, entries } = createHarness({ dynamicTools: true });
+		const plan = requireTool(tools, "task_plan");
+		for (const guidance of [
+			plan.description,
+			...(plan.promptGuidelines ?? []),
+		].filter((text) => text.includes("For pi-tasks rejections"))) {
+			expect(guidance).toContain(
+				"fields are absent from the installed tool schema",
+			);
+			expect(guidance).toContain("rather than submitting unsupported fields");
+			expect(guidance).toContain("name omitted or changed fields");
+		}
+		expect(plan.description).toContain("For pi-tasks rejections");
+		expect(
+			plan.promptGuidelines?.some((text) =>
+				text.includes("For pi-tasks rejections"),
+			),
+		).toBe(true);
+		const schema = plan.parameters as unknown as ToolSchema;
+		const stepProperties = schema.properties?.plan_steps?.items?.properties;
+		expect(stepProperties).not.toHaveProperty("decompositionStatus");
+		expect(stepProperties).not.toHaveProperty("granularityCheck");
+		expect(entries).toEqual([]);
+	});
+
 	it("emits a schema-valid task_plan scaffold from rejection recovery", async () => {
 		const { tools, ctx, store } = createHarness();
 		const plan = requireTool(tools, "task_plan");

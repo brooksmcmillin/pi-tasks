@@ -48,6 +48,7 @@ const VERIFICATION_LEVELS = [
 ];
 const PLAN_REPAIR_GUIDANCE = "task_rework adds review remediation without replacing prior steps; optionally use before_step_id to insert repairs before an open gate. Reconcile a malformed or duplicate plan before implementation: use task_replan when available to explicitly replace mistaken open steps, then resume the corrected contract. If repair is unavailable, report the tracking blocker; do not bypass the contract or cancel completed work merely to clear tracking warnings.";
 const REWORK_GUIDANCE = "Use task_rework when review discovers missing or defective work within the original objective, even if no open step remains or task_complete is recommended. Record findings and add remediation steps without asking permission for in-scope repairs; use before_step_id to insert them before a named open review/publication gate, or omit it to append. Record genuine scope or architecture decisions with task_decision before proceeding.";
+const REJECTION_REPORTING_GUIDANCE = "For pi-tasks rejections, preserve each relevant submitted payload and returned error (or exact transcript references). Report only that those submissions failed, not that no valid plan is possible. Distinguish an exact recovery submission from an adapted scaffold; name omitted or changed fields and leave unsubmitted variants untested. If recovery fields are absent from the installed tool schema, report that mismatch rather than submitting unsupported fields or repeating a known-invalid call. Recovery suggestions do not guarantee semantic acceptance: use real scope and observations, never invent evidence or bypass execution gates.";
 const TASK_ENTRYPOINT_NAMES = ["task_plan", "task_resume"];
 const registeredTaskToolNames = new WeakMap();
 function hasToolActivationApi(pi) {
@@ -154,6 +155,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             "Use concrete acceptance criteria. During initial task_plan creation, use criterionRefs with 1-based acceptance_criteria positions to selectively link a step without guessing generated IDs; omit it to retain the legacy all-criteria default.",
             "Plan and decomposition steps are semantically assessed by the configured native host model; provide concrete text and expectedOutput, but do not self-score granularity. A cohesive deliverable may include one bounded implementation cycle with its focused verification procedure; do not bundle unrelated outcomes.",
             "Activate only one task unless the user explicitly asks for parallel work.",
+            REJECTION_REPORTING_GUIDANCE,
         ],
         parameters: Type.Object({
             title: Type.String({ description: "Concise task title" }),
@@ -1189,6 +1191,7 @@ function semanticAssessmentFailureResult(error, state, retryWith) {
             "- no_regex_fallback: true",
             "",
             "Configure or restore a native Pi/Oh My Pi model capability, then retry the rejected mutation.",
+            REJECTION_REPORTING_GUIDANCE,
         ].join("\n"), details),
         isError: true,
         ...(assessmentError?.usage ? { usage: assessmentError.usage } : {}),
@@ -1206,6 +1209,7 @@ function rejectedMutationResult(error, state, event, usage) {
             `- minimum_params: ${JSON.stringify(recovery.minimum_params)}`,
             `- do_not_retry_same_call: ${recovery.do_not_retry_same_call}`,
             `- reason: ${recovery.reason}`,
+            REJECTION_REPORTING_GUIDANCE,
             ...(recovery.transition_recovery
                 ? [`- next_action: ${recovery.transition_recovery.next_action}`]
                 : []),
