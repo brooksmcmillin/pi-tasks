@@ -758,7 +758,6 @@ function getMinimumParams(
 			task_id: task.id,
 			step_id: step.id,
 			...recoveryEvidenceFields(),
-			criterion_ids: step.criterionIds,
 			references: ["<artifact path or command>"],
 		};
 	}

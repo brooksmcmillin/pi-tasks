@@ -111,7 +111,7 @@ export type EvidenceSemanticDecision =
 
 export interface EvidenceSemanticAssessment {
 	// Omission retains historical evidence-only hash validation during replay.
-	contractVersion?: 1;
+	contractVersion?: 1 | 2;
 	diagnosis?: { claim: string; missingObservation: string };
 	provenance: SemanticAssessmentProvenance;
 	inputHash: string;
@@ -122,7 +122,7 @@ export interface EvidenceSemanticAssessment {
 
 export interface TaskEvidence {
 	/** Includes model-free failure/unknown authoring; omission preserves legacy replay. */
-	contractVersion?: 1;
+	contractVersion?: 1 | 2;
 	/** Derived from the assessed event targets; never authored by evidence callers. */
 	assessedContract?: EvidenceContract;
 	id: string;

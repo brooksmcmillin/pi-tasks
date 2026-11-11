@@ -145,7 +145,7 @@ describe("persisted evidence contracts", () => {
 			expect(h.inputs[0]?.contract).toEqual(fixture.input.contract);
 			const task = required(h.store.getState().tasks.T1);
 			const evidence = required(task.evidence[0]);
-			expect(evidence.semanticAssessment?.contractVersion).toBe(1);
+			expect(evidence.semanticAssessment?.contractVersion).toBe(2);
 			expect(evidence.semanticAssessment?.provenance.promptVersion).toBe(
 				EVIDENCE_PROMPT_VERSION,
 			);
@@ -458,7 +458,7 @@ describe("persisted evidence contracts", () => {
 								],
 							}
 						: route === "task_verify_step"
-							? { ...verification, step_id: "T1-S2" }
+							? { ...verification, step_id: "T1-S2", criterion_ids: ["T1-AC2"] }
 							: { ...p, step_ids: ["T1-S2"] };
 			// Controlled assessor approval establishes identity handling, not semantic truth.
 			const first = await h.call(name, request);
@@ -617,7 +617,7 @@ describe("persisted evidence contracts", () => {
 					expect(h.inputs).toHaveLength(0);
 					const before = structuredClone(h.store.getState());
 					const record = required(before.tasks.T1?.evidence[0]);
-					expect(record.contractVersion).toBe(1);
+					expect(record.contractVersion).toBe(2);
 					expect(record.semanticAssessment).toBeUndefined();
 					const result = await h.call("task_update", {
 						task_id: "T1",
@@ -657,7 +657,7 @@ describe("persisted evidence contracts", () => {
 		},
 	);
 
-	it("uses default verify-step criteria rather than evidence-provided prose", async () => {
+	it("defaults verify-step to bounded proof rather than linked acceptance", async () => {
 		const fixture = required(evidenceCases[0]);
 		const h = await harness(fixture.input);
 		const {
@@ -669,14 +669,25 @@ describe("persisted evidence contracts", () => {
 		expect(
 			(await h.call("task_verify_step", { ...p, step_id: "T1-S1" })).isError,
 		).not.toBe(true);
-		expect(h.inputs[0]?.contract).toEqual(fixture.input.contract);
+		expect(h.inputs[0]?.contract).toEqual({
+			...fixture.input.contract,
+			criteria: [],
+		});
+		expect(h.store.getState().tasks.T1?.acceptanceCriteria[0]?.status).toBe(
+			"pending",
+		);
 	});
 
-	it("uses only selected criteria, mirrors implicit matching, and refuses clipped contract meaning", async () => {
+	it("uses explicit targets, preserves historical inference, and refuses clipped contract meaning", async () => {
 		const h = await harness(required(evidenceCases[0]).input);
 		const task = required(h.store.getState().tasks.T1);
 		const selected = evidenceContract(task, { criterionIds: ["T1-AC1"] });
-		expect(selected.steps.map((s) => s.id)).toEqual(["T1-S1"]);
+		expect(selected.steps).toEqual([]);
+		expect(
+			evidenceContract(task, { criterionIds: ["T1-AC1"] }, 1).steps.map(
+				(s) => s.id,
+			),
+		).toEqual(["T1-S1"]);
 		expect(selected.criteria.map((c) => c.id)).toEqual(["T1-AC1"]);
 		expect(evidenceContract(task, {}).steps).toEqual([]);
 		expect(() => evidenceContract(task, { stepIds: ["absent"] })).toThrow(

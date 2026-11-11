@@ -1,14 +1,15 @@
 /** Resolve only persisted meanings; evidence prose cannot redefine its targets. */
-export function evidenceContract(task, links) {
+export function evidenceContract(task, links, version = 2) {
     const criterionIds = links.criterionIds ?? [];
     let stepIds = links.stepIds ?? [];
-    if (stepIds.length === 0 && criterionIds.length > 0) {
+    // Historical contracts inferred a step from criterion links; new proof is explicit.
+    if (version === 1 && stepIds.length === 0 && criterionIds.length > 0) {
         const matching = task.planSteps.filter((step) => step.criterionIds.some((id) => criterionIds.includes(id)));
         if (matching.length === 1)
             stepIds = matching.map((step) => step.id);
     }
     const contract = {
-        version: 1,
+        version,
         objective: task.objective,
         role: links.role ?? "acceptance",
         steps: [...new Set(stepIds)].map((id) => {
@@ -32,7 +33,7 @@ export function evidenceContract(task, links) {
 }
 /** Existing IDs are not permission to reuse proof for a different outcome. */
 export function evidenceSupportsTarget(task, evidence, target) {
-    if (evidence.semanticAssessment?.contractVersion !== 1)
+    if (evidence.semanticAssessment?.contractVersion === undefined)
         return true;
     const contract = evidence.assessedContract;
     if (!contract ||

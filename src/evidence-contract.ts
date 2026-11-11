@@ -6,7 +6,7 @@ import type {
 } from "./model.ts";
 
 export interface EvidenceContract {
-	version: 1;
+	version: 1 | 2;
 	objective: string;
 	role: "acceptance" | "diagnostic";
 	steps: { id: string; text: string; expectedOutput: string }[];
@@ -21,17 +21,19 @@ export function evidenceContract(
 		criterionIds?: string[] | undefined;
 		role?: "acceptance" | "diagnostic" | undefined;
 	},
+	version: 1 | 2 = 2,
 ): EvidenceContract {
 	const criterionIds = links.criterionIds ?? [];
 	let stepIds = links.stepIds ?? [];
-	if (stepIds.length === 0 && criterionIds.length > 0) {
+	// Historical contracts inferred a step from criterion links; new proof is explicit.
+	if (version === 1 && stepIds.length === 0 && criterionIds.length > 0) {
 		const matching = task.planSteps.filter((step) =>
 			step.criterionIds.some((id) => criterionIds.includes(id)),
 		);
 		if (matching.length === 1) stepIds = matching.map((step) => step.id);
 	}
 	const contract: EvidenceContract = {
-		version: 1,
+		version,
 		objective: task.objective,
 		role: links.role ?? "acceptance",
 		steps: [...new Set(stepIds)].map((id) => {
@@ -62,7 +64,7 @@ export function evidenceSupportsTarget(
 	evidence: TaskEvidence,
 	target: TaskStep | AcceptanceCriterion,
 ): boolean {
-	if (evidence.semanticAssessment?.contractVersion !== 1) return true;
+	if (evidence.semanticAssessment?.contractVersion === undefined) return true;
 	const contract = evidence.assessedContract;
 	if (
 		!contract ||

@@ -531,7 +531,8 @@ function addEvidence(state, event) {
         task.evidence.push(evidence);
     linkEvidenceToCriteria(task, resolvedEvidence, event.criterionIds ?? []);
     linkEvidenceToSteps(task, resolvedEvidence, event.stepIds ?? [], event.overrideReason);
-    if (!event.stepIds || event.stepIds.length === 0) {
+    if (evidence.contractVersion !== 2 &&
+        (!event.stepIds || event.stepIds.length === 0)) {
         linkEvidenceToMatchingSteps(task, resolvedEvidence, event.criterionIds ?? [], event.overrideReason);
     }
     recalculateProgress(task);
@@ -540,15 +541,15 @@ function addEvidence(state, event) {
 }
 function validateEventEvidence(task, event, evidence) {
     delete evidence.assessedContract;
-    if (evidence.semanticAssessment?.contractVersion === 1) {
+    if (evidence.semanticAssessment?.contractVersion !== undefined) {
         evidence.assessedContract = evidenceContract(task, {
             stepIds: event.type === "task.step_verified" ? [event.stepId] : event.stepIds,
             criterionIds: event.criterionIds ??
-                (event.type === "task.step_verified"
+                (event.type === "task.step_verified" && evidence.contractVersion !== 2
                     ? requireStep(task, event.stepId).criterionIds
                     : []),
             role: evidence.role,
-        });
+        }, evidence.semanticAssessment.contractVersion);
     }
     validateEvidence(evidence, event.version === 2, evidence.assessedContract);
 }
@@ -577,7 +578,8 @@ function verifyStep(state, event) {
         throw new TaskTransitionError("task.step_verified requires passing acceptance evidence");
     }
     validateEventEvidence(task, event, evidence);
-    const criterionIds = event.criterionIds ?? step.criterionIds;
+    const criterionIds = event.criterionIds ??
+        (evidence.contractVersion === 2 ? [] : step.criterionIds);
     const invalidCriterionIds = criterionIds.filter((criterionId) => !step.criterionIds.includes(criterionId));
     if (invalidCriterionIds.length > 0) {
         throw new TaskTransitionError(`Verification criteria must belong to plan step ${step.id}: ${invalidCriterionIds.join(",")}`);
@@ -1170,8 +1172,8 @@ function updatePlanStep(task, event) {
 }
 function validateBoundStepEvidence(task, step, evidenceIds) {
     const records = evidenceIds.map((id) => requireEvidence(task, id));
-    if (records.some((item) => item.contractVersion === 1 ||
-        item.semanticAssessment?.contractVersion === 1) &&
+    if (records.some((item) => item.contractVersion !== undefined ||
+        item.semanticAssessment?.contractVersion !== undefined) &&
         !records.some((item) => item.passed === true &&
             isActiveAcceptanceEvidence(task, item) &&
             evidenceSupportsTarget(task, item, step))) {
@@ -1254,6 +1256,12 @@ function validateCompletion(task, evidenceIds, forceReason) {
             evidenceSupportsTarget(task, item, criterion));
         if (criterion.status === "satisfied" && criterionEvidence.length === 0) {
             throw new TaskTransitionError(`Criterion ${criterion.id} is satisfied without active acceptance evidence`);
+        }
+        if (criterion.status === "satisfied" &&
+            criterionEvidence.some((item) => item.contractVersion === 2) &&
+            !criterionEvidence.some((item) => item.passed === true) &&
+            !forceReason) {
+            throw new TaskTransitionError(`Criterion ${criterion.id} requires passing acceptance evidence assessed for its meaning`);
         }
         if (criterion.status === "satisfied" &&
             !hasFreshCriterionEvidence(task, criterion) &&
@@ -1447,7 +1455,8 @@ function isActiveAcceptanceEvidence(task, evidence) {
 }
 function validateEvidence(evidence, requireSemanticAssessment, contract) {
     if (evidence.contractVersion !== undefined &&
-        evidence.contractVersion !== 1) {
+        evidence.contractVersion !== 1 &&
+        evidence.contractVersion !== 2) {
         throw new TaskTransitionError("Unsupported evidence record contract version");
     }
     if (!evidence.summary.trim())
@@ -1483,6 +1492,11 @@ function validateEvidence(evidence, requireSemanticAssessment, contract) {
     }
     validateEvidenceQualityScore(evidence);
     if (evidence.passed === true) {
+        if (evidence.contractVersion === 2 &&
+            evidence.semanticAssessment?.contractVersion !== 2 &&
+            requireSemanticAssessment) {
+            throw new TaskTransitionError("Explicit-target evidence requires a version 2 contract assessment");
+        }
         validateEvidenceSemanticAssessment(evidence.semanticAssessment, evidence, requireSemanticAssessment, contract);
     }
     if (evidence.type !== "note" && evidence.references.length === 0) {
@@ -1563,7 +1577,8 @@ function validateEvidenceSemanticAssessment(assessment, evidence, required, cont
         throw new TaskTransitionError("Uncertain evidence semantic assessment requires the uncertain issue");
     }
     if (assessment.contractVersion !== undefined &&
-        assessment.contractVersion !== 1) {
+        assessment.contractVersion !== 1 &&
+        assessment.contractVersion !== 2) {
         throw new TaskTransitionError("Unsupported evidence contract version");
     }
     if (assessment.diagnosis &&

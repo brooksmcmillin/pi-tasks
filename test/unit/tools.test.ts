@@ -165,6 +165,7 @@ describe("registered task tools", () => {
 						step_id: "T1-S1",
 						type: "test",
 						level: "unit_test",
+						criterion_ids: ["T1-AC1"],
 						summary: "Checksum test passed",
 						references: ["fixture-test"],
 						quality: {
@@ -1464,6 +1465,7 @@ describe("registered task tools", () => {
 				step_id: "T1-S2",
 				type: "review",
 				level: "static_read",
+				criterion_ids: ["T1-AC1"],
 				summary: "Observed passing cursor regression after rework",
 				references: ["rework-review.md"],
 				quality: {
@@ -2853,7 +2855,7 @@ describe("registered task tools", () => {
 		expect(store.getState().tasks.T1?.planSteps[1]?.status).toBe("active");
 		expect(store.getState().tasks.T1?.evidence).toHaveLength(1);
 		expect(store.getState().tasks.T1?.acceptanceCriteria[0]?.status).toBe(
-			"satisfied",
+			"pending",
 		);
 
 		const retried = await execute(verify, params, ctx);
