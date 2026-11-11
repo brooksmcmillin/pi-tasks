@@ -419,6 +419,7 @@ describe("extension lifecycle integration", () => {
 		step_id: "T1-S1",
 		type: "review",
 		level: "static_read",
+		criterion_ids: ["T1-AC1"],
 		summary: "Independent review passed",
 		references: ["review.json"],
 		quality: {

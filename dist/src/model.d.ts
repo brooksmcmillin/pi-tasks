@@ -58,7 +58,7 @@ export interface PlanSemanticAssessment {
 }
 export type EvidenceSemanticDecision = "supported" | "unsupported" | "uncertain";
 export interface EvidenceSemanticAssessment {
-    contractVersion?: 1;
+    contractVersion?: 1 | 2;
     diagnosis?: {
         claim: string;
         missingObservation: string;
@@ -71,7 +71,7 @@ export interface EvidenceSemanticAssessment {
 }
 export interface TaskEvidence {
     /** Includes model-free failure/unknown authoring; omission preserves legacy replay. */
-    contractVersion?: 1;
+    contractVersion?: 1 | 2;
     /** Derived from the assessed event targets; never authored by evidence callers. */
     assessedContract?: EvidenceContract;
     id: string;

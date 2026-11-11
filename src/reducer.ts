@@ -811,7 +811,10 @@ function addEvidence(
 		event.stepIds ?? [],
 		event.overrideReason,
 	);
-	if (!event.stepIds || event.stepIds.length === 0) {
+	if (
+		evidence.contractVersion !== 2 &&
+		(!event.stepIds || event.stepIds.length === 0)
+	) {
 		linkEvidenceToMatchingSteps(
 			task,
 			resolvedEvidence,
@@ -833,17 +836,21 @@ function validateEventEvidence(
 	evidence: TaskEvidence,
 ): void {
 	delete evidence.assessedContract;
-	if (evidence.semanticAssessment?.contractVersion === 1) {
-		evidence.assessedContract = evidenceContract(task, {
-			stepIds:
-				event.type === "task.step_verified" ? [event.stepId] : event.stepIds,
-			criterionIds:
-				event.criterionIds ??
-				(event.type === "task.step_verified"
-					? requireStep(task, event.stepId).criterionIds
-					: []),
-			role: evidence.role,
-		});
+	if (evidence.semanticAssessment?.contractVersion !== undefined) {
+		evidence.assessedContract = evidenceContract(
+			task,
+			{
+				stepIds:
+					event.type === "task.step_verified" ? [event.stepId] : event.stepIds,
+				criterionIds:
+					event.criterionIds ??
+					(event.type === "task.step_verified" && evidence.contractVersion !== 2
+						? requireStep(task, event.stepId).criterionIds
+						: []),
+				role: evidence.role,
+			},
+			evidence.semanticAssessment.contractVersion,
+		);
 	}
 	validateEvidence(evidence, event.version === 2, evidence.assessedContract);
 }
@@ -886,7 +893,9 @@ function verifyStep(
 		);
 	}
 	validateEventEvidence(task, event, evidence);
-	const criterionIds = event.criterionIds ?? step.criterionIds;
+	const criterionIds =
+		event.criterionIds ??
+		(evidence.contractVersion === 2 ? [] : step.criterionIds);
 	const invalidCriterionIds = criterionIds.filter(
 		(criterionId) => !step.criterionIds.includes(criterionId),
 	);
@@ -1753,8 +1762,8 @@ function validateBoundStepEvidence(
 	if (
 		records.some(
 			(item) =>
-				item.contractVersion === 1 ||
-				item.semanticAssessment?.contractVersion === 1,
+				item.contractVersion !== undefined ||
+				item.semanticAssessment?.contractVersion !== undefined,
 		) &&
 		!records.some(
 			(item) =>
@@ -1896,6 +1905,16 @@ function validateCompletion(
 		if (criterion.status === "satisfied" && criterionEvidence.length === 0) {
 			throw new TaskTransitionError(
 				`Criterion ${criterion.id} is satisfied without active acceptance evidence`,
+			);
+		}
+		if (
+			criterion.status === "satisfied" &&
+			criterionEvidence.some((item) => item.contractVersion === 2) &&
+			!criterionEvidence.some((item) => item.passed === true) &&
+			!forceReason
+		) {
+			throw new TaskTransitionError(
+				`Criterion ${criterion.id} requires passing acceptance evidence assessed for its meaning`,
 			);
 		}
 		if (
@@ -2188,7 +2207,8 @@ function validateEvidence(
 ): void {
 	if (
 		evidence.contractVersion !== undefined &&
-		evidence.contractVersion !== 1
+		evidence.contractVersion !== 1 &&
+		evidence.contractVersion !== 2
 	) {
 		throw new TaskTransitionError(
 			"Unsupported evidence record contract version",
@@ -2247,6 +2267,15 @@ function validateEvidence(
 	}
 	validateEvidenceQualityScore(evidence);
 	if (evidence.passed === true) {
+		if (
+			evidence.contractVersion === 2 &&
+			evidence.semanticAssessment?.contractVersion !== 2 &&
+			requireSemanticAssessment
+		) {
+			throw new TaskTransitionError(
+				"Explicit-target evidence requires a version 2 contract assessment",
+			);
+		}
 		validateEvidenceSemanticAssessment(
 			evidence.semanticAssessment,
 			evidence,
@@ -2379,7 +2408,8 @@ function validateEvidenceSemanticAssessment(
 	}
 	if (
 		assessment.contractVersion !== undefined &&
-		assessment.contractVersion !== 1
+		assessment.contractVersion !== 1 &&
+		assessment.contractVersion !== 2
 	) {
 		throw new TaskTransitionError("Unsupported evidence contract version");
 	}

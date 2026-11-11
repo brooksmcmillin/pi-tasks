@@ -720,10 +720,10 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
     registerGuidedTool(pi, {
         name: "task_evidence_batch",
         label: "Task Evidence Batch",
-        description: "Submit 1–16 evidence entries (maximum 32000 serialized characters) as one atomic transaction. Record failures without hiding them; verify_step requires passing acceptance evidence and the current step_id. Every entry is validated before anything persists; rejection names the failing entry and leaves all state unchanged.",
+        description: "Submit 1–16 evidence entries (maximum 32000 serialized characters) atomically. verify_step requires passing acceptance evidence and current step_id; omitted/empty criterion_ids proves only the step, while explicit IDs additionally require full criterion proof. Every entry is validated before persistence; rejection leaves all state unchanged.",
         promptSnippet: "Submit bounded evidence in one all-or-nothing call",
         promptGuidelines: [
-            "Use entries.operation=record for observed passing, failed or diagnostic evidence; use verify_step with passed=true and role=acceptance to advance the current step after all required checks.",
+            "Use entries.operation=record for observed passing, failed or diagnostic evidence; use verify_step with passed=true and role=acceptance to advance the current step. Select criterion_ids only when the observations also establish those full criteria; otherwise leave final acceptance pending.",
             "Entries execute in order, preserving existing linkage, failure supersession and completion checks. Unrelated deliverables still need separate plan steps.",
             "Each entry requires references and complete quality fields. All evidence types require nonempty quality.artifactRefs; exact command or verification-action references are accepted. Preserve long commands/output in artifacts rather than rerunning successful checks.",
             "On rejection, no entries persist. Correct the named entry and resubmit the complete batch; do not assume a partial success.",
@@ -767,7 +767,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             const entries = params.entries.map((entry) => {
                 const duplicate = findDuplicateEvidenceForParams(state.tasks[params.task_id], { ...entry, task_id: params.task_id });
                 const evidence = {
-                    contractVersion: 1,
+                    contractVersion: 2,
                     id: duplicate?.id ?? nextEvidenceId(state, idGenerator, reservedIds),
                     type: entry.type,
                     role: entry.role ?? "acceptance",
@@ -789,7 +789,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                         type: "task.step_verified",
                         stepId: entry.step_id ?? "",
                         evidence,
-                        ...links,
+                        criterionIds: entry.criterion_ids ?? [],
                     }
                     : {
                         type: "task.evidence_added",
@@ -810,11 +810,11 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
     registerGuidedTool(pi, {
         name: "task_verify_step",
         label: "Verify Task Step",
-        description: "Atomically record passing verification evidence with traceable references and complete quality fields, then complete the current atomic plan step.",
+        description: "Atomically record passing evidence and complete the current atomic plan step. Omitted or empty criterion_ids proves only the step; supply criterion_ids only when this evidence also proves those full acceptance criteria. Later criterion proof may be recorded separately with task_evidence.",
         promptSnippet: "Record successful evidence and advance the current atomic pi-tasks step in one operation",
         promptGuidelines: [
             "Use task_verify_step for the successful happy path after verifying the current atomic step.",
-            "The tool records passing evidence, links it to the step and criteria, completes the step, and activates the next step atomically.",
+            "task_verify_step proves the bounded step and activates the next step. Linked plan criteria remain pending unless explicitly selected in criterion_ids and fully supported; step completion is not task acceptance.",
             "Always provide references plus quality.source, quality.reproducible, quality.verifier, quality.command, quality.artifactRefs, and quality.observedOutput; for non-command evidence, quality.command should name the verification action.",
             "Use task_evidence with role diagnostic for expected or remediated fail-first results; diagnostic evidence cannot satisfy criteria or task completion.",
         ],
@@ -850,7 +850,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                 step_id: params.step_id,
             });
             const step = task?.planSteps.find((candidate) => candidate.id === params.step_id);
-            const criterionIds = params.criterion_ids ?? step?.criterionIds ?? [];
+            const criterionIds = params.criterion_ids ?? [];
             const criteriaBelongToStep = criterionIds.every((criterionId) => step?.criterionIds.includes(criterionId));
             const criteriaLinked = duplicate
                 ? criterionIds.every((criterionId) => task?.acceptanceCriteria
@@ -881,7 +881,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
             const event = baseEvent("task.step_verified", params.task_id, ctx, {
                 stepId: params.step_id,
                 evidence: {
-                    contractVersion: 1,
+                    contractVersion: 2,
                     id: evidenceId,
                     type: params.type,
                     role: "acceptance",
@@ -891,7 +891,7 @@ export function registerTaskTools(pi, store, idGenerator = new SequentialIdGener
                     references: params.references,
                     quality: params.quality,
                 },
-                ...(params.criterion_ids ? { criterionIds: params.criterion_ids } : {}),
+                criterionIds,
             });
             return appendAndReport(pi, store, ctx, event, `Verified and completed step ${params.step_id} with evidence ${evidenceId}`, undefined, undefined, _signal);
         },
@@ -1129,7 +1129,7 @@ function evidenceAssessmentInput(params, task) {
 function evidenceEvent(params, evidenceId, ctx, semanticAssessment) {
     return baseEvent("task.evidence_added", params.task_id, ctx, {
         evidence: {
-            contractVersion: 1,
+            contractVersion: 2,
             id: evidenceId,
             type: params.type,
             level: params.level,
@@ -1262,12 +1262,13 @@ async function assessForkMutation(state, event, ctx, signal) {
                             ? [entry.stepId]
                             : entry.stepIds,
                         criterionIds: entry.criterionIds ??
-                            (entry.type === "task.step_verified"
+                            (entry.type === "task.step_verified" &&
+                                evidence.contractVersion !== 2
                                 ? task.planSteps.find((step) => step.id === entry.stepId)
                                     ?.criterionIds
                                 : []),
                         role: evidence.role,
-                    }),
+                    }, evidence.contractVersion ?? 1),
                     type: evidence.type,
                     level: evidence.level,
                     summary: evidence.summary,
@@ -1713,10 +1714,7 @@ function findDuplicateEvidenceForParams(task, params) {
                 ...(params.step_id
                     ? {
                         step_ids: [params.step_id],
-                        criterion_ids: params.criterion_ids ??
-                            task.planSteps.find((step) => step.id === params.step_id)
-                                ?.criterionIds ??
-                            [],
+                        criterion_ids: params.criterion_ids ?? [],
                     }
                     : {}),
             }, task));
@@ -1728,7 +1726,7 @@ function findDuplicateEvidenceForParams(task, params) {
     }
     const references = params.references ?? [];
     return task.evidence.find((evidence) => (passed !== true ||
-        (evidence.semanticAssessment?.contractVersion === 1 &&
+        (evidence.semanticAssessment?.contractVersion === 2 &&
             evidence.semanticAssessment.inputHash === inputHash)) &&
         evidence.type === params.type &&
         (evidence.role ?? "acceptance") === (params.role ?? "acceptance") &&

@@ -330,6 +330,7 @@ describe("routine receipts", () => {
 					const result = await h.call("task_verify_step", {
 						task_id: h.id,
 						step_id: `${h.id}-S${i}`,
+						criterion_ids: [`${h.id}-AC1`],
 						...proof,
 						summary: `Configuration ${i} passed`,
 					});
@@ -445,6 +446,7 @@ describe("routine receipts", () => {
 				await h.call("task_verify_step", {
 					task_id: h.id,
 					step_id: `${h.id}-S${i}`,
+					criterion_ids: [`${h.id}-AC1`],
 					...proof,
 					summary: `Configuration ${i} passed`,
 					references: [`fixture-${i}.log`],

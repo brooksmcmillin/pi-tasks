@@ -19,7 +19,7 @@ const trial = {
 };
 
 const reporting = {
-	version: 1 as const,
+	version: 2 as const,
 	objective:
 		"Investigate the failed trial and then repair execution separately",
 	role: "acceptance" as const,

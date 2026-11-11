@@ -19,8 +19,15 @@ confidence thresholds, failure supersession and acceptance-only verification are
 unchanged. Reproducibility can mean inspecting retained artifacts; no consumed
 paid operation is replayed or required.
 
-New assessments opt into contract-bound replay with `contractVersion: 1`.
-New evidence records also carry an internal `contractVersion: 1` authoring marker,
+New assessments use explicit-target `contractVersion: 2` (task 7980).
+Omitted/empty verify-step criterion selections establish only the bounded step;
+explicit criteria request proof of those whole criteria too. Criterion-only
+records do not infer or attach an implementation step. Plan relevance links do
+not imply acceptance proof. Later final-gate evidence can satisfy the same
+original criterion without repeating unrelated implementation observations.
+Historical `contractVersion: 1` preserves implicit targeting and its exact hash;
+pre-contract replay also remains unchanged.
+New evidence records carry an internal `contractVersion: 2` authoring marker,
 including model-free failed/unknown records, so those records cannot bypass
 new-record completion checks merely by lacking a semantic assessment.
 Historical assessments without the assessment marker retain evidence-only hash
@@ -55,8 +62,8 @@ not an invented model rationale.
 | Future expectation / bare reference / unsupported synthesis | unsupported | missing actual findings and connection to claim | paired corpus; native missing-observation diagnosis |
 | Synthesis with inspected findings | supported | specific common pre-dispatch cause and trial result | supported/unsupported corpus pair |
 | Evidence says to ignore persisted success criterion | unsupported | untrusted evidence cannot redefine target | adversarial corpus control |
-| Explicit / omitted / empty criterion links | explicit selection / verify-step defaults / no criterion claim | persisted links, never caller prose | registered routes, default verify-step and implicit unique-step matching tests |
-| Multiple matching steps / multiple selected targets | no implicit step / all explicit targets included | mirrors reducer's unique-match rule | shared resolver, exact contract hash; no ranking/tie selection |
+| Explicit / omitted / empty verify-step criterion links | require selected criteria / bounded step only / bounded step only | explicit assessed targets, never plan relevance links | registered single/batch, pending final gate and resume tests |
+| Criterion-only evidence / multiple explicit targets | no inferred step / all explicit targets required | criterion proof is not implementation proof | later final evidence, exact contract hash and target-reuse rejection |
 | Missing target / oversized selected contract | reject | unknown ID / exact size bound | resolver tests; no clipping |
 | Low confidence / malformed response / unavailable model / abort | uncertain or assessment error; no persistence | existing threshold and native error paths | existing semantic and integration regressions |
 | Supported null / unsupported null / malformed diagnosis | absence / reject / reject | only supported absence has meaning | Pi chat and OMP parser controls |
@@ -69,7 +76,7 @@ not an invented model rationale.
 
 Tools produce context via `evidenceContract` -> native assessor -> reducer ->
 version 2 persisted events. `task_evidence` assesses one record; verify-step
-assesses one record with its selected/default criteria; batch assesses each
+assesses one record with its explicitly selected criteria (none by default); batch assesses each
 passing entry (1–16 total entries) before atomic persistence. Failed records keep
 their existing model-free path. Reducer replay validates the same resolved
 meanings without inference. Existing-ID step/criterion completion consumers
@@ -81,7 +88,33 @@ and authorization policies are unchanged. No generated API client is involved;
 filters: `release-check` runs all unit tests and the native suite, including the
 new unit files. This code delivery does not activate an installed extension.
 
-## Bounded actual-assessor evaluation
+## Bounded step/final-gate evaluation — task 7980
+
+The two-case synthetic corpus in `test/fixtures/bounded-step-evidence.ts` models
+focused S4 fixtures followed by a final findings/published-head gate. The same
+11-test observations support bounded step proof but not final PR acceptance.
+The registered-tool unit regressions use controlled judgments and separately
+verify advancement, pending criteria, rejection, eventual acceptance, exact proof
+scope and deterministic replay. They do not establish assessor accuracy.
+
+Run only the pair using the command below with `/bounded-step-benchmark` instead
+of `/evidence-benchmark` and a fresh output path. Each case runs once, with no
+historical paid operation or task-state mutation. On Pi 1.5.2, actual native
+`pi_chat`, `openai-codex/gpt-6.1-sol`, prompt `2026-11-11.evidence.v3`, the
+[recorded run](bounded-step-benchmark.json) observed at 2026-11-11T20:13:55.940Z
+matched **2/2**, with **0 false positives, 0 false negatives, 0 errors** and no
+administrative retries. S4 was supported at confidence 0.99; the unsupported
+final-PR claim rejected at confidence 1.0 with the pending final observations
+identified. Source, contract and corpus SHA-256 identities, full inputs,
+judgments and usage are retained in that artifact.
+
+This pair proves only the bounded synthetic scenario on that model, not
+universal semantic correctness, a repaired historical session, installed
+activation or live Trivy behavior. The older nine-case results below remain
+historical evidence for their recorded source/prompt versions, not a claim that
+the new source was measured by those old runs.
+
+## Bounded actual-assessor evaluation — task 7886
 
 `test/fixtures/semantic-evidence.ts` is a sanitized, synthetic nine-case corpus.
 Its artifact names and observations are fixtures, not claims that the historical

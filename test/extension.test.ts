@@ -884,6 +884,7 @@ describe("native Pi settlement advisories", () => {
 						step_id: "T1-S1",
 						type: "review",
 						level: "static_read",
+						criterion_ids: ["T1-AC1"],
 						summary: "Independent review passed",
 						references: ["native-review.json"],
 						quality: {
@@ -1329,7 +1330,21 @@ describe("native Pi dynamic task tools", () => {
 						undefined,
 					)
 				).content[0]?.text,
-			).toContain("task_complete");
+			).toContain("Do now: task_evidence");
+			expect(
+				(
+					await requireTool(first.session, "task_complete").execute(
+						"premature-final-gate",
+						{
+							task_id: "T1",
+							summary: "Premature completion",
+							evidence_ids: ["E1"],
+						},
+						undefined,
+						undefined,
+					)
+				).isError,
+			).toBe(true);
 			const sessionFile = first.sessionManager.getSessionFile();
 			assert.ok(sessionFile);
 			await waitForPersistedTaskEvent(sessionFile);
@@ -1351,7 +1366,7 @@ describe("native Pi dynamic task tools", () => {
 							undefined,
 						)
 					).content[0]?.text,
-				).toContain("task_complete");
+				).toContain("Do now: task_evidence");
 			} finally {
 				restored.session.dispose();
 			}

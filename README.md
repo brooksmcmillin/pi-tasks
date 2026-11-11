@@ -255,7 +255,18 @@ history.
 Evidence assessment receives the persisted objective, targeted step outputs,
 selected criterion meanings and evidence role. Specific negative results can
 prove a completed investigation or reconciliation without proving implementation
-success. Diagnostic records remain diagnostic; they cannot satisfy acceptance
+success. Step verification is distinct from task acceptance: `task_verify_step`
+(and batch `verify_step`) with omitted or empty `criterion_ids` proves only the
+current step. Plan `criterionIds` links describe relevance, not an automatic
+claim that this step's evidence proves the whole criterion. Select
+`criterion_ids` explicitly only when the same observations support those full
+criteria too. Later `task_evidence` with only `criterion_ids` can establish final
+acceptance without resubmitting unrelated implementation proof; it does not
+implicitly prove or attach a plan step. `task_complete` still requires all
+original criteria and step evidence. New explicit-target contracts use version 2;
+historical version 1 contracts retain their original implicit linkage on replay.
+
+Diagnostic records remain diagnostic; they cannot satisfy acceptance
 criteria or complete steps with new proof. Existing evidence IDs cannot transfer
 reporting proof to an unassessed implementation target. Reproducibility may mean inspecting retained artifacts,
 not replaying a consumed paid operation. Unsupported claims retain issue codes
@@ -503,8 +514,9 @@ serialized characters. Each entry uses the `task_evidence` fields (without
 provide `step_id`, `passed: "true"` and acceptance role; omit record-only
 `step_ids`, `override_reason`, `supersedes_evidence_ids` and `reason`.
 Record all required checks before the final verification entry advances a step.
-Existing criterion linkage, step locks, failed-evidence supersession and completion
-gates apply unchanged. All entries persist in one event or none persist; errors
+As with single-step verification, omitted/empty `criterion_ids` proves only the
+step; explicit IDs additionally require full criterion proof. Step locks,
+failed-evidence supersession and final task completion gates remain unchanged. All entries persist in one event or none persist; errors
 name the rejected entry. Fix that entry and resubmit the entire batch.
 
 ```json
