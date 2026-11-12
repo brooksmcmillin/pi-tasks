@@ -622,15 +622,18 @@ function validateReworkSteps(steps: TaskStepInput[]): void {
 				"Rework steps require text, expectedOutput, and evidenceRequired=true",
 			);
 		}
-		for (const values of [step.criterionIds, step.allowedActions]) {
+		for (const [field, values] of [
+			["criterionIds", step.criterionIds],
+			["allowedActions", step.allowedActions],
+		] as const) {
 			if (
 				values !== undefined &&
 				(!Array.isArray(values) ||
-					values.length === 0 ||
+					(field === "allowedActions" && values.length === 0) ||
 					values.some((value) => typeof value !== "string" || !value.trim()))
 			) {
 				throw new TaskTransitionError(
-					"Rework criterionIds and allowedActions must be non-empty string arrays",
+					"Rework criterionIds must contain non-empty strings; allowedActions must be a non-empty string array",
 				);
 			}
 		}

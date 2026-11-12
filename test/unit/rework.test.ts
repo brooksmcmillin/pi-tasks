@@ -332,7 +332,8 @@ describe("task.reworked", () => {
 		{ taskId: "unknown" },
 		{ planSteps: [null] },
 		{ planSteps: [{ ...step, criterionIds: ["unknown"] }] },
-		{ planSteps: [{ ...step, criterionIds: [] }] },
+		{ planSteps: [{ ...step, criterionIds: [""] }] },
+		{ planSteps: [{ ...step, allowedActions: [] }] },
 		{ planSteps: [{ ...step, criterionIds: "T1-AC1" }] },
 		{ planSteps: [{ ...step, text: 1 }] },
 		{ planSteps: [{ ...step, evidenceRequired: false }] },
@@ -357,6 +358,20 @@ describe("task.reworked", () => {
 		).toThrow();
 		expect(state).toEqual(exhausted());
 	});
+
+	it.each([{ criterionIds: undefined }, { criterionIds: [] as string[] }])(
+		"defaults rework criterion links without unlinking: $criterionIds",
+		({ criterionIds }) => {
+			const state = reduceTaskState(exhausted(), {
+				...rework,
+				planSteps: [{ ...step, criterionIds }],
+			});
+			expect(state.tasks.T1?.planSteps.at(-1)?.criterionIds).toEqual([
+				"T1-AC1",
+				"T1-AC2",
+			]);
+		},
+	);
 
 	it("replays persisted rework and snapshot-only branches with the same freshness gate", () => {
 		const events = [create, verify, complete, rework];

@@ -261,6 +261,164 @@ describe("explicit plan repair", () => {
 		).toThrow("failing evidence E1");
 	});
 
+	it.each([{ criterionIds: undefined }, { criterionIds: [] as string[] }])(
+		"repairs a later-gate link without losing obligations (default links: $criterionIds)",
+		({ criterionIds }) => {
+			const store = createTaskRuntimeStore();
+			store.append(
+				{
+					...created,
+					acceptanceCriteria: [
+						"Configuration verified",
+						"Final review verified",
+					],
+					planSteps: [
+						{
+							...step,
+							criterionIds: ["T1-AC1"],
+							decompositionStatus: "atomic",
+							granularityCheck: {
+								isAtomic: true,
+								reason: "One bounded configuration regression",
+								canBeDoneInOneAgentAction: true,
+								hasSingleObservableOutput: true,
+								hasSingleVerificationMethod: true,
+								hasNoHiddenSubtasks: true,
+							},
+						},
+						{ ...step, criterionIds: ["T1-AC2"] },
+					],
+				},
+				() => {},
+			);
+			const quality = {
+				source: "retained fixture",
+				reproducible: true,
+				verifier: "tool" as const,
+				command: "npm test -- test/unit/plan-repair.test.ts",
+				artifactRefs: ["test/unit/plan-repair.test.ts"],
+				observedOutput: "Controlled prior observation",
+			};
+			store.append(
+				{
+					...created,
+					id: "completed",
+					type: "task.step_verified",
+					stepId: "T1-S1",
+					criterionIds: ["T1-AC1"],
+					evidence: {
+						id: "E1",
+						type: "test",
+						level: "unit_test",
+						summary: "Configuration verified",
+						passed: true,
+						references: quality.artifactRefs,
+						quality,
+					},
+				},
+				() => {},
+			);
+			for (const role of ["diagnostic", "acceptance"] as const) {
+				store.append(
+					{
+						...created,
+						id: role,
+						type: "task.evidence_added",
+						stepIds: ["T1-S2"],
+						criterionIds: ["T1-AC2"],
+						evidence: {
+							id: role === "diagnostic" ? "E2" : "E3",
+							role,
+							type: "test",
+							level: "unit_test",
+							passed: false,
+							summary: "Final review not yet verified",
+							references: quality.artifactRefs,
+							quality,
+						},
+					},
+					() => {},
+				);
+			}
+			const before = structuredClone(store.getState());
+			for (const ids of [["missing"], ["T1-AC1"]]) {
+				const persist = vi.fn();
+				expect(() =>
+					store.append(
+						{
+							...repair,
+							stepIds: ["T1-S2"],
+							planSteps: [{ ...step, criterionIds: ids }],
+						},
+						persist,
+					),
+				).toThrow();
+				expect(persist).not.toHaveBeenCalled();
+				expect(store.getState()).toEqual(before);
+			}
+			// Neither omission nor [] means unlinking; both retain all criteria.
+			const defaults = createTaskRuntimeStore();
+			defaults.replay(
+				before.events.map((data) => ({
+					type: "custom",
+					customType: TASK_EVENT_CUSTOM_TYPE,
+					data,
+				})),
+			);
+			defaults.append(
+				{
+					...repair,
+					stepIds: ["T1-S2"],
+					planSteps: [{ ...step, ...(criterionIds ? { criterionIds } : {}) }],
+				},
+				() => {},
+			);
+			expect(defaults.getState().tasks.T1?.planSteps[1]?.criterionIds).toEqual([
+				"T1-AC1",
+				"T1-AC2",
+			]);
+			store.append(
+				{
+					...repair,
+					stepIds: ["T1-S2"],
+					reason: "Separate intermediate configuration proof from final review",
+					planSteps: [
+						{ ...step, criterionIds: ["T1-AC1"] },
+						{
+							...step,
+							text: "Validate final review",
+							criterionIds: ["T1-AC2"],
+						},
+					],
+				},
+				() => {},
+			);
+			const after = store.getState().tasks.T1;
+			expect(after?.planSteps[0]).toEqual(before.tasks.T1?.planSteps[0]);
+			expect(after?.acceptanceCriteria).toEqual(
+				before.tasks.T1?.acceptanceCriteria,
+			);
+			expect(after?.evidence).toEqual(before.tasks.T1?.evidence);
+			expect(after?.planSteps.at(-1)).toMatchObject({
+				id: "T1-S2",
+				status: "skipped",
+				evidenceIds: ["E2", "E3"],
+				criterionIds: ["T1-AC2"],
+				supersededBy: ["T1-S3", "T1-S4"],
+			});
+			expect(buildTaskResume(store.getState()).currentStepId).toBe("T1-S3");
+			const restored = createTaskRuntimeStore();
+			restored.replay(
+				store.getState().events.map((data) => ({
+					type: "custom",
+					customType: TASK_EVENT_CUSTOM_TYPE,
+					data,
+				})),
+			);
+			expect(restored.getState()).toEqual(store.getState());
+		},
+	);
+
 	it("does not replace another active task or reopen cancellation", () => {
 		const store = createTaskRuntimeStore();
 		store.append(created, () => {});
