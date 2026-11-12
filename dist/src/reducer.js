@@ -390,12 +390,15 @@ function validateReworkSteps(steps) {
             (step.evidenceRequired !== undefined && step.evidenceRequired !== true)) {
             throw new TaskTransitionError("Rework steps require text, expectedOutput, and evidenceRequired=true");
         }
-        for (const values of [step.criterionIds, step.allowedActions]) {
+        for (const [field, values] of [
+            ["criterionIds", step.criterionIds],
+            ["allowedActions", step.allowedActions],
+        ]) {
             if (values !== undefined &&
                 (!Array.isArray(values) ||
-                    values.length === 0 ||
+                    (field === "allowedActions" && values.length === 0) ||
                     values.some((value) => typeof value !== "string" || !value.trim()))) {
-                throw new TaskTransitionError("Rework criterionIds and allowedActions must be non-empty string arrays");
+                throw new TaskTransitionError("Rework criterionIds must contain non-empty strings; allowedActions must be a non-empty string array");
             }
         }
         if (step.decompositionStatus !== undefined &&

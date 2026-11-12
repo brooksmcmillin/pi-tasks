@@ -434,6 +434,10 @@ reduction. The example still exercises fewer controlled recovery attempts.
 
 ## Repairing a mistaken plan
 
+For erroneous step/criterion mappings, see the [tested recovery sequence and T8
+operator recipe](docs/criterion-link-recovery.md). It distinguishes bounded
+step-only proof from final acceptance and preserves failed/diagnostic history.
+
 Use `task_replan` for a planning mistake, not `task_rework` (which adds
 findings-driven remediation without replacing existing steps). For example, replace an inspection-only step or duplicate
 open steps with the actual deliverable:

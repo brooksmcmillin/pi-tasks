@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { TaskState } from "../src/model.ts";
 import { normalizeReworkInput } from "../src/remediation.ts";
 import type { TaskStateEvent } from "../src/state-events.ts";
 import {
@@ -1097,6 +1098,249 @@ describe("native Pi settlement advisories", () => {
 				}
 			} finally {
 				h.session.dispose();
+			}
+		},
+	);
+});
+
+describe("criterion-link recovery registered-tool rehearsal", () => {
+	it.each([false, true])(
+		"splits an erroneous final-gate link and resumes persisted pending acceptance (compiled=%s)",
+		async (compiled) => {
+			const first = await createNativeSession({ compiled });
+			const call = async (
+				session: typeof first.session,
+				name: string,
+				input: unknown,
+			) => {
+				const tool = requireTool(session, name);
+				const args = piAi.validateToolArguments(tool, {
+					type: "toolCall",
+					id: "link-recovery",
+					name,
+					arguments: input,
+				});
+				return tool.execute("link-recovery", args, undefined, undefined);
+			};
+			const history = async (
+				session: typeof first.session,
+			): Promise<TaskState> => {
+				const result = await call(session, "task_list", {
+					include_history: true,
+				});
+				expect(result.isError).not.toBe(true);
+				return JSON.parse(result.content[0]?.text ?? "");
+			};
+			const quality = {
+				source: "disposable local recovery rehearsal",
+				reproducible: true,
+				verifier: "tool",
+				command: "npm run test:native -- -t 'criterion-link recovery'",
+				artifactRefs: ["test/extension.test.ts"],
+				observedOutput:
+					"Controlled fixture observation; not a live Trivy result",
+			};
+			const implementation = {
+				text: "Verify configuration regression",
+				expectedOutput: "Configuration regression passes",
+				allowedActions: ["Run configuration regression"],
+			};
+			try {
+				appendNativeToolCall(first.sessionManager);
+				expect(
+					(
+						await call(first.session, "task_plan", {
+							title: "Disposable erroneous criterion mapping",
+							objective:
+								"Separate configuration proof from final review without losing history",
+							acceptance_criteria: [
+								"Configuration regression passes",
+								"Final review passes",
+							],
+							plan_steps: [
+								{ ...implementation, criterionRefs: [1] },
+								{ ...implementation, criterionRefs: [2] },
+							],
+						})
+					).isError,
+				).not.toBe(true);
+				expect(
+					(
+						await call(first.session, "task_verify_step", {
+							task_id: "T1",
+							step_id: "T1-S1",
+							criterion_ids: ["T1-AC1"],
+							type: "test",
+							level: "unit_test",
+							summary: "Configuration regression passes",
+							references: quality.artifactRefs,
+							quality,
+						})
+					).isError,
+				).not.toBe(true);
+				for (const role of ["diagnostic", "acceptance"]) {
+					expect(
+						(
+							await call(first.session, "task_evidence", {
+								task_id: "T1",
+								step_ids: ["T1-S2"],
+								criterion_ids: role === "diagnostic" ? ["T1-AC2"] : [],
+								role,
+								passed: "false",
+								type: "test",
+								level: "unit_test",
+								summary: "Synthetic final review remains unverified",
+								references: quality.artifactRefs,
+								quality,
+							})
+						).isError,
+					).not.toBe(true);
+				}
+				const before = await history(first.session);
+				const replacement = {
+					task_id: "T1",
+					step_ids: ["T1-S2"],
+					reason: "Separate intermediate configuration proof from final review",
+					plan_steps: [
+						{ ...implementation, criterionIds: ["T1-AC1"] },
+						{
+							text: "Verify final review",
+							expectedOutput: "Final review passes",
+							allowedActions: ["Assess final review"],
+							criterionIds: ["T1-AC2"],
+						},
+					],
+				};
+				for (const criterionIds of [["missing"], ["T1-AC1"]]) {
+					const result = await call(first.session, "task_replan", {
+						...replacement,
+						plan_steps: [{ ...implementation, criterionIds }],
+					});
+					expect(result.isError).toBe(true);
+					expect(await history(first.session)).toEqual(before);
+					const recovery = result.details as {
+						retry_with: string;
+						minimum_params: unknown;
+					};
+					expect(recovery.retry_with).toBe("task_replan");
+					piAi.validateToolArguments(
+						requireTool(first.session, recovery.retry_with),
+						{
+							type: "toolCall",
+							id: "recovery-schema",
+							name: recovery.retry_with,
+							arguments: recovery.minimum_params,
+						},
+					);
+				}
+				expect(
+					(await call(first.session, "task_replan", replacement)).isError,
+				).not.toBe(true);
+				const after = await history(first.session);
+				expect(after.tasks.T1?.planSteps[0]).toEqual(
+					before.tasks.T1?.planSteps[0],
+				);
+				expect(after.tasks.T1?.evidence).toEqual(before.tasks.T1?.evidence);
+				expect(after.tasks.T1?.acceptanceCriteria).toEqual(
+					before.tasks.T1?.acceptanceCriteria,
+				);
+				expect(after.tasks.T1?.planSteps.at(-1)).toMatchObject({
+					id: "T1-S2",
+					status: "skipped",
+					evidenceIds: ["E2", "E3"],
+					supersededBy: ["T1-S3", "T1-S4"],
+				});
+				// [] is all-criteria linking, never an unlinking instruction.
+				expect(
+					(
+						await call(first.session, "task_replan", {
+							...replacement,
+							step_ids: ["T1-S3"],
+							plan_steps: [{ ...implementation, criterionIds: [] }],
+						})
+					).isError,
+				).not.toBe(true);
+				expect(
+					(await history(first.session)).tasks.T1?.planSteps[1]?.criterionIds,
+				).toEqual(["T1-AC1", "T1-AC2"]);
+				const proof = await call(first.session, "task_verify_step", {
+					task_id: "T1",
+					step_id: "T1-S5",
+					type: "test",
+					level: "unit_test",
+					summary: "Configuration regression passes",
+					references: quality.artifactRefs,
+					quality,
+				});
+				expect(proof.isError).not.toBe(true);
+				const persisted = await history(first.session);
+				expect(persisted.tasks.T1?.acceptanceCriteria[1]?.status).toBe(
+					"pending",
+				);
+				expect(persisted.tasks.T1?.evidence).toHaveLength(4);
+				await first.session.prompt("/tasks detail");
+				const sessionFile = first.sessionManager.getSessionFile();
+				assert.ok(sessionFile);
+				await waitForPersistedTaskEvent(sessionFile, "task.evidence_added");
+				first.session.dispose();
+				const restored = await createNativeSession({
+					base: first.base,
+					sessionFile,
+					compiled,
+				});
+				try {
+					expect(await history(restored.session)).toEqual(persisted);
+					for (const name of ["task_resume", "task_focus"]) {
+						const result = await call(restored.session, name, {});
+						expect(result.content[0]?.text).toContain("T1-S4");
+						expect(result.content[0]?.text).toContain("task_replan");
+						const resume = result.details as {
+							recommendedTool: string;
+							nextAllowedActions: string[];
+							blockedTools: string[];
+							minimumParams: unknown;
+						};
+						expect(resume.recommendedTool).toBe("task_verify_step");
+						expect(resume.nextAllowedActions).toContain(resume.recommendedTool);
+						expect(resume.blockedTools).not.toContain(resume.recommendedTool);
+						piAi.validateToolArguments(
+							requireTool(restored.session, resume.recommendedTool),
+							{
+								type: "toolCall",
+								id: "resume-schema",
+								name: resume.recommendedTool,
+								arguments: resume.minimumParams,
+							},
+						);
+					}
+					expect(
+						(
+							await call(restored.session, "task_complete", {
+								task_id: "T1",
+								summary: "Premature completion",
+								evidence_ids: ["E1", "E4"],
+							})
+						).isError,
+					).toBe(true);
+					console.info(
+						JSON.stringify({
+							kind: "disposable registered-tool criterion-link recovery; controlled semantic fixture",
+							sdkRoot,
+							compiled,
+							completed: "T1-S1",
+							retired: ["T1-S2", "T1-S3"],
+							nextStep: "T1-S4",
+							nextAction: "task_verify_step",
+							finalAcceptance: "pending",
+							retainedEvidence: ["E1", "E2", "E3", "E4"],
+							originalSessionRepaired: false,
+						}),
+					);
+				} finally {
+					restored.session.dispose();
+				}
+			} finally {
+				first.session.dispose();
 			}
 		},
 	);
