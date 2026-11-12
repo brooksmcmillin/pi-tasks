@@ -742,7 +742,10 @@ longer, save that exact command and its observed output in an artifact, referenc
 that artifact briefly in `quality.command`, and include its path in
 `quality.artifactRefs`. Do not weaken, shorten, or rerun a successful check merely
 to fit the evidence field. Recovery examples contain placeholders to fill with
-real artifact paths, not evidence that an artifact already exists.
+real artifact paths, not evidence that an artifact already exists. Host schema
+validation may reject the call before tool recovery runs; follow the
+[schema-tested retained-artifact example](docs/long-command-evidence.md), including
+its source/cwd provenance and explicit evidence-transport proof limits.
 
 Reasoned skipped steps, including legacy session entries without `supersededBy`,
 do not require execution evidence. Skipping does not satisfy acceptance criteria
