@@ -8,6 +8,30 @@ AI coding agents say "done" without proof. Context compaction loses progress. Mu
 
 **pi-tasks** gives your Pi agent a binding execution contract: structured plans, evidence gates, ordered execution, and compaction-safe resume — all visible in your TUI.
 
+## Nexus-managed work
+
+Nexus is authoritative for Nexus-managed tasks. Pi plans are optional working
+aids, not a second required execution contract. Continue in a fresh session from
+the durable task and repository/PR handoff; do not import or reconstruct another
+session's plan, repair stale step IDs, or complete/cancel a local task to clear a
+warning. Existing history remains readable with `task_list({ include_history: true })`.
+
+Planning/decomposition/repair rules in tool guidance apply to standalone Pi
+contracts. Local tool validation still protects voluntarily authored records;
+its errors do not block external work or certify external completion. Neither
+local plans nor old-head evidence grant current ownership, authorization or proof.
+Keep Nexus dependencies, human decisions, safe worktrees, review, CI and actual
+verification requirements intact.
+
+After updating this package, build it (`npm ci --ignore-scripts && npm run build`)
+and `/reload` in Pi, or start a fresh session. Check the **effective** `task_plan`
+and `task_resume` descriptions/guidelines for the Nexus exception; an old loaded
+extension still has old guidance. Also update the separately owned infra closeout
+package and dotfiles `.pi/agent/AGENTS.md`, then refresh those installed sources
+and `/reload`. No plan-history migration is needed. Source tests do not establish
+that a user's installed extension or context has been refreshed. See the
+[source/consumer map and bounded two-session rehearsal](docs/nexus-continuation.md).
+
 ## Optional passive telemetry
 
 An opt-in companion records private phase/compaction metadata without changing

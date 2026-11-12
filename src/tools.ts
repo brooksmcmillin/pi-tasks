@@ -280,6 +280,9 @@ type GuidedTaskToolDefinition<TParams extends Record<string, unknown>> =
 const REJECTION_REPORTING_GUIDANCE =
 	"For pi-tasks rejections, preserve each relevant submitted payload and returned error (or exact transcript references). Report only that those submissions failed, not that no valid plan is possible. Distinguish an exact recovery submission from an adapted scaffold; name omitted or changed fields and leave unsubmitted variants untested. If recovery fields are absent from the installed tool schema, report that mismatch rather than submitting unsupported fields or repeating a known-invalid call. Recovery suggestions do not guarantee semantic acceptance: use real scope and observations, never invent evidence or bypass execution gates.";
 
+export const EXTERNAL_TASK_GUIDANCE =
+	"For Nexus-managed work, Nexus is authoritative and Pi local plans are optional working aids. Continue from durable task and repository evidence without creating, importing, reconstructing, repairing or completing a duplicate Pi record. Missing, stale or malformed local state and local step/evidence IDs do not gate authorized work or closeout. Local history remains readable provenance, not current authorization or verification. Preserve live ownership, formal dependencies, human decisions, safe worktrees, review, CI and verification; evidence for an obsolete commit is not current proof.";
+
 const TASK_ENTRYPOINT_NAMES = ["task_plan", "task_resume"] as const;
 const registeredTaskToolNames = new WeakMap<ExtensionAPI, Set<string>>();
 
@@ -303,6 +306,19 @@ function registerGuidedTool<TParams extends Record<string, unknown>>(
 	pi: ExtensionAPI,
 	tool: GuidedTaskToolDefinition<TParams>,
 ): void {
+	// Tool rules are injected globally, including while an external task is active.
+	const description = tool.description;
+	tool = {
+		...tool,
+		description: `${EXTERNAL_TASK_GUIDANCE}\n\n${tool.description}`,
+		promptSnippet: `Optional for Nexus-managed work: ${tool.promptSnippet}`,
+		promptGuidelines: [
+			EXTERNAL_TASK_GUIDANCE,
+			...tool.promptGuidelines.map(
+				(guideline) => `For standalone Pi contracts only: ${guideline}`,
+			),
+		],
+	};
 	let names = registeredTaskToolNames.get(pi);
 	if (!names) {
 		names = new Set();
@@ -328,7 +344,10 @@ function registerGuidedTool<TParams extends Record<string, unknown>>(
 		promptGuidelines: _promptGuidelines,
 		...lazyTool
 	} = tool;
-	pi.registerTool(lazyTool);
+	pi.registerTool({
+		...lazyTool,
+		description: `Optional Pi-local working aid for Nexus-managed work; never gates external work or closeout. ${description}`,
+	});
 	names.add(tool.name);
 }
 

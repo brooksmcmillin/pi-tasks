@@ -1825,14 +1825,14 @@ describe("registered task tools", () => {
 		const evidence = requireTool(tools, "task_evidence");
 
 		expect(plan.promptGuidelines).toContain(
-			"Use task_plan for multi-step work before implementation when no suitable active task exists.",
+			"For standalone Pi contracts only: Use task_plan for multi-step work before implementation when no suitable active task exists.",
 		);
 		expect(plan.description).toContain("Agent guidance:");
 		expect(plan.description).toContain(
 			"Use task_plan for multi-step work before implementation when no suitable active task exists.",
 		);
 		expect(evidence.promptGuidelines).toContain(
-			"Use task_evidence for tests, commands, reviews, files, dogfood, or explicit user acceptance.",
+			"For standalone Pi contracts only: Use task_evidence for tests, commands, reviews, files, dogfood, or explicit user acceptance.",
 		);
 		expect(evidence.description).toContain("Agent guidance:");
 		expect(evidence.description).toContain(
@@ -1864,7 +1864,7 @@ describe("registered task tools", () => {
 		expect(evidence.promptGuidelines).toBeUndefined();
 		expect(evidence.description).not.toContain("Agent guidance:");
 		expect(evidence.description).toBe(
-			"Attach verification evidence to a task and optionally satisfy acceptance criteria.",
+			"Optional Pi-local working aid for Nexus-managed work; never gates external work or closeout. Attach verification evidence to a task and optionally satisfy acceptance criteria.",
 		);
 	});
 
@@ -1904,7 +1904,7 @@ describe("registered task tools", () => {
 			"Required non-empty explanation",
 		);
 		expect(evidence.promptGuidelines).toContain(
-			"For expected or remediated fail-first results, use role diagnostic; diagnostic evidence remains visible and may support diagnostic steps, but cannot satisfy criteria or task completion.",
+			"For standalone Pi contracts only: For expected or remediated fail-first results, use role diagnostic; diagnostic evidence remains visible and may support diagnostic steps, but cannot satisfy criteria or task completion.",
 		);
 		expect(evidence.description).toContain("supersedes_evidence_ids");
 		expect(schema).not.toHaveProperty("oneOf");

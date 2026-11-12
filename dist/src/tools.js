@@ -49,6 +49,7 @@ const VERIFICATION_LEVELS = [
 const PLAN_REPAIR_GUIDANCE = "task_rework adds review remediation without replacing prior steps; optionally use before_step_id to insert repairs before an open gate. Reconcile a malformed or duplicate plan before implementation: use task_replan when available to explicitly replace mistaken open steps, then resume the corrected contract. If repair is unavailable, report the tracking blocker; do not bypass the contract or cancel completed work merely to clear tracking warnings.";
 const REWORK_GUIDANCE = "Use task_rework when review discovers missing or defective work within the original objective, even if no open step remains or task_complete is recommended. Record findings and add remediation steps without asking permission for in-scope repairs; use before_step_id to insert them before a named open review/publication gate, or omit it to append. Record genuine scope or architecture decisions with task_decision before proceeding.";
 const REJECTION_REPORTING_GUIDANCE = "For pi-tasks rejections, preserve each relevant submitted payload and returned error (or exact transcript references). Report only that those submissions failed, not that no valid plan is possible. Distinguish an exact recovery submission from an adapted scaffold; name omitted or changed fields and leave unsubmitted variants untested. If recovery fields are absent from the installed tool schema, report that mismatch rather than submitting unsupported fields or repeating a known-invalid call. Recovery suggestions do not guarantee semantic acceptance: use real scope and observations, never invent evidence or bypass execution gates.";
+export const EXTERNAL_TASK_GUIDANCE = "For Nexus-managed work, Nexus is authoritative and Pi local plans are optional working aids. Continue from durable task and repository evidence without creating, importing, reconstructing, repairing or completing a duplicate Pi record. Missing, stale or malformed local state and local step/evidence IDs do not gate authorized work or closeout. Local history remains readable provenance, not current authorization or verification. Preserve live ownership, formal dependencies, human decisions, safe worktrees, review, CI and verification; evidence for an obsolete commit is not current proof.";
 const TASK_ENTRYPOINT_NAMES = ["task_plan", "task_resume"];
 const registeredTaskToolNames = new WeakMap();
 function hasToolActivationApi(pi) {
@@ -57,6 +58,17 @@ function hasToolActivationApi(pi) {
         typeof pi.setActiveTools === "function");
 }
 function registerGuidedTool(pi, tool) {
+    // Tool rules are injected globally, including while an external task is active.
+    const description = tool.description;
+    tool = {
+        ...tool,
+        description: `${EXTERNAL_TASK_GUIDANCE}\n\n${tool.description}`,
+        promptSnippet: `Optional for Nexus-managed work: ${tool.promptSnippet}`,
+        promptGuidelines: [
+            EXTERNAL_TASK_GUIDANCE,
+            ...tool.promptGuidelines.map((guideline) => `For standalone Pi contracts only: ${guideline}`),
+        ],
+    };
     let names = registeredTaskToolNames.get(pi);
     if (!names) {
         names = new Set();
@@ -72,7 +84,10 @@ function registerGuidedTool(pi, tool) {
         return;
     }
     const { promptSnippet: _promptSnippet, promptGuidelines: _promptGuidelines, ...lazyTool } = tool;
-    pi.registerTool(lazyTool);
+    pi.registerTool({
+        ...lazyTool,
+        description: `Optional Pi-local working aid for Nexus-managed work; never gates external work or closeout. ${description}`,
+    });
     names.add(tool.name);
 }
 function formatToolDescription(description, guidelines) {

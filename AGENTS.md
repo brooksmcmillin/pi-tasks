@@ -1,5 +1,11 @@
 # Development Rules
 
+## Nexus-managed work
+
+- Nexus is authoritative for Nexus-managed tasks; Pi plans are optional working aids. Planning, resume, repair, decision, decomposition, rejected-submission reporting and local step/evidence identity rules below apply to standalone Pi contracts, not prerequisites for Nexus execution or closeout.
+- Missing, stale or malformed local plans cannot block authorized work. Never require import, reconstruction, step repair or forced local completion/cancellation to clear bookkeeping. Preserve readable historical events without treating them as current authority or proof for another commit.
+- Keep authorization, ownership, formal dependencies, human decisions, safe worktrees, review, CI and required verification intact. Local validation remains intact for voluntarily authored Pi records; it cannot certify Nexus task acceptance.
+
 ## Product Goal
 
 Build a Pi-native task and progress contract that lets both the agent and the user understand:
