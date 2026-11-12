@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
 	createEmptyState,
@@ -1072,6 +1073,105 @@ describe("registered task tools", () => {
 			ctx,
 		);
 		expect(full.content[0]?.text).toContain("stepGranularityCheck");
+	});
+	it.each(["task_evidence", "task_verify_step", "task_evidence_batch"])(
+		"validates retained long-command documentation through the registered %s schema",
+		(name) => {
+			const { tools } = createHarness();
+			const document = readFileSync(
+				new URL("../../docs/long-command-evidence.md", import.meta.url),
+				"utf8",
+			);
+			const blocks = [...document.matchAll(/```json\n([\s\S]*?)\n```/g)].map(
+				(match) => JSON.parse(match[1] ?? ""),
+			);
+			expect(blocks).toHaveLength(2);
+			const [artifact, example] = blocks;
+			expect(artifact.command.length).toBeGreaterThan(300);
+			expect(artifact.command).toContain(artifact.cwd);
+			expect(example.quality.source).toBe(artifact.source);
+			expect(example.quality.observedOutput).toBe(artifact.observedOutput);
+			expect(example.quality.command.length).toBeLessThanOrEqual(300);
+			expect(example.quality.command).toContain(
+				example.quality.artifactRefs[0],
+			);
+			expect(example.quality.artifactRefs).toEqual(example.references);
+			const { step_id, ...fields } = example;
+			const payload =
+				name === "task_evidence_batch"
+					? {
+							task_id: "T1",
+							entries: [
+								{
+									...fields,
+									operation: "verify_step",
+									passed: "true",
+									step_id,
+								},
+							],
+						}
+					: name === "task_evidence"
+						? { ...fields, passed: "true", step_ids: [step_id] }
+						: example;
+			if (name === "task_evidence_batch") delete payload.entries[0].task_id;
+			const schema = requireTool(tools, name).parameters;
+			const quality =
+				name === "task_evidence_batch"
+					? payload.entries[0].quality
+					: payload.quality;
+			assertSchema(schema, payload);
+			for (const command of ["npm test", "x".repeat(300)]) {
+				quality.command = command;
+				assertSchema(schema, payload);
+			}
+			quality.command = "x".repeat(301);
+			expect(() => assertSchema(schema, payload)).toThrow();
+			quality.command = example.quality.artifactRefs[0];
+			delete quality.source;
+			expect(() => assertSchema(schema, payload)).toThrow();
+		},
+	);
+	it("rehearses retained long-command submission and readback on a disposable task without shell execution", async () => {
+		const { tools, ctx, store, entries, pi } = createHarness();
+		const document = readFileSync(
+			new URL("../../docs/long-command-evidence.md", import.meta.url),
+			"utf8",
+		);
+		const blocks = [...document.matchAll(/```json\n([\s\S]*?)\n```/g)].map(
+			(match) => JSON.parse(match[1] ?? ""),
+		);
+		const artifactBefore = JSON.stringify(blocks[0]);
+		const call = async (name: string, params: Record<string, unknown>) => {
+			const tool = requireTool(tools, name);
+			assertSchema(tool.parameters, params);
+			const result = await execute(tool, params, ctx);
+			expect(result.isError, result.content[0]?.text).not.toBe(true);
+			return result;
+		};
+		await call("task_plan", {
+			title: "Disposable retained evidence transport",
+			objective: "Retain a synthetic invocation reference without executing it",
+			acceptance_criteria: ["Original command behavior remains unverified"],
+			plan_steps: [
+				{
+					text: "Retain the documented synthetic evidence fixture",
+					expectedOutput: "Synthetic invocation and output reference retained",
+					allowedActions: ["Submit retained fixture metadata"],
+				},
+			],
+		});
+		await call("task_verify_step", blocks[1]);
+		const readback = await call("task_list", { include_history: true });
+		expect(readback.content[0]?.text).toContain(blocks[1].quality.command);
+		const task = store.getState().tasks.T1;
+		expect(task?.evidence).toHaveLength(1);
+		expect(task?.evidence[0]?.quality).toEqual(blocks[1].quality);
+		expect(task?.planSteps[0]?.status).toBe("done");
+		expect(task?.acceptanceCriteria[0]?.status).toBe("pending");
+		expect(entries).toHaveLength(2);
+		expect(pi).not.toHaveProperty("exec");
+		expect(tools.has("bash")).toBe(false);
+		expect(JSON.stringify(blocks[0])).toBe(artifactBefore);
 	});
 	it.each(["task_evidence", "task_verify_step"])(
 		"exposes command limits and artifact recovery for %s",
