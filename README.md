@@ -32,6 +32,17 @@ and `/reload`. No plan-history migration is needed. Source tests do not establis
 that a user's installed extension or context has been refreshed. See the
 [source/consumer map and bounded two-session rehearsal](docs/nexus-continuation.md).
 
+## Compact standalone PR plans
+
+Ordinary standalone work may use a compact deliverable checklist: one verified
+candidate and one reviewed publication, each with bounded scope and verification.
+Detailed plans remain supported. Capture, review dispatch/wait, receipt storage,
+commit and push keep their execution gates without each needing a planning step.
+Reuse recorded review/verification proof by ID for the same targets instead of
+resubmitting prose. Missing verification, stale affected proof and lost ownership
+still prevent success; local receipts do not check external leases or Git heads.
+See the [schema-tested checklist, receipt reuse and bounded 10-to-4 comparison](docs/compact-planning.md).
+
 ## Optional passive telemetry
 
 An opt-in companion records private phase/compaction metadata without changing

@@ -7,6 +7,11 @@ new review findings and `task_replan` to replace mistaken open planning entries;
 do not create a second active task just to use this example. Both still require
 native assessment. Never supply reducer-owned atomicity or assessment fields.
 
+For routine standalone PR work, prefer the [compact deliverable checklist](compact-planning.md).
+The detailed action plan below remains supported when useful; these execution
+boundaries do not require a separate planning step or prose receipt for every
+operation. Reuse already assessed proof by ID for the same targets.
+
 ## Boundaries
 
 - A verification bundle establishes **one named claim about one fixed candidate
@@ -22,7 +27,7 @@ native assessment. Never supply reducer-owned atomicity or assessment fields.
 - Assess completed reviews separately. Missing output, identity mismatch or failed
   execution cannot count as a clean review. Repairs use `task_rework`, not a hidden
   repair loop in the result-assessment step.
-- Keep audit-ledger persistence, commit, push and PR creation separate. Each can
+- Keep audit-ledger persistence, commit, push and PR creation separate at execution. Each can
   include its immediate preconditions and receipt/readback checks. Preparing a PR
   description belongs with that PR creation, not an artificial writing step.
 - Permission, ownership, freshness, required validation and rollout gates remain

@@ -436,12 +436,14 @@ export function registerTaskTools(
 		name: "task_plan",
 		label: "Task Plan",
 		description:
-			"Create a structured pi-tasks task with objective and acceptance criteria. For selective initial step links, use criterionRefs with 1-based acceptance_criteria positions; omitting it links all criteria for backward compatibility.",
+			"Create a structured pi-tasks task with objective and acceptance criteria. Routine standalone PR work may use a compact deliverable checklist with bounded outputs and verification; detailed plans remain supported. Do not decompose receipt-only bookkeeping. Reuse recorded proof for the same targets through task_update.step_evidence_ids and task_complete.evidence_ids, preserving ownership, review, CI and exact-head gates. For selective initial step links, use criterionRefs with 1-based acceptance_criteria positions; omitting it links all criteria for backward compatibility.",
 		promptSnippet:
-			"Create a pi-tasks execution contract before non-trivial implementation work",
+			"Create a compact deliverable checklist or detailed execution contract before non-trivial standalone work",
 		promptGuidelines: [
 			"Use task_plan for multi-step work before implementation when no suitable active task exists.",
 			"task_plan steps describe deliverables, not support reads or inspection. Supply structured plan_steps with expectedOutput and bounded allowedActions; mark atomic only with a truthful granularityCheck.",
+			"Routine standalone PR work may use a compact checklist: one verified candidate and one reviewed publication with bounded verification. Keep actual operation gates separate without making every capture, dispatch, receipt, commit or push a planning step. Detailed action plans remain useful for genuinely independent outcomes.",
+			"Reuse recorded verification/review provenance for the same targets with task_update.step_evidence_ids and task_complete.evidence_ids/criterion_results; do not resubmit evidence prose or decompose receipt-only bookkeeping. Revalidate ownership and affected exact-head proof before relying on historical receipts.",
 			REWORK_GUIDANCE,
 			PLAN_REPAIR_GUIDANCE,
 			"Constrain the plan to the user's stated objective; do not add speculative scope, gates, or abstractions.",
@@ -1009,6 +1011,7 @@ export function registerTaskTools(
 			"Use step_id with step_status=done when the current planned step is finished.",
 			"Smart models: record one state transition per call; do not bundle drift, evidence, and completion into one update.",
 			"Weak models: use task_focus current step_id; for done, include step_evidence_ids when evidence was just recorded.",
+			"task_update can complete the current step using existing step_evidence_ids already assessed for that output, without resubmitting evidence prose or native assessment. This does not broaden proof, satisfy missing criteria, refresh stale-head evidence or establish live ownership.",
 			"Only atomic steps can be marked done. Below the depth limit, classify an already-simple current step with step_granularity_check or use task_decompose for genuine compound work; explicitly block at the limit.",
 			"Evidence-required steps need linked evidence before step_status=done.",
 			"Do not skip ahead; ordered plan steps must be completed or skipped in the displayed order.",
@@ -1518,6 +1521,7 @@ export function registerTaskTools(
 			"Complete a pi-tasks task only when acceptance criteria have evidence",
 		promptGuidelines: [
 			"Call task_complete only after task_evidence has recorded supporting evidence.",
+			"task_complete reuses recorded evidence_ids and criterion_results evidenceIds; no prose resubmission or receipt-only planning step is needed. IDs must already prove the same targets; missing verification, unresolved blockers and rework evidence baselines still prevent completion.",
 			REWORK_GUIDANCE,
 			"Smart models: complete only after gaps are empty and all linked failures are superseded by later passing evidence.",
 			"Weak models: copy evidence_ids from task_resume/task_focus; if rejected, call task_next instead of retrying the same call.",
