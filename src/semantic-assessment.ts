@@ -21,8 +21,13 @@ import type {
 	ModelUsage,
 } from "./pi-types.ts";
 
-export const SEMANTIC_PROMPT_VERSION = "2026-11-07.v3";
+export const SEMANTIC_PROMPT_VERSION = "2026-11-14.v4";
 export const EVIDENCE_PROMPT_VERSION = "2026-11-11.evidence.v3";
+// Hash formats are persisted contracts, independent of the currently active prompt.
+const CONTEXTUAL_PLAN_HASH_VERSIONS = new Set([
+	"2026-11-07.v3",
+	"2026-11-14.v4",
+]);
 export const MIN_SEMANTIC_CONFIDENCE = 0.7;
 
 const PLAN_RESPONSE_TOOL = "submit_plan_semantic_assessment";
@@ -40,7 +45,8 @@ Multiple actions means independently executable operations that could be ordered
 A concrete step identifies enough of the target, intended change or inspection, and observable result for another agent to act without guessing the scope.
 Return only the requested typed classification.`;
 
-const PLAN_DELIVERABLE_POLICY = `Assess the complete step together: text, expectedOutput, allowedActions, any boundedScope/verificationPlan/reason, task objective, acceptance criteria and parent context. Do not classify the title or action list in isolation.
+const PLAN_DELIVERABLE_POLICY = `The action-count rule above applies to action-sized steps. For deliverable-sized steps, count independently useful owned outcomes, not the supporting operations needed to produce them.
+Assess the complete step together: text, expectedOutput, allowedActions, any boundedScope/verificationPlan/reason, task objective, acceptance criteria and parent context. Do not classify the title or action list in isolation.
 First identify the owned outcome and exclusions, then ask whether proposed parts are independently useful deliverables or merely supporting mechanics. One bounded batch publication with its graph readback, one sourced investigation report from several evidence seams, and one focused repair with several regression assertions can each be one unit. Multiple records, files, reads, tool calls or test layers do not alone imply multiple units.
 A scoped verification procedure may combine assertions, checks or test layers that jointly establish the same outcome. Count independent verification goals, not commands or testing frameworks.
 Do not require exact commands, script names, per-edit steps or per-item decomposition to recognize that unit. Conversely, wrapping unrelated products in one command or calling them a batch does not make them cohesive.
@@ -52,7 +58,8 @@ ${PLAN_DELIVERABLE_POLICY}
 For every plan step, classify specificity, independent action count, independently observable output count, independent verification-method count, and hidden subtasks.
 Related read-only checks may form one verification bundle when they establish one named claim about the same fixed candidate or review run. Several commands, identity fields, or assertions do not alone imply independent outputs or verification methods. Saving that bundle is part of producing its evidence, not a separate outcome. Unrelated claims remain separate even if placed in one report.
 A single authorized mutation may include its immediate precondition checks and receipt verification: for example, push one fixed commit to one named remote ref and confirm that ref, or create one draft PR and confirm its head/base. Drafting the description for that PR is supporting preparation, not a separate delivery outcome.
-Keep independently durable mutations separate: candidate staging/capture, reviewer dispatch, audit-ledger persistence, commit, push, and PR creation are not one atomic publication operation. Dispatch receipt does not prove reviewer completion. Reviewing completed results is separate from launching or resuming the reviewer and from repairing findings.
+Routine standalone PR work may use a compact deliverable checklist: one verified candidate and one reviewed publication for that candidate. Their bounded implementation, review and publication procedures need not be decomposed into receipt-only planning steps. Detailed action-sized plans remain valid when helpful; unrelated features, repositories or independently useful outcomes still require separate deliverables.
+Keep independently durable mutations separate at execution time: candidate staging/capture, reviewer dispatch, audit-ledger persistence, commit, push, and PR creation are not one atomic publication operation. Their separate authorization, ownership, completed independent review, CI and exact-head verification gates remain mandatory within a deliverable. A compact planning unit does not combine those operations into one authorized action. Dispatch receipt does not prove reviewer completion. Reviewing completed results is separate from launching or resuming the reviewer and from repairing findings. Persisting or reusing already recorded verification/review receipts for the same targets is supporting bookkeeping, not a new deliverable; do not require receipt-only decomposition or repeated evidence prose.
 Templates and reported permission are not authorization. Missing target, uncertain ownership, unresolved human decisions, ambiguous scope, or unknown run status must not be guessed away. Do not infer atomicity from a template name or from the words bundle, receipt, or publication.
 Use "unclear" instead of guessing when essential context is genuinely absent. Confidence is epistemic certainty in the classification, from 0 to 1.`;
 
@@ -606,7 +613,7 @@ export function hashPlanAssessmentInput(
 ): string {
 	const normalized = normalizePlanAssessmentInput(input);
 	// Old events were assessed without clarification or parent context. Preserve replay identity.
-	if (promptVersion !== SEMANTIC_PROMPT_VERSION) {
+	if (!CONTEXTUAL_PLAN_HASH_VERSIONS.has(promptVersion)) {
 		delete normalized.context;
 		for (const step of normalized.steps) delete step.granularityCheck;
 	}
@@ -621,7 +628,8 @@ export function hashStepSemanticInput(
 		text: step.text.trim(),
 		expectedOutput: step.expectedOutput.trim(),
 		allowedActions: (step.allowedActions ?? []).map((value) => value.trim()),
-		...(promptVersion === SEMANTIC_PROMPT_VERSION && step.granularityCheck
+		...(CONTEXTUAL_PLAN_HASH_VERSIONS.has(promptVersion) &&
+		step.granularityCheck
 			? { granularityCheck: structuredClone(step.granularityCheck) }
 			: {}),
 	});

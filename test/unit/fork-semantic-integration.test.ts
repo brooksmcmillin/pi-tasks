@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { TASK_EVENT_CUSTOM_TYPE, type TaskEvent } from "../../src/model.ts";
+import {
+	TASK_EVENT_CUSTOM_TYPE,
+	type TaskEvent,
+	type TaskStepInput,
+} from "../../src/model.ts";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -68,7 +72,7 @@ const cases: Array<[string, Record<string, unknown>]> = [
 	],
 ];
 
-async function harness() {
+async function harness(planStep: TaskStepInput = step) {
 	const tools = new Map<string, ToolDefinition<Record<string, unknown>>>();
 	const events: TaskEvent[] = [];
 	const publications: string[] = [];
@@ -118,7 +122,7 @@ async function harness() {
 				title: "Parser integration",
 				objective: "Preserve parser alias behavior",
 				acceptance_criteria: ["Parser aliases pass"],
-				plan_steps: [step],
+				plan_steps: [planStep],
 			})
 		).isError,
 	).not.toBe(true);
@@ -135,6 +139,54 @@ async function harness() {
 }
 
 describe("fork mutation semantic boundaries", () => {
+	it("replays retained v3 creation and contextual classification after a prompt-only upgrade", async () => {
+		const check = {
+			unit: "deliverable" as const,
+			boundedScope: "Parser aliases only; exclude unrelated parser replacement",
+			verificationPlan:
+				"Run focused parser alias assertions for the fixed candidate",
+			isAtomic: true,
+			reason: "One bounded parser compatibility outcome",
+			canBeDoneInOneAgentAction: true,
+			hasSingleObservableOutput: true,
+			hasSingleVerificationMethod: true,
+			hasNoHiddenSubtasks: true,
+		};
+		const h = await harness({ ...step, granularityCheck: check });
+		expect(
+			(
+				await h.call("task_update", {
+					step_id: "T1-S1",
+					step_granularity_check: check,
+				})
+			).isError,
+		).not.toBe(true);
+		const historical = structuredClone(h.events);
+		for (const event of historical) {
+			if (!event.semanticAssessment) throw new Error("Missing assessment");
+			// v3 and v4 use the same normalized contextual hash format. Keep the
+			// original hashes while restoring the previous assessor's provenance.
+			event.semanticAssessment.provenance.promptVersion = "2026-11-07.v3";
+		}
+		const restored = createTaskRuntimeStore().replay(
+			historical.map((data) => ({
+				type: "custom",
+				customType: TASK_EVENT_CUSTOM_TYPE,
+				data,
+			})),
+		);
+		expect(restored.malformedEvents).toEqual([]);
+		expect(restored.state.tasks.T1?.planSteps[0]?.decompositionStatus).toBe(
+			"atomic",
+		);
+		expect(
+			restored.state.tasks.T1?.planSteps[0]?.granularityCheck.boundedScope,
+		).toBe(check.boundedScope);
+		expect(
+			restored.state.tasks.T1?.planSteps[0]?.granularityCheck.verificationPlan,
+		).toBe(check.verificationPlan);
+	});
+
 	it.each(cases)(
 		"persists assessed %s with deterministic replay",
 		async (name, params) => {
