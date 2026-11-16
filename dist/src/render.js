@@ -245,7 +245,7 @@ export function formatTaskResume(state) {
     lines.push(`Task: ${resume.taskId} [${resume.status}] ${resume.progress}% - ${resume.title}`);
     if (resume.handoff) {
         lines.push(`Before execution: ${resume.handoff.nextAction}`);
-        lines.push(`Handoff: ${JSON.stringify(resume.handoff.lanes)}`);
+        lines.push(`Historical handoff (lane nextAction is not actionable): ${JSON.stringify(resume.handoff.lanes)}`);
         lines.push(resume.handoff.instruction);
     }
     if (resume.mode)
