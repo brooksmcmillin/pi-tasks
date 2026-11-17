@@ -64,11 +64,12 @@ export function validateHandoff(value) {
     if (Buffer.byteLength(JSON.stringify(value)) > 16 * 1024)
         throw new Error("Handoff exceeds 16 KiB; retain details in existing mission/artifact records");
 }
-export const HANDOFF_RECOVERY_INSTRUCTION = "Handoff is historical context, not authority or fresh evidence. Before the recorded next action, revalidate task/worktree registration, canonical cwd, branch/base/head, live writer/run ownership and publication permission. Inspect the exact existing worker and mission; missing or unknown status never means terminal and must not cause a duplicate launch or automatic reclaim. Recheck gate and PR receipts against the current candidate/published head; a receipt never authorizes execution or publication. Pending decisions still require resolution. Compaction recovery does not provide unattended process restart.";
+export const HANDOFF_RECOVERY_INSTRUCTION = "Handoff is historical context, not authority or fresh evidence. Lane nextAction values are historical plans, not instructions to execute; they may refer to completed steps. Derive the current action from the current task resume contract, preserving unresolved blockers and waits. Before any current action, revalidate task/worktree registration, canonical cwd, branch/base/head, live writer/run ownership and publication permission. Inspect the exact existing worker and mission; missing or unknown status never means terminal and must not cause a duplicate launch or automatic reclaim. Recheck gate and PR receipts against the current candidate/published head; a receipt never authorizes execution or publication. Pending decisions still require resolution. Compaction recovery does not provide unattended process restart.";
 export function handoffRecovery(lanes) {
     return {
         lanes,
         authority: "none",
+        laneActions: "historical-not-actionable",
         revalidationRequired: true,
         nextAction: "Revalidate recorded identities and inspect existing runs before continuing",
         instruction: HANDOFF_RECOVERY_INSTRUCTION,

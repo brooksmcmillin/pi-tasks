@@ -108,6 +108,7 @@ This project must align with the commercial-quality bar established by `pi-knowl
 
 - Keep optional handoff lanes on the active task in existing branch-local snapshots; omission preserves them and an explicit empty array clears them. Validate bounded shape on authoring and replay; never add a competing store.
 - Resume exposes exact stored identities as historical observations with no authority and mandatory live revalidation. Never launch/reclaim a worker or authorize publication from a checkpoint or receipt. Do not infer terminal child state from absence or promise unattended process restart.
+- Label stored lane actions as historical, not actionable, in structured and text recovery. Derive current execution from the current resume contract after advancement; preserve exact lanes and unresolved blockers/waits rather than rewriting history.
 - Handoff metadata neither satisfies evidence gates nor creates/resolves blockers. Use existing task blocker semantics for waits and decisions. Task/branch changes must not leak another task's handoff into the active resume contract.
 
 ## Agent Planning Discipline

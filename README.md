@@ -367,9 +367,12 @@ record `not-applicable` in ref fields. Limit: eight lanes, 1024 characters per
 string, 16 KiB total; oversized checkpoints fail without persisting.
 
 `task_resume` returns these records in `handoff.lanes`, with `authority: "none"`,
-`revalidationRequired: true`, and a recovery action before the recorded next
-action. It never treats a matching stored SHA or a successful receipt as fresh
-proof. The parent must check current task/worktree registration, cwd, refs,
+`laneActions: "historical-not-actionable"`, and `revalidationRequired: true`.
+Stored lane `nextAction` values remain exact historical plans, including after
+step advancement; use the current resume contract for the actionable step and
+preserve unresolved blockers/waits. Revalidate before any current action. Resume
+never treats a matching stored SHA or a successful receipt as fresh proof.
+The parent must check current task/worktree registration, cwd, refs,
 writer ownership, exact run/mission status, publication permission, and PR/head
 and gate evidence using their owning tools. Unknown child status blocks a
 replacement; do not assume an unobserved run has stopped. A recorded pending

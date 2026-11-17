@@ -135,6 +135,61 @@ describe("checkpoint orchestration handoff", () => {
 		expect(resumed.tools.has("subagent")).toBe(false);
 	});
 
+	it("labels checkpoint actions as historical after verified step advancement and snapshot replay", async () => {
+		const h = harness();
+		await h.execute("task_plan", {
+			title: "Recover current step",
+			objective: "Preserve current recovery and historical evidence",
+			acceptance_criteria: ["Recovery verified"],
+			plan_steps: ["Validate candidate", "Publish reviewed candidate"].map(
+				(text) => ({
+					text,
+					expectedOutput: `${text} verified`,
+					allowedActions: ["test"],
+				}),
+			),
+		});
+		const historical = { ...lane, nextAction: "Validate candidate (T1-S1)" };
+		await h.execute("task_checkpoint", { handoff: [historical] });
+		const verified = await h.execute("task_verify_step", {
+			task_id: "T1",
+			step_id: "T1-S1",
+			type: "test",
+			level: "unit_test",
+			summary: "Candidate validation passed",
+			references: ["fixture.log"],
+			quality: {
+				source: "fixture",
+				reproducible: true,
+				verifier: "tool",
+				command: "fixture-check",
+				artifactRefs: ["fixture.log"],
+				observedOutput: "Candidate validation passed",
+			},
+		});
+		expect(verified.isError).not.toBe(true);
+		await h.emit("session_before_compact");
+		const snapshot = h.entries.at(-1);
+		if (!snapshot) throw new Error("Missing compaction snapshot");
+		const resumed = harness([structuredClone(snapshot)]);
+		await resumed.emit("session_start");
+		const result = await resumed.execute("task_resume");
+		const contract = result.details as TaskResumeContext;
+		expect(contract.currentStepId).toBe("T1-S2");
+		expect(contract.currentStepText).toBe("Publish reviewed candidate");
+		expect(contract.handoff?.lanes).toEqual([historical]);
+		expect(contract.handoff?.laneActions).toBe("historical-not-actionable");
+		expect(contract.handoff?.instruction).toContain(
+			"Derive the current action from the current task resume contract",
+		);
+		expect(result.content[0]).toMatchObject({
+			text: expect.stringContaining(
+				"Historical handoff (lane nextAction is not actionable)",
+			),
+		});
+		expect(resumed.sendMessage).not.toHaveBeenCalled();
+	});
+
 	it("retains stale heads as history, never treating recorded ownership or successful receipts as fresh authority", async () => {
 		const h = await planned();
 		await h.execute("task_checkpoint", {
