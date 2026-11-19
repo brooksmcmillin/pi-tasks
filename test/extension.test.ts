@@ -343,6 +343,49 @@ async function createNativeSession(
 	return { ...result, base, cwd, sessionDir, events, sessionManager, eventBus };
 }
 
+describe("native rejection diagnostic persistence", () => {
+	it("recovers exact rejected arguments and response from host tool-result details", async () => {
+		const h = await createNativeSession();
+		try {
+			appendNativeToolCall(h.sessionManager);
+			const file = h.sessionManager.getSessionFile();
+			assert.ok(file);
+			await vi.waitFor(async () =>
+				expect(await readFile(file, "utf8")).toContain("native-plan-call"),
+			);
+			const params = { ...validPlan(), acceptance_criteria: [] };
+			const rejected = await requireTool(h.session, "task_plan").execute(
+				"rejected-plan",
+				params,
+			);
+			expect(rejected.isError).toBe(true);
+			expect(rejected.content[0].text.length).toBeLessThanOrEqual(3000);
+			expect(rejected.details).toMatchObject({
+				rejectionDiagnostic: { submitted: params, toolCallId: "rejected-plan" },
+			});
+			h.sessionManager.appendMessage({
+				role: "toolResult",
+				toolName: "task_plan",
+				toolCallId: "rejected-plan",
+				...rejected,
+				timestamp: Date.now(),
+			});
+			await vi.waitFor(async () => {
+				const entries = (await readFile(file, "utf8"))
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line));
+				const saved = entries.find(
+					(entry) => entry.message?.toolCallId === "rejected-plan",
+				);
+				expect(saved?.message.details).toEqual(rejected.details);
+			});
+		} finally {
+			h.session.dispose();
+		}
+	});
+});
+
 describe("native early cohort attribution", () => {
 	it.each([
 		{ status: "review", compiled: false },

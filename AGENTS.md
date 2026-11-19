@@ -177,6 +177,8 @@ This project must align with the commercial-quality bar established by `pi-knowl
 
 ## Runtime Recovery Contracts
 
+- Compact structured rejection text only with a usable host transcript locator. Preserve exact submitted arguments and original response content in tool-result details alongside unchanged recovery metadata; never create a second evidence store. Bound model-facing output to 3,000 characters, identify adapted suggestion fields, and retain authority caveats. Missing/inaccessible transcript storage falls back to full inline diagnostics; host persistence remains responsible for durability. Repeated failures retain independent tool-call identities and no task mutation.
+
 - Bound blocker reports to observed submissions: retain relevant payloads and returned errors or exact transcript references, distinguish exact recovery submissions from adapted scaffolds, and name omitted/changed fields. Unsubmitted variants remain untested; failed attempts do not prove no valid plan exists.
 - If suggested fields are unavailable in the installed public schema, report that mismatch without submitting unsupported fields or repeating known-invalid calls. Schema-valid suggestions do not promise semantic success or authorize invented evidence or bypassed execution gates. Keep this guidance in `task_plan` prompt metadata/description and rejection output; host-level schema failures may occur before tool execution.
 

@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	createEmptyState,
@@ -134,6 +136,41 @@ function requireTool(
 }
 
 describe("registered task tools", () => {
+	it("compacts registered planning rejection while retaining the exact call and leaving state untouched", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "pi-rejection-"));
+		try {
+			const file = join(directory, "session.jsonl");
+			writeFileSync(file, "");
+			const { tools, ctx, entries, publications } = createHarness();
+			ctx.sessionManager.getSessionFile = () => file;
+			const params = {
+				title: "Rejected plan",
+				objective: "x".repeat(20_000),
+				acceptance_criteria: [],
+				plan_steps: [
+					{
+						text: "Implement bounded rejection output",
+						expectedOutput: "Passing output-bound regression",
+						allowedActions: ["Edit formatter and run tests"],
+					},
+				],
+			};
+			const result = await execute(
+				requireTool(tools, "task_plan"),
+				params,
+				ctx,
+			);
+			expect(result.isError).toBe(true);
+			expect(result.content[0].text?.length).toBeLessThanOrEqual(3000);
+			expect(result.details).toMatchObject({
+				rejectionDiagnostic: { submitted: params, toolCallId: "call-1" },
+			});
+			expect(entries).toEqual([]);
+			expect(publications).toEqual([]);
+		} finally {
+			rmSync(directory, { recursive: true });
+		}
+	});
 	async function transitionHarness(status = "active") {
 		const harness = createHarness();
 		const call = async (name: string, params: Record<string, unknown>) => {

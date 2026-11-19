@@ -716,6 +716,7 @@ configuration or manual sign-off is required.
 - Decomposition stops at depth 4. A still-non-atomic step then recommends an explicit `task_update` blocker so its remaining scope can be planned as a flat successor; pi-tasks never marks it done or creates the successor automatically.
 - Evidence fields expose the same limits enforced by the reducer: summaries 500 characters, observed output 1,000, and each reference/source/command 300. Retry templates preserve valid values and replace invalid over-limit values with explicit placeholders.
 - `task_update.scope` requires `activity`; `scope_change` and `off_plan` also require `scope_reason`. Missing fields return a targeted `task_update` recovery using the public snake_case parameter names.
+- With a readable/writable host session transcript, structured rejection text is capped at 3,000 characters: reason, next action, changed/omitted top-level suggestion fields, and a transcript/tool-call locator. Exact arguments and the original response are retained in `toolResult.details.rejectionDiagnostic`; existing structured recovery fields remain in `details`. Locate the JSONL tool result by `message.toolCallId` to recover them. No separate artifact store is used. This relies on normal host tool-result persistence, not a durable-write acknowledgement; if the transcript is missing/inaccessible or its locator cannot fit, the full inline response is preserved instead. Host schema errors before execution are unchanged.
 - Rejection reports should retain each relevant submitted payload and returned error (or exact transcript references). Distinguish an exact recovery submission from an adapted scaffold and name omitted/changed fields; unsubmitted variants remain untested. Failed submissions do not prove that no valid plan is possible. If suggested fields are unavailable in the installed schema, report the mismatch rather than submitting unsupported fields or repeating known-invalid calls.
 - Recovery `minimumParams` / `minimum_params` are public-tool argument scaffolds. Replace placeholders with concrete scope and actual observations before submitting; schema-valid scaffolds do not bypass native semantic assessment or verification gates. Planning scaffolds omit internal atomicity fields, and evidence scaffolds do not assert a passing result.
 - Empty or omitted `criterionIds` on new and decomposed steps auto-link the available task criteria; non-empty arrays must contain known generated IDs.
@@ -794,7 +795,7 @@ or erase linked failures; those still require ordinary verification.
 Routine successful mutations return a compact receipt: affected task/step identity,
 status, permitted next actions, prohibited tools, and newly relevant constraints.
 Changed execution contracts are included; unchanged lineage and recovery templates
-are not repeated. First use, replay/automatic compaction recovery, and errors retain
+are not repeated. Structured errors use the bounded transcript-backed recovery described above. First use and replay/automatic compaction recovery retain
 full guidance. Explicit `task_resume` and `task_focus` remain authoritative, and
 structured resume details are preserved. Blocking a task still reports its blocker
 without changing which task is active. See the [sanitized receipt benchmark](docs/receipt-benchmark.md)
