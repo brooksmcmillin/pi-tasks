@@ -4,6 +4,7 @@ import { handoffSchema, validateHandoff, } from "./handoff.js";
 import { createEventId, SequentialIdGenerator, } from "./ids.js";
 import { isAtMaximumDecompositionDepth, MAX_EVIDENCE_OBSERVED_OUTPUT_LENGTH, MAX_EVIDENCE_REFERENCE_LENGTH, MAX_EVIDENCE_SUMMARY_LENGTH, } from "./model.js";
 import { evidenceQualityEqual, normalizeEvidenceQuality, reduceTaskState, TaskTransitionError, taskMutationAssessmentInput, } from "./reducer.js";
+import { compactRejectionOutput } from "./rejection-output.js";
 import { COMPACT_REMEDIATION_GUIDANCE, compactRemediationSchema, normalizeReworkInput, } from "./remediation.js";
 import { buildTaskResume, formatTaskFocus, formatTaskList, formatTaskNext, formatTaskReceipt, formatTaskResume, getTaskPlanRecoveryParams, recoveryPlanStep, } from "./render.js";
 import { Type } from "./schema.js";
@@ -60,8 +61,14 @@ function hasToolActivationApi(pi) {
 function registerGuidedTool(pi, tool) {
     // Tool rules are injected globally, including while an external task is active.
     const description = tool.description;
+    const execute = tool.execute;
     tool = {
         ...tool,
+        execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+            const submitted = structuredClone(params);
+            const result = await execute(toolCallId, params, signal, onUpdate, ctx);
+            return compactRejectionOutput(result, submitted, tool.name, toolCallId, () => ctx.sessionManager.getSessionFile?.());
+        },
         description: `${EXTERNAL_TASK_GUIDANCE}\n\n${tool.description}`,
         promptSnippet: `Optional for Nexus-managed work: ${tool.promptSnippet}`,
         promptGuidelines: [

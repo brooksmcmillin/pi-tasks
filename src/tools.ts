@@ -51,13 +51,13 @@ import {
 	TaskTransitionError,
 	taskMutationAssessmentInput,
 } from "./reducer.ts";
+import { compactRejectionOutput } from "./rejection-output.ts";
 import {
 	COMPACT_REMEDIATION_GUIDANCE,
 	type CompactRemediation,
 	compactRemediationSchema,
 	normalizeReworkInput,
 } from "./remediation.ts";
-
 import {
 	buildTaskResume,
 	formatTaskFocus,
@@ -308,8 +308,20 @@ function registerGuidedTool<TParams extends Record<string, unknown>>(
 ): void {
 	// Tool rules are injected globally, including while an external task is active.
 	const description = tool.description;
+	const execute = tool.execute;
 	tool = {
 		...tool,
+		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+			const submitted = structuredClone(params);
+			const result = await execute(toolCallId, params, signal, onUpdate, ctx);
+			return compactRejectionOutput(
+				result,
+				submitted,
+				tool.name,
+				toolCallId,
+				() => ctx.sessionManager.getSessionFile?.(),
+			);
+		},
 		description: `${EXTERNAL_TASK_GUIDANCE}\n\n${tool.description}`,
 		promptSnippet: `Optional for Nexus-managed work: ${tool.promptSnippet}`,
 		promptGuidelines: [
